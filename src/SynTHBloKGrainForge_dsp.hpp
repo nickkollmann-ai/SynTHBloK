@@ -204,26 +204,62 @@ struct Svf {
 
 // Master DJ filter: amt -1..0 sweeps a low-pass down from 20 kHz to 80 Hz, 0..+1 a high-pass up from
 // 20 Hz to 8 kHz. One stereo SVF serves both, so passing through the centre never clicks; a small dead
-// zone there is true bypass. Fixed gentle resonance (a little bump, never a scream).
+// zone there is true bypass. RES 0..1 goes from a gentle bump (Q 0.8) to a capped peak (Q 5); the
+// level drops a little as it rises, so it sings but never screams.
+// STAGES 0..2 (smoothed, so it crossfades): 1, 2 or 3 SVFs in series = 12 / 24 / 36 dB per octave.
+// The first stage carries the resonance; the extra ones are plain, so more stages never add scream.
 struct DjFilter {
-    float ic1[2] = {}, ic2[2] = {};
-    void process(float& l, float& r, float amt, float sr) {
+    float ic1[3][2] = {}, ic2[3][2] = {};
+    void process(float& l, float& r, float amt, float res, float sr, float stages = 0.f) {
         float a = std::fabs(amt);
         float fc = amt < 0.f ? 20000.f * std::pow(80.f / 20000.f, a) : 20.f * std::pow(8000.f / 20.f, a);
         float g = std::tan(float(M_PI) * clampf(fc, 20.f, sr * 0.45f) / sr);
-        const float k = 1.2f;
-        float a1 = 1.f / (1.f + g * (g + k)), a2 = g * a1, a3 = g * a2;
+        float kr = 1.2f * std::pow(0.2f / 1.2f, clampf(res, 0.f, 1.f));
+        float comp = std::pow(kr / 1.2f, 0.3f);
         float wet = clampf((a - 0.02f) / 0.08f, 0.f, 1.f);
+        stages = clampf(stages, 0.f, 2.f);
+        int s0 = std::min((int)stages, 1);
+        float sf = stages - s0;
+        bool hp = amt >= 0.f;
         float* io[2] = {&l, &r};
         for (int c = 0; c < 2; c++) {
-            float x = *io[c];
-            float v3 = x - ic2[c];
-            float v1 = a1 * ic1[c] + a2 * v3;
-            float v2 = ic2[c] + a2 * ic1[c] + a3 * v3;
-            ic1[c] = 2.f * v1 - ic1[c]; ic2[c] = 2.f * v2 - ic2[c];
-            float y = amt < 0.f ? v2 : x - k * v1 - v2;
+            float x = *io[c], y = x, tap[3];
+            for (int s = 0; s < 3; s++) {   // all stages always run, so switching never clicks
+                float k = s == 0 ? kr : 1.414f;
+                float a1 = 1.f / (1.f + g * (g + k)), a2 = g * a1, a3 = g * a2;
+                float v3 = y - ic2[s][c];
+                float v1 = a1 * ic1[s][c] + a2 * v3;
+                float v2 = ic2[s][c] + a2 * ic1[s][c] + a3 * v3;
+                ic1[s][c] = 2.f * v1 - ic1[s][c]; ic2[s][c] = 2.f * v2 - ic2[s][c];
+                y = hp ? y - k * v1 - v2 : v2;
+                tap[s] = y;
+            }
+            y = (tap[s0] + (tap[s0 + 1] - tap[s0]) * sf) * comp;
             *io[c] = x + (y - x) * wet;
         }
+    }
+};
+
+// Filter ADSR, retriggered in time. Times in seconds; exponential segments, so no clicks.
+struct Adsr {
+    enum { IDLE, ATK, DEC, REL } st = IDLE;
+    float v = 0.f;
+    void trigger() { st = ATK; }
+    void release() { if (st != IDLE) st = REL; }
+    float process(float atk, float dec, float sus, float rel, float sr) {
+        switch (st) {
+            case ATK:   // aims past 1 so it really arrives
+                v += (1.3f - v) * (1.f - std::exp(-1.f / (atk * sr)));
+                if (v >= 1.f) { v = 1.f; st = DEC; }
+                break;
+            case DEC: v += (sus - v) * (1.f - std::exp(-1.f / (dec * sr))); break;
+            case REL:
+                v += (0.f - v) * (1.f - std::exp(-1.f / (rel * sr)));
+                if (v < 1e-4f) { v = 0.f; st = IDLE; }
+                break;
+            default: break;
+        }
+        return v;
     }
 };
 

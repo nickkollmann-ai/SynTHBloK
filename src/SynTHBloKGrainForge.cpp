@@ -70,6 +70,9 @@ struct SynTHBloKGrainForge : Module {
         RND_DIV_PARAM, RND_GLIDE_PARAM, RND_FREEZE_PARAM,
         PRESET_PARAM,                 // turning it (or clicking the PRESET screen) loads that preset
         FILTER_PARAM,                 // master DJ filter on the final mix
+        FLT_RES_PARAM, FLT_ATK_PARAM, FLT_DEC_PARAM, FLT_SUS_PARAM, FLT_REL_PARAM,
+        FLT_ENV_PARAM,                // ADSR depth on the DJ filter, + opens / - closes; retriggers every beat
+        FLT_STAGES_PARAM,             // 1 / 2 / 3 filter stages (12 / 24 / 36 dB)
         NUM_PARAMS
     };
     enum InputIds { IN_L_INPUT, IN_R_INPUT, CLOCK_INPUT, RESET_INPUT, OPEN_INPUT, GLITCH_INPUT, NUM_INPUTS };
@@ -82,6 +85,8 @@ struct SynTHBloKGrainForge : Module {
     Pulse pulse;
     WarpDelay delay;
     DjFilter master;
+    Adsr fltEnv;
+    float fltGate = 0.f;               // samples left before the envelope's release
     dsp::SchmittTrigger clkTrig, rstTrig, glitchTrig;
 
     static const int kThrowSteps = 16;
@@ -266,6 +271,13 @@ struct SynTHBloKGrainForge : Module {
         configSwitch(PRESET_PARAM, 0.f, (float)kPresetCount, 0.f, "Preset", presetNames);
         paramQuantities[PRESET_PARAM]->randomizeEnabled = false;
         configParam(FILTER_PARAM, -1.f, 1.f, 0.f, "Filter (left: low-pass, right: high-pass, centre: off)", "%", 0.f, 100.f);
+        configParam(FLT_RES_PARAM, 0.f, 1.f, 0.f, "Filter resonance", "%", 0.f, 100.f);
+        configParam(FLT_ATK_PARAM, 0.f, 1.f, 0.1f, "Filter env attack", " ms", 2000.f, 1.f);
+        configParam(FLT_DEC_PARAM, 0.f, 1.f, 0.45f, "Filter env decay", " ms", 800.f, 5.f);
+        configParam(FLT_SUS_PARAM, 0.f, 1.f, 0.3f, "Filter env sustain", "%", 0.f, 100.f);
+        configParam(FLT_REL_PARAM, 0.f, 1.f, 0.4f, "Filter env release", " ms", 800.f, 5.f);
+        configParam(FLT_ENV_PARAM, -1.f, 1.f, 0.f, "Filter env depth (retriggers every beat; + opens, - closes)", "%", 0.f, 100.f);
+        configSwitch(FLT_STAGES_PARAM, 0.f, 2.f, 0.f, "Filter stages", {"1 stage (12 dB)", "2 stages (24 dB)", "3 stages (36 dB)"});
         configParam(IN_GAIN_PARAM, 0.f, 2.f, 1.f, "Input gain", "%", 0.f, 100.f);
         configParam(DRYWET_PARAM, 0.f, 1.f, 0.45f, "Dry / wet", "%", 0.f, 100.f);
         configParam(OUT_GAIN_PARAM, 0.f, 1.5f, 1.f, "Output level", "%", 0.f, 100.f);
@@ -442,7 +454,13 @@ struct SynTHBloKGrainForge : Module {
         // ---- out: smooth limiter (clean up to 80%, then a soft knee to full scale) ----
         float dw = sm[DRYWET_PARAM], og = sm[OUT_GAIN_PARAM];
         float mL = inL + (wetL - inL) * dw, mR = inR + (wetR - inR) * dw;
-        master.process(mL, mR, sm[FILTER_PARAM], sr);   // DJ filter on the whole mix, before the limiter
+        // filter ADSR: hits on every beat, held for half a beat, then releases
+        if (edge && clk % 4 == 0) { fltEnv.trigger(); fltGate = 2.f * stepLen; }
+        if (fltGate > 0.f && (fltGate -= 1.f) <= 0.f) fltEnv.release();
+        float env = fltEnv.process(0.001f * std::pow(2000.f, sm[FLT_ATK_PARAM]), 0.005f * std::pow(800.f, sm[FLT_DEC_PARAM]),
+                                   sm[FLT_SUS_PARAM], 0.005f * std::pow(800.f, sm[FLT_REL_PARAM]), sr);
+        float famt = clamp(sm[FILTER_PARAM] + env * sm[FLT_ENV_PARAM], -1.f, 1.f);
+        master.process(mL, mR, famt, sm[FLT_RES_PARAM], sr, sm[FLT_STAGES_PARAM]);   // DJ filter on the whole mix, before the limiter
         float oL = softLimit(mL * og);
         float oR = softLimit(mR * og);
         outputs[OUT_L_OUTPUT].setVoltage(5.f * oL);
@@ -583,17 +601,22 @@ struct GFButton : app::ParamWidget {
     }
 };
 
-// PULSE filter mode: LP | BP | HP, the active one lit. Click steps to the next.
+// Three-way picker, the active one lit; click a segment to pick it. PULSE mode (LP | BP | HP) side by
+// side, the master filter's stages (1 / 2 / 3) stacked.
 struct GFModeButton : app::ParamWidget {
+    const char* const* names = kModeName;
+    bool vertical = false;
     void draw(const DrawArgs& args) override {
         ParamQuantity* pq = getParamQuantity();
         int sel = pq ? clamp((int)std::round(pq->getValue()), 0, 2) : 0;
-        float w = box.size.x / 3.f, h = box.size.y;
+        float w = vertical ? box.size.x : box.size.x / 3.f, h = vertical ? box.size.y / 3.f : box.size.y;
         auto font = uiFont();
         for (int i = 0; i < 3; i++) {
             bool lit = i == sel;
+            float x0 = vertical ? 0.f : i * w, y0 = vertical ? i * h : 0.f;
             nvgBeginPath(args.vg);
-            nvgRoundedRect(args.vg, i * w + 0.5f, 0.f, w - 1.f, h, 1.2f);
+            if (vertical) nvgRoundedRect(args.vg, 0.f, y0 + 0.5f, w, h - 1.f, 1.2f);
+            else nvgRoundedRect(args.vg, x0 + 0.5f, 0.f, w - 1.f, h, 1.2f);
             nvgFillColor(args.vg, lit ? nvgRGBA(255, 112, 15, 235) : nvgRGBA(40, 25, 8, 255));
             nvgFill(args.vg);
             nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, lit ? 255 : 120));
@@ -604,13 +627,13 @@ struct GFModeButton : app::ParamWidget {
             nvgFontSize(args.vg, 7.f);
             nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
             nvgFillColor(args.vg, lit ? nvgRGBA(20, 10, 2, 255) : nvgRGBA(255, 190, 90, 255));
-            nvgText(args.vg, i * w + w * 0.5f, h * 0.5f, kModeName[i], NULL);
+            nvgText(args.vg, x0 + w * 0.5f, y0 + h * 0.5f, names[i], NULL);
         }
     }
     void onButton(const ButtonEvent& e) override {
         if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
             if (ParamQuantity* pq = getParamQuantity()) {
-                int sel = clamp((int)(e.pos.x / (box.size.x / 3.f)), 0, 2);   // click a segment to pick it
+                int sel = clamp((int)(vertical ? e.pos.y / (box.size.y / 3.f) : e.pos.x / (box.size.x / 3.f)), 0, 2);
                 pq->setValue((float)sel);
             }
             e.consume(this);
@@ -796,12 +819,9 @@ struct GFPresetBar : TransparentWidget {
         auto font = uiFont(); if (!font) return;
         nvgFontFaceId(args.vg, font->handle);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFontSize(args.vg, 7.f);
-        nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 130));
-        nvgText(args.vg, W * 0.5f, H * 0.3f, "PRESET", NULL);
-        nvgFontSize(args.vg, 8.5f);
+        nvgFontSize(args.vg, 6.5f);   // tiny screen: just the name
         nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 255));
-        nvgText(args.vg, W * 0.5f, H * 0.68f, nameOf(cur()), NULL);
+        nvgText(args.vg, W * 0.5f, H * 0.55f, nameOf(cur()), NULL);
     }
     void onButton(const ButtonEvent& e) override {   // the knob picks; a click on SMART RND rolls a new one
         if (e.action != GLFW_PRESS || e.button != GLFW_MOUSE_BUTTON_LEFT) return;
@@ -910,17 +930,36 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
         GFRndPanel* rp = createWidget<GFRndPanel>(mm2px(Vec(59.f, 79.5f)));
         rp->box.size = mm2px(Vec(36.f, 14.f)); rp->module = module;
         addChild(rp);
-        GFPresetBar* pb = createWidget<GFPresetBar>(mm2px(Vec(97.f, 79.5f)));   // next to FREEZE, tiny knob below
-        pb->box.size = mm2px(Vec(30.f, 14.f)); pb->module = module;
+        GFPresetBar* pb = createWidget<GFPresetBar>(mm2px(Vec(5.f, 95.5f)));   // small, under BPM, its knob beside it
+        pb->box.size = mm2px(Vec(16.f, 6.f)); pb->module = module;
         addChild(pb);
-        addParam(createParamCentered<Trimpot>(mm2px(Vec(112.f, 99.f)), module, G::PRESET_PARAM));
-        knob(136.f, 86.5f, G::IN_GAIN_PARAM, "INPUT");
-        knob(151.f, 86.5f, G::FILTER_PARAM, "FILTER");
-        GFRing* big = createWidgetCentered<GFRing>(mm2px(Vec(168.f, 86.5f)));
-        big->box.size = mm2px(Vec(18.f, 18.f)); big->box.pos = mm2px(Vec(159.f, 77.5f)); big->module = module; big->param = G::DRYWET_PARAM;
-        addChild(big);
-        addParam(createParamCentered<RoundLargeBlackKnob>(mm2px(Vec(168.f, 86.5f)), module, G::DRYWET_PARAM));
-        label(168.f, 97.f, "DRY / WET");
+        addParam(createParamCentered<Trimpot>(mm2px(Vec(25.f, 98.5f)), module, G::PRESET_PARAM));
+        knob(104.f, 86.5f, G::IN_GAIN_PARAM, "INPUT");
+        // master filter: cutoff, res, env depth on top; ADSR trimpots below
+        // FILTER and DRY/WET: one size up from the rest
+        auto midKnob = [&](float x, float y, int param, const char* name) {
+            GFRing* r = createWidget<GFRing>(mm2px(Vec(x - 6.75f, y - 6.75f)));
+            r->box.size = mm2px(Vec(13.5f, 13.5f)); r->module = module; r->param = param;
+            addChild(r);
+            addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x, y)), module, param));
+            label(x, y + 8.5f, name);
+        };
+        midKnob(118.f, 84.f, G::FILTER_PARAM, "FILTER");
+        knob(132.f, 84.f, G::FLT_RES_PARAM, "RES");
+        knob(145.f, 84.f, G::FLT_ENV_PARAM, "ENV");
+        static const char* const stageNames[3] = {"1", "2", "3"};
+        GFModeButton* stg = createParam<GFModeButton>(mm2px(Vec(152.5f, 77.5f)), module, G::FLT_STAGES_PARAM);
+        stg->box.size = mm2px(Vec(6.f, 13.5f)); stg->names = stageNames; stg->vertical = true;
+        addParam(stg);
+        label(155.5f, 93.f, "STAGE");
+        const int adsr[4] = {G::FLT_ATK_PARAM, G::FLT_DEC_PARAM, G::FLT_SUS_PARAM, G::FLT_REL_PARAM};
+        const char* an[4] = {"A", "D", "S", "R"};
+        for (int i = 0; i < 4; i++) {
+            float x = 120.f + i * 10.f;
+            addParam(createParamCentered<Trimpot>(mm2px(Vec(x, 98.5f)), module, adsr[i]));
+            label(x - 4.6f, 98.5f, an[i]);
+        }
+        midKnob(168.f, 86.5f, G::DRYWET_PARAM, "DRY / WET");
         knob(191.f, 86.5f, G::OUT_GAIN_PARAM, "OUTPUT");
 
         const char* jn[8] = {"IN L", "IN R", "CLOCK", "RESET", "OPEN", "GLITCH", "OUT L", "OUT R"};
