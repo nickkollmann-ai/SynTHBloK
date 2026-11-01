@@ -244,7 +244,6 @@ struct BlokMaster : Module {
         configButton(VIEW_COMP_PARAM, "Tracker view: compressor");
         configButton(VIEW_MULTI_PARAM, "Tracker view: multiband leveler");
         configButton(VIEW_LOUD_PARAM, "Tracker view: loudness");
-
         configInput(IN_L_INPUT, "Left in");
         configInput(IN_R_INPUT, "Right in (normalled to left)");
         configInput(SIDECHAIN_INPUT, "External sidechain for the compressor");
@@ -960,6 +959,104 @@ struct DynamicsTracker : MasterDisplayBase {
         }
     }
 };
+
+// ---- TONE: EQ response with the leveler crossovers and live band gains ------
+struct ToneDisplay : MasterDisplayBase {
+    // biquad magnitude at f (dB)
+    static float magDb(const Biquad& q, float f, float sr) {
+        float w = 2.f * (float) M_PI * f / sr, c1 = std::cos(w), s1 = std::sin(w), c2 = std::cos(2.f * w), s2 = std::sin(2.f * w);
+        float nr = q.b0 + q.b1 * c1 + q.b2 * c2, ni = -(q.b1 * s1 + q.b2 * s2);
+        float dr = 1.f + q.a1 * c1 + q.a2 * c2, di = -(q.a1 * s1 + q.a2 * s2);
+        return 10.f * std::log10(std::max(nr * nr + ni * ni, 1e-12f) / std::max(dr * dr + di * di, 1e-12f));
+    }
+    float param(int id, float dflt) { return module ? module->params[id].getValue() : dflt; }
+
+    void drawLayer(const DrawArgs& a, int layer) override {
+        if (layer != 1) return;
+        float W = box.size.x, H = box.size.y;
+        float sx = 4.f, sy = 4.f, sw = W - 8.f, sh = H * 0.62f;
+        const float F0 = 30.f, F1 = 16000.f, R = 12.f;
+        auto fx = [&](float f) { return sx + sw * std::log(f / F0) / std::log(F1 / F0); };
+        auto gy = [&](float db) { return sy + sh * 0.5f - fclamp(db, -R, R) / R * sh * 0.5f; };
+        NVGcolor dim = nvgRGBA(255, 180, 90, 120);
+
+        // the same filters process() runs, from the current knob values
+        float sr = module ? module->sr : 48000.f;
+        float lcF = param(BlokMaster::LOWCUT_PARAM, 40.f), lowDb = param(BlokMaster::LOW_PARAM, 3.f), tilt = param(BlokMaster::TILT_PARAM, 0.2f);
+        float highDb = param(BlokMaster::HIGH_PARAM, -2.f), airAmt = param(BlokMaster::AIR_PARAM, 0.4f);
+        Biquad lc, ls, hs, tl, th, air;
+        lc.highpass(lcF, 0.70710678f, sr);
+        ls.lowShelf(120.f, lowDb, sr);
+        hs.highShelf(6000.f, highDb, sr);
+        tl.lowShelf(650.f, -tilt * 5.f, sr);
+        th.highShelf(650.f, tilt * 5.f, sr);
+        air.highShelf(12000.f, airAmt * 9.f, sr);
+
+        // grid: 6 dB lines, 0 dB brighter
+        nvgStrokeWidth(a.vg, 0.5f);
+        for (int k = -2; k <= 2; k++) {
+            nvgStrokeColor(a.vg, nvgRGBA(255, 180, 90, k == 0 ? 60 : 28));
+            nvgBeginPath(a.vg); nvgMoveTo(a.vg, sx, gy(k * 6.f)); nvgLineTo(a.vg, sx + sw, gy(k * 6.f)); nvgStroke(a.vg);
+        }
+        text(a, sx + 1.f, gy(12.f) + 1.f, "+12", 6.f, nvgRGBA(255, 180, 90, 90), NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+        text(a, sx + 1.f, gy(-12.f) - 1.f, "-12", 6.f, nvgRGBA(255, 180, 90, 90), NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
+
+        // leveler bands: crossover lines + live band gain bars
+        const float bf[4] = {F0, 180.f, 3200.f, F1};
+        const NVGcolor bc[3] = {nvgRGBA(255, 122, 0, 255), nvgRGBA(255, 190, 90, 255), nvgRGBA(255, 240, 200, 255)};
+        for (int i = 1; i <= 2; i++) {
+            nvgBeginPath(a.vg);
+            for (float y = sy; y < sy + sh; y += 4.f) { nvgMoveTo(a.vg, fx(bf[i]), y); nvgLineTo(a.vg, fx(bf[i]), std::min(y + 2.f, sy + sh)); }
+            nvgStrokeColor(a.vg, AMB(110)); nvgStroke(a.vg);
+            text(a, fx(bf[i]) + 1.5f, sy + 1.f, i == 1 ? "X 180" : "X 3.2k", 6.f, AMB(150), NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+        }
+        for (int b = 0; b < 3; b++) {
+            float g = module ? module->mbGain[b] * module->mbMixSm : (b == 0 ? 2.f : b == 1 ? -1.5f : 1.f);
+            nvgBeginPath(a.vg); nvgRect(a.vg, fx(bf[b]) + 1.f, gy(g) - 0.8f, fx(bf[b + 1]) - fx(bf[b]) - 2.f, 1.6f);
+            nvgFillColor(a.vg, nvgTransRGBA(bc[b], 170)); nvgFill(a.vg);
+        }
+
+        // EQ curve with a soft fill to the 0 dB line
+        const int NP = 64;
+        float px[NP + 1], py[NP + 1];
+        for (int i = 0; i <= NP; i++) {
+            float f = F0 * std::pow(F1 / F0, (float) i / NP);
+            float db = magDb(ls, f, sr) + magDb(hs, f, sr) + magDb(tl, f, sr) + magDb(th, f, sr) + magDb(air, f, sr);
+            if (lcF > 20.5f) db += magDb(lc, f, sr);
+            px[i] = fx(f); py[i] = gy(db);
+        }
+        nvgBeginPath(a.vg);
+        nvgMoveTo(a.vg, px[0], gy(0.f));
+        for (int i = 0; i <= NP; i++) nvgLineTo(a.vg, px[i], py[i]);
+        nvgLineTo(a.vg, px[NP], gy(0.f));
+        nvgClosePath(a.vg);
+        nvgFillColor(a.vg, AMB(40)); nvgFill(a.vg);
+        nvgBeginPath(a.vg);
+        for (int i = 0; i <= NP; i++) { if (i == 0) nvgMoveTo(a.vg, px[i], py[i]); else nvgLineTo(a.vg, px[i], py[i]); }
+        nvgStrokeWidth(a.vg, 1.4f); nvgStrokeColor(a.vg, AMB()); nvgStroke(a.vg);
+
+        // frequency ticks (same as the analyzer)
+        const char* fl[5] = {"50", "200", "1k", "4k", "16k"};
+        const float ff[5] = {50.f, 200.f, 1000.f, 4000.f, 16000.f};
+        for (int k = 0; k < 5; k++) text(a, fx(ff[k]), sy + sh + 2.f, fl[k], 6.f, nvgRGBA(255, 180, 90, 100), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+
+        // readout: the tone knobs
+        char b[5][16];
+        if (lcF > 20.5f) snprintf(b[0], 16, "%d", (int) lcF); else snprintf(b[0], 16, "OFF");
+        snprintf(b[1], 16, "%+.1f", lowDb);
+        snprintf(b[2], 16, "%+.1f", tilt * 5.f);
+        snprintf(b[3], 16, "%+.1f", highDb);
+        snprintf(b[4], 16, "%d%%", (int) std::round(airAmt * 100.f));
+        const char* nm[5] = {"LO CUT", "LOW", "TILT", "HIGH", "AIR"};
+        float y0 = H - 17.f, colW = (W - 8.f) / 5.f;
+        for (int k = 0; k < 5; k++) {
+            float x = 4.f + colW * (k + 0.5f);
+            text(a, x, y0, nm[k], 6.f, dim, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+            text(a, x, y0 + 6.5f, b[k], 8.f, AMB(), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+        }
+        frame(a);
+    }
+};
 } // namespace
 
 // ============================================================================
@@ -1042,6 +1139,12 @@ struct BlokMasterWidget : ModuleWidget {
         dt->box.pos = mm2px(Vec(BML::D3[0], BML::D3[1]));
         dt->box.size = mm2px(Vec(BML::D3[2], BML::D3[3]));
         addChild(dt);
+
+        auto* td = new ToneDisplay();
+        td->module = module;
+        td->box.pos = mm2px(Vec(BML::D4[0], BML::D4[1]));
+        td->box.size = mm2px(Vec(BML::D4[2], BML::D4[3]));
+        addChild(td);
 
         // tracker view buttons (light under the cap shows the active view)
         for (int i = 0; i < NUM_VIEWS; i++) {
