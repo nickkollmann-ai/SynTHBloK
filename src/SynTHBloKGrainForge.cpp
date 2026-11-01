@@ -737,6 +737,48 @@ struct GFButton : app::ParamWidget {
     }
 };
 
+// Micro button beside the THROW STEPS label: every click deals a new random throw pattern.
+struct GFThrowRoll : OpaqueWidget {
+    SynTHBloKGrainForge* module = NULL;
+    float flash = 0.f;
+    void roll() {
+        if (!module) return;
+        float density = 0.2f + 0.3f * random::uniform();          // 20..50% of the steps lit
+        bool on[SynTHBloKGrainForge::kThrowSteps];
+        int count = 0;
+        for (int i = 0; i < SynTHBloKGrainForge::kThrowSteps; i++) { on[i] = random::uniform() < density; count += on[i]; }
+        while (count < 2) {                                          // always throw something
+            int i = (int)(random::uniform() * SynTHBloKGrainForge::kThrowSteps) % SynTHBloKGrainForge::kThrowSteps;
+            if (!on[i]) { on[i] = true; count++; }
+        }
+        for (int i = 0; i < SynTHBloKGrainForge::kThrowSteps; i++)
+            module->paramQuantities[SynTHBloKGrainForge::throwParam(i)]->setValue(on[i] ? 1.f : 0.f);
+    }
+    void draw(const DrawArgs& args) override {
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.f);
+        nvgFillColor(args.vg, flash > 0.f ? nvgRGBA(255, 112, 15, (int)(235 * flash)) : nvgRGBA(40, 25, 8, 255));
+        nvgFill(args.vg);
+        nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, 160));
+        nvgStrokeWidth(args.vg, 0.7f);
+        nvgStroke(args.vg);
+        auto font = uiFont(); if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgFontSize(args.vg, 5.5f);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, flash > 0.5f ? nvgRGBA(20, 10, 2, 255) : nvgRGBA(255, 190, 90, 255));
+        nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, "RND", NULL);
+        flash = std::max(0.f, flash - 0.08f);
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
+            roll();
+            flash = 1.f;
+            e.consume(this);
+        }
+    }
+};
+
 // Three-way picker, the active one lit; click a segment to pick it. PULSE mode (LP | BP | HP) side by
 // side, the master filter's stages (1 / 2 / 3) stacked.
 struct GFModeButton : app::ParamWidget {
@@ -1212,6 +1254,9 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
         knob(c - 13.f, 29.f, G::DL_TIME_PARAM, "TIME");  knob(c, 29.f, G::DL_FDBK_PARAM, "FDBK");   knob(c + 13.f, 29.f, G::DL_WARP_PARAM, "WARP");
         knob(c - 13.f, 44.f, G::DL_ROUTE_PARAM, "ROUTE"); knob(c, 44.f, G::DL_TONE_PARAM, "TONE");  knob(c + 13.f, 44.f, G::DL_MIX_PARAM, "ECHO");
         label(c, 56.f, "THROW STEPS");
+        GFThrowRoll* roll = createWidget<GFThrowRoll>(mm2px(Vec(c + 12.f, 54.4f)));   // right edge = throw grid's
+        roll->box.size = mm2px(Vec(5.8f, 3.2f)); roll->module = module;
+        addChild(roll);
         float bx0 = c - 17.4f;
         for (int i = 0; i < G::kThrowSteps; i++) {   // two rows: 1-8, 9-16
             GFButton* b = createParam<GFButton>(mm2px(Vec(bx0 + (i % 8) * 4.4f, 58.5f + (i / 8) * 6.5f)), module, G::throwParam(i));
