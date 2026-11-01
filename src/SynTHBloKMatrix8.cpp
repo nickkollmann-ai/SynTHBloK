@@ -11,6 +11,7 @@
 //  are in the right-click menu. All JAM lights go dark when the module is removed or bypassed.
 // ============================================================================
 #include "plugin.hpp"
+#include "SynTHBloKMix24_fx.hpp"   // MIX-24's onboard FX engine, shared
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -228,10 +229,12 @@ struct SynTHBloKMatrix8 : Module {
                     BANK_PARAM, RANGE_PARAM, BONC_PARAM, BOFFC_PARAM, RUN_PARAM, RESET_PARAM, KNOB_PARAM,
                     DELAY_PARAM, SPACE_PARAM,
                     F2_CUTOFF_PARAM, F2_RES_PARAM, F2_ENV_PARAM, F2_MODE_PARAM,
-                    ENV_A_PARAM, ENV_D_PARAM, ENV_S_PARAM, ENV_R_PARAM, NUM_PARAMS };
-    enum InputIds { CLOCK_INPUT, RESET_INPUT, RUN_INPUT, NUM_INPUTS };
+                    ENV_A_PARAM, ENV_D_PARAM, ENV_S_PARAM, ENV_R_PARAM,
+                    FX_PROG_PARAM, FX_P1_PARAM, FX_P2_PARAM, FX_P3_PARAM, FX_SEND_PARAM, FX_RET_PARAM,
+                    M_WIDTH_PARAM, M_TILT_PARAM, M_GLUE_PARAM, M_CLIP_PARAM, NUM_PARAMS };
+    enum InputIds { CLOCK_INPUT, RESET_INPUT, RUN_INPUT, FX_RTN_L_INPUT, FX_RTN_R_INPUT, NUM_INPUTS };
     enum OutputIds { TRIG_OUTPUT, STRIP_OUTPUT = TRIG_OUTPUT + 8, KNOB_OUTPUT = STRIP_OUTPUT + 8,
-                     AUDIO_L_OUTPUT, AUDIO_R_OUTPUT, NUM_OUTPUTS };
+                     AUDIO_L_OUTPUT, AUDIO_R_OUTPUT, FX_SEND_L_OUTPUT, FX_SEND_R_OUTPUT, NUM_OUTPUTS };
     enum LightIds { NUM_LIGHTS };
 
     midi::InputQueue midiIn;
@@ -259,6 +262,10 @@ struct SynTHBloKMatrix8 : Module {
     M8Delay delay;
     M8Reverb reverb;
     float delayMix = 0.f, spaceMix = 0.f;
+    // FX + master bus, as on MIX-24
+    MixFx fx;
+    float tiltL = 0.f, tiltR = 0.f, busEnv = 0.f;
+    float meterL = 0.f, meterR = 0.f;   // output level 0..1, for the panel meter
 
     // JAM knob pages: MST = master, GRP = delay, IN1 = space, CUE = master.
     int knobParam() {
@@ -304,6 +311,21 @@ struct SynTHBloKMatrix8 : Module {
         configParam(ENV_D_PARAM, 0.f, 1.f, 0.5f, "Envelope decay", " ms", 400.f, 5.f);
         configParam(ENV_S_PARAM, 0.f, 1.f, 1.f, "Envelope sustain", "%", 0.f, 100.f);
         configParam(ENV_R_PARAM, 0.f, 1.f, 0.6f, "Envelope release", " ms", 800.f, 5.f);
+        configSwitch(FX_PROG_PARAM, 0.f, 7.f, 2.f, "FX program",
+                     {"Off", "Room", "Hall", "Plate", "Echo", "Ping-pong", "Chorus", "Flanger"});
+        configParam(FX_P1_PARAM, 0.f, 1.f, 0.5f, "FX param 1");
+        configParam(FX_P2_PARAM, 0.f, 1.f, 0.5f, "FX param 2");
+        configParam(FX_P3_PARAM, 0.f, 1.f, 0.4f, "FX param 3");
+        configParam(FX_SEND_PARAM, 0.f, 1.f, 0.f, "FX send", "%", 0.f, 100.f);
+        configParam(FX_RET_PARAM, 0.f, 1.f, 0.5f, "FX return", "%", 0.f, 100.f);
+        configParam(M_WIDTH_PARAM, -1.f, 1.f, 0.f, "Master width", "%", 0.f, 100.f);
+        configParam(M_TILT_PARAM, -1.f, 1.f, 0.f, "Master tilt (dark <-> bright)", "%", 0.f, 100.f);
+        configParam(M_GLUE_PARAM, 0.f, 1.f, 0.f, "Master glue (bus compressor)", "%", 0.f, 100.f);
+        configParam(M_CLIP_PARAM, 0.f, 1.f, 0.0625f, "Master clip (soft saturation)", "%", 0.f, 100.f);
+        configInput(FX_RTN_L_INPUT, "FX return left (mono if R unpatched)");
+        configInput(FX_RTN_R_INPUT, "FX return right");
+        configOutput(FX_SEND_L_OUTPUT, "FX send left");
+        configOutput(FX_SEND_R_OUTPUT, "FX send right");
         for (int i = 0; i < CLEAR_PARAM; i++) paramQuantities[i]->snapEnabled = true;
         paramQuantities[BANK_PARAM]->snapEnabled = true;
         paramQuantities[BONC_PARAM]->snapEnabled = true;
@@ -548,9 +570,52 @@ struct SynTHBloKMatrix8 : Module {
             spaceMix += (params[SPACE_PARAM].getValue() - spaceMix) * k;
             l += rl * spaceMix;
             r += rr * spaceMix;
+
+            // ---- master bus, as on MIX-24: width, tilt, FX return, glue, clip, level ----
+            float mid = 0.5f * (l + r), side = 0.5f * (l - r) * (1.f + params[M_WIDTH_PARAM].getValue());
+            l = mid + side; r = mid - side;
+
+            float tilt = params[M_TILT_PARAM].getValue();
+            float tc = std::exp(-2.f * float(M_PI) * 800.f * args.sampleTime);
+            tiltL = tiltL * tc + l * (1.f - tc);
+            tiltR = tiltR * tc + r * (1.f - tc);
+            float lowG = 1.f - 0.5f * std::max(0.f, tilt), highG = 1.f - 0.5f * std::max(0.f, -tilt);
+            l = tiltL * lowG + (l - tiltL) * highG;
+            r = tiltR * lowG + (r - tiltR) * highG;
+
+            // FX aux: the synth mix is sent in, the wet signal (+ the external return) comes back.
+            float send = params[FX_SEND_PARAM].getValue();
+            float sendL = l * send, sendR = r * send, wl, wr;
+            fx.process(sendL, sendR, args.sampleRate, (int)std::round(params[FX_PROG_PARAM].getValue()),
+                       params[FX_P1_PARAM].getValue(), params[FX_P2_PARAM].getValue(), params[FX_P3_PARAM].getValue(), wl, wr);
+            outputs[FX_SEND_L_OUTPUT].setVoltage(sendL * 5.f);
+            outputs[FX_SEND_R_OUTPUT].setVoltage(sendR * 5.f);
+            bool rtnL = inputs[FX_RTN_L_INPUT].isConnected(), rtnR = inputs[FX_RTN_R_INPUT].isConnected();
+            float xl = rtnL ? inputs[FX_RTN_L_INPUT].getVoltage() * 0.2f : 0.f;
+            float xr = rtnR ? inputs[FX_RTN_R_INPUT].getVoltage() * 0.2f : 0.f;
+            if (rtnL && !rtnR) xr = xl;
+            if (!rtnL && rtnR) xl = xr;
+            float ret = params[FX_RET_PARAM].getValue();
+            l += (wl + xl) * ret;
+            r += (wr + xr) * ret;
+
+            float x = std::fabs(0.5f * (l + r));
+            busEnv += (x - busEnv) * (x > busEnv ? 0.0015f : 0.12f);
+            float gr = busEnv > 0.7f ? 0.7f / (busEnv + 1e-6f) : 1.f;
+            float glue = params[M_GLUE_PARAM].getValue() * 0.8f;
+            l = l * (1.f - glue) + l * gr * glue;
+            r = r * (1.f - glue) + r * gr * glue;
+
+            float clipDrive = 0.4f + params[M_CLIP_PARAM].getValue() * 1.6f;
             master += (params[KNOB_PARAM].getValue() - master) * k;
-            outputs[AUDIO_L_OUTPUT].setVoltage(5.f * std::tanh(l * 0.5f * master));
-            outputs[AUDIO_R_OUTPUT].setVoltage(5.f * std::tanh(r * 0.5f * master));
+            l = std::tanh(l * clipDrive) * master;
+            r = std::tanh(r * clipDrive) * master;
+            outputs[AUDIO_L_OUTPUT].setVoltage(5.f * l);
+            outputs[AUDIO_R_OUTPUT].setVoltage(5.f * r);
+
+            float fall = std::exp(-args.sampleTime * 6.f);
+            meterL = std::max(std::fabs(l), meterL * fall);
+            meterR = std::max(std::fabs(r), meterR * fall);
         }
 
         resync += args.sampleTime;
@@ -1014,12 +1079,93 @@ struct JKnobRing : TransparentWidget {
     }
 };
 
+// FX program names and what P1..P3 mean for each (MIX-24's onboard FX).
+static const char* kFxProg[8] = {"OFF", "ROOM", "HALL", "PLATE", "ECHO", "PING-PONG", "CHORUS", "FLANGER"};
+static const char* kFxParamName[8][3] = {
+    {"-", "-", "-"}, {"SIZE", "DAMP", "PRE"}, {"SIZE", "DAMP", "PRE"}, {"SIZE", "TONE", "PRE"},
+    {"TIME", "FDBK", "TONE"}, {"TIME", "FDBK", "TONE"}, {"RATE", "DEPTH", "SPREAD"}, {"RATE", "DEPTH", "FDBK"}};
+static int fxProg(SynTHBloKMatrix8* m) { return m ? clamp((int)std::round(m->params[SynTHBloKMatrix8::FX_PROG_PARAM].getValue()), 0, 7) : 2; }
+
+// FX program display (MIDI + style): click = next program, right-click = previous.
+struct JFxDisplay : TransparentWidget {
+    SynTHBloKMatrix8* module = NULL;
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        float W = box.size.x, H = box.size.y;
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, W, H, 2.f);
+        nvgFillColor(args.vg, nvgRGBA(14, 9, 3, 255));
+        nvgFill(args.vg);
+        nvgStrokeWidth(args.vg, 0.8f);
+        nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, 80));
+        nvgStroke(args.vg);
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFontSize(args.vg, 6.5f);
+        nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 130));
+        nvgText(args.vg, W * 0.5f, H * 0.28f, "FX PROGRAM", NULL);
+        nvgFontSize(args.vg, 9.5f);
+        nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 255));
+        nvgText(args.vg, W * 0.5f, H * 0.68f, kFxProg[fxProg(module)], NULL);
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.action != GLFW_PRESS || !module) return;
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT || e.button == GLFW_MOUSE_BUTTON_RIGHT) {
+            int p = (fxProg(module) + (e.button == GLFW_MOUSE_BUTTON_LEFT ? 1 : 7)) % 8;
+            module->params[SynTHBloKMatrix8::FX_PROG_PARAM].setValue((float)p);
+            e.consume(this);
+        }
+    }
+};
+
+// Caption for FX knob 1..3 that follows the program (SIZE, TIME, RATE, ...).
+struct JFxLabel : TransparentWidget {
+    SynTHBloKMatrix8* module = NULL;
+    int which = 0;
+    void draw(const DrawArgs& args) override {
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgFontSize(args.vg, 7.f);
+        nvgTextLetterSpacing(args.vg, 0.6f);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, nvgRGB(0xbb, 0xbb, 0xbb));
+        nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, kFxParamName[fxProg(module)][which], NULL);
+    }
+};
+
+// Stereo output meter: two horizontal amber bars, red near clipping.
+struct JMeter : TransparentWidget {
+    SynTHBloKMatrix8* module = NULL;
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        float W = box.size.x, H = box.size.y, bh = H * 0.42f;
+        float lv[2] = {module ? module->meterL : 0.6f, module ? module->meterR : 0.5f};
+        for (int i = 0; i < 2; i++) {
+            float y = i == 0 ? 0.f : H - bh;
+            nvgBeginPath(args.vg);
+            nvgRoundedRect(args.vg, 0.f, y, W, bh, 1.f);
+            nvgFillColor(args.vg, nvgRGBA(14, 9, 3, 255));
+            nvgFill(args.vg);
+            float v = clamp(lv[i], 0.f, 1.f);
+            if (v > 0.f) {
+                nvgBeginPath(args.vg);
+                nvgRoundedRect(args.vg, 0.5f, y + 0.5f, (W - 1.f) * v, bh - 1.f, 0.8f);
+                nvgFillColor(args.vg, v > 0.9f ? nvgRGB(0xf0, 0x40, 0x00) : nvgRGBA(255, 112, 15, 235));
+                nvgFill(args.vg);
+            }
+        }
+    }
+};
+
 struct SynTHBloKMatrix8Widget : ModuleWidget {
     SynTHBloKMatrix8Widget(SynTHBloKMatrix8* module) {
         setModule(module);
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKMatrix8.svg")));
         using namespace rack::componentlibrary;
-        const float PW = 127.0f;
+        const float PW = 157.48f;   // 31 HP
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(PW - 3.5f, 3.5f))));
         JTitle* title = createWidget<JTitle>(mm2px(Vec(8.5f, 0.f)));
@@ -1132,6 +1278,49 @@ struct SynTHBloKMatrix8Widget : ModuleWidget {
             if (i < 3) addInput(createInputCentered<SmallJack>(mm2px(Vec(x, 107.f)), module, JIN[i]));
             else addOutput(createOutputCentered<SmallJack>(mm2px(Vec(x, 107.f)), module, JOUT[i - 3]));
         }
+
+        // ---------------- third section: FX + master bus (as on MIX-24) ----------------
+        const float SX = 128.8f, SW = 24.9f, SC = SX + SW * 0.5f;
+        const float C1 = SX + 6.f, C2 = SX + SW - 6.f;
+        JFxDisplay* fd = createWidget<JFxDisplay>(mm2px(Vec(SX, 10.5f)));
+        fd->box.size = mm2px(Vec(SW, 10.f)); fd->module = module;
+        addChild(fd);
+        auto fxKnob = [&](float x, float y, int param, int which) {
+            JKnobRing* fr = createWidget<JKnobRing>(mm2px(Vec(x - 5.5f, y - 5.5f)));
+            fr->box.size = mm2px(Vec(11.f, 11.f));
+            fr->module = module; fr->param = param;
+            addChild(fr);
+            addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(x, y)), module, param));
+            JFxLabel* l = createWidget<JFxLabel>(mm2px(Vec(x - 6.f, y + 5.f)));
+            l->box.size = mm2px(Vec(12.f, 4.f)); l->module = module; l->which = which;
+            addChild(l);
+        };
+        fxKnob(C1, 27.5f, SynTHBloKMatrix8::FX_P1_PARAM, 0);
+        fxKnob(C2, 27.5f, SynTHBloKMatrix8::FX_P2_PARAM, 1);
+        fxKnob(C1, 41.f, SynTHBloKMatrix8::FX_P3_PARAM, 2);
+        smallKnob(C2, 41.f, SynTHBloKMatrix8::FX_RET_PARAM, "RETURN");
+        smallKnob(SC, 54.f, SynTHBloKMatrix8::FX_SEND_PARAM, "SEND");
+
+        label(SC, 66.5f, "MASTER BUS");
+        smallKnob(C1, 74.f, SynTHBloKMatrix8::M_WIDTH_PARAM, "WIDTH");
+        smallKnob(C2, 74.f, SynTHBloKMatrix8::M_TILT_PARAM, "TILT");
+        smallKnob(C1, 88.5f, SynTHBloKMatrix8::M_GLUE_PARAM, "GLUE");
+        smallKnob(C2, 88.5f, SynTHBloKMatrix8::M_CLIP_PARAM, "CLIP");
+
+        // External FX loop jacks, level with the right panel's jack row.
+        // Jacks in pairs (L, R): "SEND" over the outputs, "RETURN" over the inputs.
+        label(SX + SW * 0.25f, 102.f, "SEND");
+        label(SX + SW * 0.75f, 102.f, "RETURN");
+        for (int i = 0; i < 4; i++) {
+            float x = SX + SW * (i + 0.5f) / 4.f;
+            if (i < 2) addOutput(createOutputCentered<SmallJack>(mm2px(Vec(x, 107.f)), module,
+                                 i == 0 ? SynTHBloKMatrix8::FX_SEND_L_OUTPUT : SynTHBloKMatrix8::FX_SEND_R_OUTPUT));
+            else addInput(createInputCentered<SmallJack>(mm2px(Vec(x, 107.f)), module,
+                          i == 2 ? SynTHBloKMatrix8::FX_RTN_L_INPUT : SynTHBloKMatrix8::FX_RTN_R_INPUT));
+        }
+        JMeter* mt = createWidget<JMeter>(mm2px(Vec(SX, 117.5f)));
+        mt->box.size = mm2px(Vec(SW, 6.f)); mt->module = module;
+        addChild(mt);
     }
 
     // Settings that used to be panel knobs live in the right-click menu.
