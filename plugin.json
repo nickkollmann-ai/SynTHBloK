@@ -198,13 +198,13 @@
     {
       "slug": "SynTHBloKGrainForge",
       "name": "SynTHBloK GRAIN-FORGE",
-      "description": "Glitch, granular stretch, robot-voice harmonics and a warp delay whose repeats loop back through the stretch and robot stages; clock-locked stereo FX chain",
+      "description": "Beat shuffler, glitch, robot vocoder, clock-locked gate/filter and a warp delay whose repeats loop back through the robot and pulse stages; clock-locked stereo FX chain",
       "tags": [
         "Effect",
-        "Granular",
         "Delay",
+        "Filter",
+        "Vocoder",
         "Pitch shifter",
-        "Formant",
         "Clock modulator"
       ]
     }

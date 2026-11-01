@@ -1,8 +1,9 @@
 // ============================================================================
-// SynTHBloK GRAIN-FORGE  (glitch / stretch / robot voice / warp delay FX chain)
-//  IN -> GLITCH -> STRETCH -> ROBOT -> WARP DELAY -> OUT, each stage with ON and its own mix.
-//  WARP DELAY's feedback can loop back through STRETCH and ROBOT (ROUTE), so repeats get
-//  stretched, pitch-warped and "sung" as they cycle. Clock-locked (internal 120 BPM if no clock).
+// SynTHBloK GRAIN-FORGE  (shuffle / glitch / robot voice / pulse / warp delay FX chain)
+//  IN -> SHUFFLE -> GLITCH -> ROBOT -> PULSE -> WARP DELAY -> OUT, each stage with ON and its own mix.
+//  SHUFFLE rearranges the clean beat first, GLITCH breaks it up, ROBOT voices it, PULSE gates and
+//  filters it in time, and WARP DELAY echoes it. The delay's feedback can loop back through ROBOT and
+//  PULSE (ROUTE), so repeats get "sung" and filtered as they cycle. Clock-locked (120 BPM internal).
 // ============================================================================
 #include "plugin.hpp"
 #include "SynTHBloKGrainForge_dsp.hpp"
@@ -14,26 +15,29 @@ namespace {
 using namespace gforge;
 
 static const char* kNote[12] = {"A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"};
-static const char* kPitchName[8] = {"-12", "-7", "-5", "0", "+5", "+7", "+12", "REV"};
 
 struct SynTHBloKGrainForge : Module {
     enum ParamIds {
         GL_ON_PARAM, GL_CHANCE_PARAM, GL_ROLL_PARAM, GL_REV_PARAM, GL_STOP_PARAM, GL_CRUSH_PARAM, GL_MIX_PARAM,
-        ST_ON_PARAM, ST_STRETCH_PARAM, ST_SIZE_PARAM, ST_PITCH_PARAM, ST_SPRAY_PARAM, ST_MIX_PARAM, ST_FREEZE_PARAM,
+        // PULSE took over the old STRETCH slots (saved patches reset them, see fromJson)
+        PU_ON_PARAM, PU_CUTOFF_PARAM, PU_RES_PARAM, PU_PATTERN_PARAM, PU_DEPTH_PARAM, PU_MIX_PARAM, PU_MODE_PARAM,
         RB_ON_PARAM, RB_ROOT_PARAM, RB_CHORD_PARAM, RB_VOWEL_PARAM, RB_RING_PARAM, RB_Q_PARAM, RB_MIX_PARAM,
         DL_ON_PARAM, DL_TIME_PARAM, DL_FDBK_PARAM, DL_WARP_PARAM, DL_ROUTE_PARAM, DL_TONE_PARAM, DL_MIX_PARAM,
         ENUMS(DL_STEP_PARAM, 8),
         IN_GAIN_PARAM, DRYWET_PARAM, OUT_GAIN_PARAM,
         ENUMS(DL_STEP2_PARAM, 8),     // throw steps 9-16 (added last so saved patches keep their ids)
+        PU_DECAY_PARAM,
+        SH_ON_PARAM, SH_PATTERN_PARAM, SH_AMOUNT_PARAM, SH_REV_PARAM, SH_PITCH_PARAM, SH_LEN_PARAM, SH_MIX_PARAM,
         NUM_PARAMS
     };
-    enum InputIds { IN_L_INPUT, IN_R_INPUT, CLOCK_INPUT, RESET_INPUT, FREEZE_INPUT, GLITCH_INPUT, NUM_INPUTS };
+    enum InputIds { IN_L_INPUT, IN_R_INPUT, CLOCK_INPUT, RESET_INPUT, OPEN_INPUT, GLITCH_INPUT, NUM_INPUTS };
     enum OutputIds { OUT_L_OUTPUT, OUT_R_OUTPUT, NUM_OUTPUTS };
     enum LightIds { NUM_LIGHTS };
 
+    Shuffle shuffle;
     Glitch glitch;
-    Stretch stretch;
     Robot robot;
+    Pulse pulse;
     WarpDelay delay;
     dsp::SchmittTrigger clkTrig, rstTrig, glitchTrig;
 
@@ -57,19 +61,29 @@ struct SynTHBloKGrainForge : Module {
         const std::vector<std::string> offOn = {"Off", "On"};
         configSwitch(GL_ON_PARAM, 0.f, 1.f, 1.f, "GLITCH", offOn);
         configParam(GL_CHANCE_PARAM, 0.f, 1.f, 0.2f, "Glitch chance per step", "%", 0.f, 100.f);
-        configSwitch(GL_ROLL_PARAM, 0.f, kRollCount - 1, 4.f, "Roll size",
+        configSwitch(GL_ROLL_PARAM, 0.f, kRollCount - 1, 3.f, "Roll size (rolls start on the beat and last a beat)",
                      std::vector<std::string>(kRollName, kRollName + kRollCount));
         configParam(GL_REV_PARAM, 0.f, 1.f, 0.2f, "Reverse amount", "%", 0.f, 100.f);
         configParam(GL_STOP_PARAM, 0.f, 1.f, 0.1f, "Tape-stop amount", "%", 0.f, 100.f);
         configParam(GL_CRUSH_PARAM, 0.f, 1.f, 0.f, "Crush (bits + sample rate)", "%", 0.f, 100.f);
         configParam(GL_MIX_PARAM, 0.f, 1.f, 1.f, "Glitch mix", "%", 0.f, 100.f);
-        configSwitch(ST_ON_PARAM, 0.f, 1.f, 1.f, "STRETCH", offOn);
-        configParam(ST_STRETCH_PARAM, 0.f, 1.f, 0.25f, "Stretch", "x", 16.f, 1.f);
-        configParam(ST_SIZE_PARAM, 0.f, 1.f, 0.45f, "Grain size", " ms", 13.3f, 30.f);
-        configSwitch(ST_PITCH_PARAM, 0.f, 7.f, 3.f, "Grain pitch", {"-12", "-7", "-5", "0", "+5", "+7", "+12", "Reverse"});
-        configParam(ST_SPRAY_PARAM, 0.f, 1.f, 0.2f, "Spray", "%", 0.f, 100.f);
-        configParam(ST_MIX_PARAM, 0.f, 1.f, 0.4f, "Stretch mix", "%", 0.f, 100.f);
-        configSwitch(ST_FREEZE_PARAM, 0.f, 1.f, 0.f, "Freeze (the FREEZE gate also freezes)", {"Off", "Frozen"});
+        configSwitch(SH_ON_PARAM, 0.f, 1.f, 1.f, "SHUFFLE", offOn);
+        configSwitch(SH_PATTERN_PARAM, 0.f, kShufCount - 1, 0.f, "Shuffle pattern",
+                     std::vector<std::string>(kShufName, kShufName + kShufCount));
+        configParam(SH_AMOUNT_PARAM, 0.f, 1.f, 0.35f, "Shuffle amount (chance a step is moved)", "%", 0.f, 100.f);
+        configParam(SH_REV_PARAM, 0.f, 1.f, 0.15f, "Reversed slices", "%", 0.f, 100.f);
+        configParam(SH_PITCH_PARAM, 0.f, 1.f, 0.f, "Octave slices (up or down)", "%", 0.f, 100.f);
+        configSwitch(SH_LEN_PARAM, 0.f, 2.f, 2.f, "Shuffle length", std::vector<std::string>(kShufLenName, kShufLenName + 3));
+        configParam(SH_MIX_PARAM, 0.f, 1.f, 1.f, "Shuffle mix", "%", 0.f, 100.f);
+        configSwitch(PU_ON_PARAM, 0.f, 1.f, 1.f, "PULSE", offOn);
+        configParam(PU_CUTOFF_PARAM, 0.f, 1.f, 0.55f, "Cutoff", " Hz", 600.f, 30.f);
+        configParam(PU_RES_PARAM, 0.f, 1.f, 0.35f, "Resonance", "%", 0.f, 100.f);
+        configSwitch(PU_PATTERN_PARAM, 0.f, kPulseCount - 1, 0.f, "Pulse pattern",
+                     std::vector<std::string>(kPulseName, kPulseName + kPulseCount));
+        configParam(PU_DEPTH_PARAM, 0.f, 1.f, 0.5f, "Depth (gate + filter sweep per hit)", "%", 0.f, 100.f);
+        configParam(PU_DECAY_PARAM, 0.f, 1.f, 0.35f, "Decay (click .. 4 steps)", "%", 0.f, 100.f);
+        configParam(PU_MIX_PARAM, 0.f, 1.f, 0.6f, "Pulse mix", "%", 0.f, 100.f);
+        configSwitch(PU_MODE_PARAM, 0.f, 2.f, 0.f, "Filter mode", {"Low-pass", "Band-pass", "High-pass"});
         configSwitch(RB_ON_PARAM, 0.f, 1.f, 1.f, "ROBOT", offOn);
         configSwitch(RB_ROOT_PARAM, 0.f, 24.f, 12.f, "Robot root",
                      {"A1", "A#1", "B1", "C2", "C#2", "D2", "D#2", "E2", "F2", "F#2", "G2", "G#2",
@@ -84,7 +98,7 @@ struct SynTHBloKGrainForge : Module {
                      std::vector<std::string>(kDelayName, kDelayName + kDelayCount));
         configParam(DL_FDBK_PARAM, 0.f, 1.f, 0.4f, "Feedback", "%", 0.f, 100.f);
         configParam(DL_WARP_PARAM, -12.f, 12.f, 0.f, "Warp (pitch shift per repeat)", " st");
-        configParam(DL_ROUTE_PARAM, 0.f, 1.f, 0.3f, "Route repeats through STRETCH + ROBOT", "%", 0.f, 100.f);
+        configParam(DL_ROUTE_PARAM, 0.f, 1.f, 0.3f, "Route repeats through ROBOT + PULSE", "%", 0.f, 100.f);
         configParam(DL_TONE_PARAM, 0.f, 1.f, 0.6f, "Repeat tone (dark -> bright)", "%", 0.f, 100.f);
         configParam(DL_MIX_PARAM, 0.f, 1.f, 0.6f, "Echo level", "%", 0.f, 100.f);
         for (int i = 0; i < kThrowSteps; i++)
@@ -96,7 +110,7 @@ struct SynTHBloKGrainForge : Module {
         configInput(IN_R_INPUT, "Right (left is copied here when unpatched)");
         configInput(CLOCK_INPUT, "Clock (16th notes; 120 BPM internal when unpatched)");
         configInput(RESET_INPUT, "Reset");
-        configInput(FREEZE_INPUT, "Freeze (gate)");
+        configInput(OPEN_INPUT, "Open (gate): PULSE lets everything through while high");
         configInput(GLITCH_INPUT, "Glitch now (trigger)");
         configOutput(OUT_L_OUTPUT, "Left");
         configOutput(OUT_R_OUTPUT, "Right");
@@ -108,20 +122,25 @@ struct SynTHBloKGrainForge : Module {
 
     void onReset() override { step = -1; }
 
-    // Patches saved before the 13-slot TIME switch and 11-slot ROLL switch stored the old layouts:
-    // TIME as an index into 7 slots, ROLL as a 0..1 knob split into 5 zones.
+    // Older patches stored older layouts.
+    //   v1 (no data block): TIME as an index into 7 slots, ROLL as a 0..1 knob split into 5 zones.
+    //   v2: ROLL as an index into 11 slots.
+    //   v3: the current 13 TIME slots and 7 ROLL slots, with STRETCH where PULSE is now.
+    //   v4: SHUFFLE and PULSE.
     json_t* dataToJson() override {
         json_t* root = json_object();
-        json_object_set_new(root, "v2", json_true());
+        json_object_set_new(root, "v4", json_true());
         return root;
     }
     void fromJson(json_t* rootJ) override {   // old patches have no "data" block, so dataFromJson never runs for them
         Module::fromJson(rootJ);
         json_t* d = json_object_get(rootJ, "data");
-        if (d && json_object_get(d, "v2")) return;
-        int old = clamp((int)std::round(params[DL_TIME_PARAM].getValue()), 0, 6);
-        params[DL_TIME_PARAM].setValue((float)kDelayOldIndex[old]);
-        // the old ROLL value was loaded into the new switch's range, so read it from the patch itself
+        int ver = !d ? 1 : json_object_get(d, "v4") ? 4 : json_object_get(d, "v3") ? 3 : json_object_get(d, "v2") ? 2 : 1;
+        if (ver >= 4) return;
+        // STRETCH's settings were saved in PULSE's slots: start PULSE from its defaults instead
+        for (int id = PU_ON_PARAM; id <= PU_MODE_PARAM; id++) params[id].setValue(paramQuantities[id]->getDefaultValue());
+        if (ver == 3) return;
+        // the saved ROLL value was clamped into the new switch's range, so read it from the patch itself
         float roll = 0.4f;
         json_t* ps = json_object_get(rootJ, "params");
         for (size_t i = 0; ps && i < json_array_size(ps); i++) {
@@ -129,7 +148,13 @@ struct SynTHBloKGrainForge : Module {
             if (json_integer_value(json_object_get(p, "id")) == GL_ROLL_PARAM)
                 roll = (float)json_number_value(json_object_get(p, "value"));
         }
-        params[GL_ROLL_PARAM].setValue((float)kRollOldIndex[clamp((int)(roll * 5.f), 0, 4)]);
+        if (ver == 2) {
+            params[GL_ROLL_PARAM].setValue((float)kRollV2Index[clamp((int)std::round(roll), 0, 10)]);
+            return;
+        }
+        int old = clamp((int)std::round(params[DL_TIME_PARAM].getValue()), 0, 6);
+        params[DL_TIME_PARAM].setValue((float)kDelayOldIndex[old]);
+        params[GL_ROLL_PARAM].setValue((float)kRollV1Index[clamp((int)(roll * 5.f), 0, 4)]);
     }
 
     void process(const ProcessArgs& args) override {
@@ -167,37 +192,44 @@ struct SynTHBloKGrainForge : Module {
         float inR = inputs[IN_R_INPUT].isConnected() ? inputs[IN_R_INPUT].getVoltage() * g : inL;
 
         // Every stage keeps running so switching it on is seamless; ON crossfades it in.
+        float stepLen = stepSec * sr;
+        float pL, pR;
+        // ---- SHUFFLE (first, so it rearranges the clean beat) ----
+        shuffle.process(inL, inR, sr, stepLen, edge, step, slot(SH_PATTERN_PARAM), params[SH_AMOUNT_PARAM].getValue(),
+                        params[SH_REV_PARAM].getValue(), params[SH_PITCH_PARAM].getValue(), slot(SH_LEN_PARAM), pL, pR);
+        float m = sm[SH_MIX_PARAM] * sm[SH_ON_PARAM];
+        float sL = inL + (pL - inL) * m, sR = inR + (pR - inR) * m;
+
         // ---- GLITCH ----
         if (edge || force) {
             glitch.trigger(stepSec * sr, params[GL_CHANCE_PARAM].getValue(), slot(GL_ROLL_PARAM),
-                           params[GL_REV_PARAM].getValue(), params[GL_STOP_PARAM].getValue(), force);
+                           params[GL_REV_PARAM].getValue(), params[GL_STOP_PARAM].getValue(), step % 4 == 0 || force, force);
             static const char* names[4] = {"-", "ROLL", "REVERSE", "TAPE STOP"};
             glitchEvent = glitch.ev == Glitch::ROLL ? std::string("ROLL ") + kRollName[glitch.rollDiv] : names[glitch.ev];
         }
-        float pL, pR;
-        glitch.process(inL, inR, sr, sm[GL_CRUSH_PARAM], pL, pR);
-        float m = sm[GL_MIX_PARAM] * sm[GL_ON_PARAM];
-        float aL = inL + (pL - inL) * m, aR = inR + (pR - inR) * m;
+        glitch.process(sL, sR, sr, sm[GL_CRUSH_PARAM], pL, pR);
+        m = sm[GL_MIX_PARAM] * sm[GL_ON_PARAM];
+        float aL = sL + (pL - sL) * m, aR = sR + (pR - sR) * m;
 
-        // ---- WARP DELAY read (its feedback may loop through STRETCH and ROBOT) ----
+        // ---- WARP DELAY read (its feedback may loop through ROBOT and PULSE) ----
         float fbL = 0.f, fbR = 0.f;
         float route = sm[DL_ROUTE_PARAM], dlOn = sm[DL_ON_PARAM];
         delay.read(sr, kDelaySteps[clamp(slot(DL_TIME_PARAM), 0, kDelayCount - 1)] * stepSec, sm[DL_FDBK_PARAM] * dlOn,
                    sm[DL_WARP_PARAM], sm[DL_TONE_PARAM], fbL, fbR);
 
-        // ---- STRETCH ----
-        float bInL = aL + route * fbL, bInR = aR + route * fbR;
-        bool frz = on(ST_FREEZE_PARAM) || inputs[FREEZE_INPUT].getVoltage() > 1.f;
-        stretch.process(bInL, bInR, sr, std::pow(16.f, sm[ST_STRETCH_PARAM]), sm[ST_SIZE_PARAM],
-                        clamp(slot(ST_PITCH_PARAM), 0, 7), sm[ST_SPRAY_PARAM], frz, pL, pR);
-        m = sm[ST_MIX_PARAM] * sm[ST_ON_PARAM];
-        float bL = bInL + (pL - bInL) * m, bR = bInR + (pR - bInR) * m;
-
         // ---- ROBOT (root glides between notes) ----
+        float bL = aL + route * fbL, bR = aR + route * fbR;
         robot.process(bL, bR, sr, sm[RB_ROOT_PARAM], clamp(slot(RB_CHORD_PARAM), 0, 7),
                       sm[RB_VOWEL_PARAM], sm[RB_RING_PARAM], sm[RB_Q_PARAM], pL, pR);
         m = sm[RB_MIX_PARAM] * sm[RB_ON_PARAM];
-        float cL = bL + (pL - bL) * m, cR = bR + (pR - bR) * m;
+        float rL = bL + (pL - bL) * m, rR = bR + (pR - bR) * m;
+
+        // ---- PULSE (gate + filter in time; OPEN lets everything through) ----
+        pulse.process(rL, rR, sr, stepLen, edge, step, slot(PU_PATTERN_PARAM), sm[PU_CUTOFF_PARAM], sm[PU_RES_PARAM],
+                      sm[PU_DEPTH_PARAM], sm[PU_DECAY_PARAM], clamp(slot(PU_MODE_PARAM), 0, 2),
+                      inputs[OPEN_INPUT].getVoltage() > 1.f, pL, pR);
+        m = sm[PU_MIX_PARAM] * sm[PU_ON_PARAM];
+        float cL = rL + (pL - rL) * m, cR = rR + (pR - rR) * m;
 
         // ---- WARP DELAY write: lit steps throw this signal in; un-routed feedback goes straight back ----
         bool throwOn = step < 0 || on(throwParam(step));
@@ -315,7 +347,7 @@ struct GFStageDisplay : TransparentWidget {
     }
 };
 
-// Amber latch button (FREEZE) and throw-step buttons.
+// Amber throw-step buttons.
 struct GFButton : app::ParamWidget {
     const char* label = "";
     int playIdx = -1;                       // throw buttons: outline when this step plays
@@ -341,6 +373,43 @@ struct GFButton : app::ParamWidget {
     void onButton(const ButtonEvent& e) override {
         if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
             if (ParamQuantity* pq = getParamQuantity()) pq->setValue(pq->getValue() > 0.5f ? 0.f : 1.f);
+            e.consume(this);
+            return;
+        }
+        ParamWidget::onButton(e);
+    }
+};
+
+// PULSE filter mode: LP | BP | HP, the active one lit. Click steps to the next.
+struct GFModeButton : app::ParamWidget {
+    void draw(const DrawArgs& args) override {
+        ParamQuantity* pq = getParamQuantity();
+        int sel = pq ? clamp((int)std::round(pq->getValue()), 0, 2) : 0;
+        float w = box.size.x / 3.f, h = box.size.y;
+        auto font = uiFont();
+        for (int i = 0; i < 3; i++) {
+            bool lit = i == sel;
+            nvgBeginPath(args.vg);
+            nvgRoundedRect(args.vg, i * w + 0.5f, 0.f, w - 1.f, h, 1.2f);
+            nvgFillColor(args.vg, lit ? nvgRGBA(255, 112, 15, 235) : nvgRGBA(40, 25, 8, 255));
+            nvgFill(args.vg);
+            nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, lit ? 255 : 120));
+            nvgStrokeWidth(args.vg, 0.8f);
+            nvgStroke(args.vg);
+            if (!font) continue;
+            nvgFontFaceId(args.vg, font->handle);
+            nvgFontSize(args.vg, 7.f);
+            nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+            nvgFillColor(args.vg, lit ? nvgRGBA(20, 10, 2, 255) : nvgRGBA(255, 190, 90, 255));
+            nvgText(args.vg, i * w + w * 0.5f, h * 0.5f, kModeName[i], NULL);
+        }
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
+            if (ParamQuantity* pq = getParamQuantity()) {
+                int sel = clamp((int)(e.pos.x / (box.size.x / 3.f)), 0, 2);   // click a segment to pick it
+                pq->setValue((float)sel);
+            }
             e.consume(this);
             return;
         }
@@ -433,7 +502,7 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
         setModule(module);
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKGrainForge.svg")));
         using namespace rack::componentlibrary;
-        const float PW = 162.56f;   // 32 HP
+        const float PW = 203.2f;   // 40 HP
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(PW - 3.5f, 3.5f))));
         GFTitle* title = createWidget<GFTitle>(mm2px(Vec(8.5f, 0.f)));
@@ -462,25 +531,22 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
         };
         typedef SynTHBloKGrainForge G;
 
-        // ---- four stages, left to right ----
-        float c = stage(0, G::GL_ON_PARAM, "GLITCH", [m]() -> std::string { return m ? m->glitchEvent : "ROLL 1/4"; });
+        // ---- five stages, left to right in signal order ----
+        float c = stage(0, G::SH_ON_PARAM, "SHUFFLE", [m]() -> std::string {
+            int p = m ? clamp(m->slot(G::SH_PATTERN_PARAM), 0, kShufCount - 1) : 0;
+            int s = m ? m->shuffle.src : -1;
+            char b[24];
+            if (s < 0) snprintf(b, sizeof b, "%s  LIVE", kShufName[p]); else snprintf(b, sizeof b, "%s  >%02d", kShufName[p], s + 1);
+            return b;
+        });
+        knob(c - 9.f, 29.f, G::SH_PATTERN_PARAM, "PATTERN"); knob(c + 9.f, 29.f, G::SH_AMOUNT_PARAM, "AMOUNT");
+        knob(c - 9.f, 44.f, G::SH_REV_PARAM, "REVERSE");     knob(c + 9.f, 44.f, G::SH_PITCH_PARAM, "OCTAVE");
+        knob(c - 9.f, 59.f, G::SH_LEN_PARAM, "LENGTH");      knob(c + 9.f, 59.f, G::SH_MIX_PARAM, "MIX");
+
+        c = stage(1, G::GL_ON_PARAM, "GLITCH", [m]() -> std::string { return m ? m->glitchEvent : "ROLL 1/16"; });
         knob(c - 9.f, 29.f, G::GL_CHANCE_PARAM, "CHANCE"); knob(c + 9.f, 29.f, G::GL_ROLL_PARAM, "ROLL");
         knob(c - 9.f, 44.f, G::GL_REV_PARAM, "REVERSE");   knob(c + 9.f, 44.f, G::GL_STOP_PARAM, "STOP");
         knob(c - 9.f, 59.f, G::GL_CRUSH_PARAM, "CRUSH");   knob(c + 9.f, 59.f, G::GL_MIX_PARAM, "MIX");
-
-        c = stage(1, G::ST_ON_PARAM, "STRETCH", [m]() -> std::string {
-            if (!m) return "x2.0";
-            if (m->on(G::ST_FREEZE_PARAM) || m->inputs[G::FREEZE_INPUT].getVoltage() > 1.f) return "FROZEN";
-            char b[24]; snprintf(b, sizeof b, "x%.1f  %s", std::pow(16.f, m->params[G::ST_STRETCH_PARAM].getValue()),
-                                 kPitchName[clamp(m->slot(G::ST_PITCH_PARAM), 0, 7)]);
-            return b;
-        });
-        knob(c - 9.f, 29.f, G::ST_STRETCH_PARAM, "STRETCH"); knob(c + 9.f, 29.f, G::ST_SIZE_PARAM, "SIZE");
-        knob(c - 9.f, 44.f, G::ST_PITCH_PARAM, "PITCH");     knob(c + 9.f, 44.f, G::ST_SPRAY_PARAM, "SPRAY");
-        knob(c - 9.f, 59.f, G::ST_MIX_PARAM, "MIX");
-        GFButton* frz = createParam<GFButton>(mm2px(Vec(c + 3.f, 56.f)), module, G::ST_FREEZE_PARAM);
-        frz->box.size = mm2px(Vec(12.f, 6.f)); frz->label = "FREEZE";
-        addParam(frz);
 
         c = stage(2, G::RB_ON_PARAM, "ROBOT", [m]() -> std::string {
             int root = m ? m->slot(G::RB_ROOT_PARAM) : 12, ch = m ? clamp(m->slot(G::RB_CHORD_PARAM), 0, 7) : 3;
@@ -490,7 +556,19 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
         knob(c - 9.f, 44.f, G::RB_VOWEL_PARAM, "VOWEL"); knob(c + 9.f, 44.f, G::RB_RING_PARAM, "RING");
         knob(c - 9.f, 59.f, G::RB_Q_PARAM, "RES");       knob(c + 9.f, 59.f, G::RB_MIX_PARAM, "MIX");
 
-        c = stage(3, G::DL_ON_PARAM, "WARP DELAY", [m]() -> std::string {
+        c = stage(3, G::PU_ON_PARAM, "PULSE", [m]() -> std::string {
+            if (m && m->inputs[G::OPEN_INPUT].getVoltage() > 1.f) return "OPEN";
+            int p = m ? clamp(m->slot(G::PU_PATTERN_PARAM), 0, kPulseCount - 1) : 3;
+            int md = m ? clamp(m->slot(G::PU_MODE_PARAM), 0, 2) : 0;
+            return std::string(kPulseName[p]) + "  " + kModeName[md];
+        });
+        knob(c - 13.f, 29.f, G::PU_CUTOFF_PARAM, "CUTOFF");   knob(c, 29.f, G::PU_RES_PARAM, "RES");     knob(c + 13.f, 29.f, G::PU_DEPTH_PARAM, "DEPTH");
+        knob(c - 13.f, 44.f, G::PU_PATTERN_PARAM, "PATTERN"); knob(c, 44.f, G::PU_DECAY_PARAM, "DECAY"); knob(c + 13.f, 44.f, G::PU_MIX_PARAM, "MIX");
+        GFModeButton* mode = createParam<GFModeButton>(mm2px(Vec(c - 8.f, 58.f)), module, G::PU_MODE_PARAM);
+        mode->box.size = mm2px(Vec(16.f, 6.5f));
+        addParam(mode);
+
+        c = stage(4, G::DL_ON_PARAM, "WARP DELAY", [m]() -> std::string {
             int t = m ? clamp(m->slot(G::DL_TIME_PARAM), 0, kDelayCount - 1) : 8;
             float w = m ? m->params[G::DL_WARP_PARAM].getValue() : 0.f;
             char b[24]; snprintf(b, sizeof b, "%s  %+.0f st", kDelayName[t], w);
@@ -508,19 +586,19 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
 
         // ---- bottom: status + meter, gains, jacks ----
         GFStatus* st = createWidget<GFStatus>(mm2px(Vec(5.f, 79.5f)));
-        st->box.size = mm2px(Vec(56.f, 14.f)); st->module = module;
+        st->box.size = mm2px(Vec(72.f, 14.f)); st->module = module;
         addChild(st);
-        knob(76.f, 86.5f, G::IN_GAIN_PARAM, "INPUT");
-        GFRing* big = createWidgetCentered<GFRing>(mm2px(Vec(100.f, 86.5f)));
-        big->box.size = mm2px(Vec(18.f, 18.f)); big->box.pos = mm2px(Vec(91.f, 77.5f)); big->module = module; big->param = G::DRYWET_PARAM;
+        knob(105.f, 86.5f, G::IN_GAIN_PARAM, "INPUT");
+        GFRing* big = createWidgetCentered<GFRing>(mm2px(Vec(140.f, 86.5f)));
+        big->box.size = mm2px(Vec(18.f, 18.f)); big->box.pos = mm2px(Vec(131.f, 77.5f)); big->module = module; big->param = G::DRYWET_PARAM;
         addChild(big);
-        addParam(createParamCentered<RoundLargeBlackKnob>(mm2px(Vec(100.f, 86.5f)), module, G::DRYWET_PARAM));
-        label(100.f, 97.f, "DRY / WET");
-        knob(124.f, 86.5f, G::OUT_GAIN_PARAM, "OUTPUT");
+        addParam(createParamCentered<RoundLargeBlackKnob>(mm2px(Vec(140.f, 86.5f)), module, G::DRYWET_PARAM));
+        label(140.f, 97.f, "DRY / WET");
+        knob(175.f, 86.5f, G::OUT_GAIN_PARAM, "OUTPUT");
 
-        const char* jn[8] = {"IN L", "IN R", "CLOCK", "RESET", "FREEZE", "GLITCH", "OUT L", "OUT R"};
+        const char* jn[8] = {"IN L", "IN R", "CLOCK", "RESET", "OPEN", "GLITCH", "OUT L", "OUT R"};
         for (int i = 0; i < 8; i++) {
-            float x = 12.f + i * 19.8f;
+            float x = 14.f + i * 25.f;
             label(x, 106.f, jn[i]);
             Vec p = mm2px(Vec(x, 113.f));
             if (i < 6) addInput(createInputCentered<BlackJack>(p, module, i));

@@ -1,7 +1,7 @@
 #pragma once
 // DSP for SynTHBloK GRAIN-FORGE (header-only, no Rack deps so it can be tested offline).
-// Chain: GLITCH -> STRETCH -> ROBOT -> WARP DELAY, with the delay's feedback able to loop back
-// through STRETCH and ROBOT so repeats get stretched and "sung".
+// Chain: SHUFFLE -> GLITCH -> ROBOT -> PULSE -> WARP DELAY, with the delay's feedback able to loop
+// back through ROBOT and PULSE so repeats get "sung" and gated / filtered in time.
 #include <vector>
 #include <cmath>
 #include <cstdint>
@@ -31,9 +31,73 @@ struct StereoBuf {
     }
 };
 
-// Pitch steps shared by STRETCH (and labels): semitones, the last slot is reverse.
-static const float kPitchSemis[8] = {-12.f, -7.f, -5.f, 0.f, 5.f, 7.f, 12.f, 0.f};
-static const int kPitchReverse = 7;
+// ---------------------------------------------------------------------------------------------
+// SHUFFLE: a beat slicer. It records all the time and, on each clock step, picks which of the last
+// LENGTH steps (4 / 8 / 16) to play: PATTERN says which slice goes where, AMOUNT is the chance a
+// step is rearranged at all, REVERSE the chance a moved slice plays backwards, PITCH the chance it
+// plays an octave up or down. A 3 ms crossfade hides every jump.
+static const int kShufCount = 8;
+static const char* kShufName[kShufCount] = {"SWAP", "BACKWARD", "DOUBLE", "HALF", "LOOP", "THIRDS", "SCATTER", "RANDOM"};
+static const int kShufPat[kShufCount - 1][16] = {
+    {1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14},
+    {15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0},
+    {0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14},
+    {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+    {0, 1, 2, 3, 0, 1, 2, 3, 8, 9, 10, 11, 8, 9, 0, 1},
+    {0, 3, 6, 9, 12, 15, 2, 5, 8, 11, 14, 1, 4, 7, 10, 13},
+    {0, 7, 2, 13, 4, 11, 6, 1, 8, 15, 10, 3, 12, 5, 14, 9}};
+static const int kShufLen[3] = {4, 8, 16};
+static const char* kShufLenName[3] = {"1 BEAT", "2 BEATS", "1 BAR"};
+
+struct Shuffle {
+    StereoBuf buf;
+    Rng rng{23};
+    struct Rd { double pos = 0.0; float inc = 1.f; bool live = true; };
+    Rd cur, old;
+    float xf = 1.f;     // 0 -> 1: crossfade from the old slice to the new one
+    int src = -1;       // slice now playing (-1 = live), for the display
+
+    // stepLen in samples; edge = a clock step starts now; stepIdx = 0..15 position in the bar.
+    void process(float inL, float inR, float sr, float stepLen, bool edge, int stepIdx, int pattern, float amount,
+                 float rev, float pitch, int lenSlot, float& oL, float& oR) {
+        if (buf.n == 0) buf.init((int)(sr * 10.f));
+        buf.write(inL, inR);
+        double now = buf.w - 1;   // the sample just written
+        if (edge && stepIdx >= 0) {
+            int L = kShufLen[clampi(lenSlot, 0, 2)];
+            int s = stepIdx % L, j = s;
+            if (rng.next() < amount) {
+                int p = clampi(pattern, 0, kShufCount - 1);
+                j = p == kShufCount - 1 ? (int)(rng.next() * L) % L : kShufPat[p][stepIdx & 15] % L;
+            }
+            int d = (s - j + L) % L;                                    // steps back to that slice
+            if ((d + 2) * stepLen > buf.n) d = 0;                       // very slow clock: stay live
+            bool back = d > 0 && rng.next() < rev;
+            float sp = (d > 0 && rng.next() < pitch) ? (rng.next() < 0.5f ? 2.f : 0.5f) : 1.f;
+            bool live = d == 0;
+            if (!(live && cur.live)) {                                  // live -> live needs no jump
+                old = cur; xf = 0.f;
+                double start = now - d * (double)stepLen;
+                cur.inc = back ? -sp : sp;
+                cur.pos = back ? start + stepLen * sp : start;
+                cur.live = live;
+            }
+            src = live ? -1 : j;
+        }
+        float aL, aR;
+        if (cur.live) { aL = inL; aR = inR; }
+        else { aL = buf.rd(buf.l, cur.pos); aR = buf.rd(buf.r, cur.pos); }
+        if (xf < 1.f) {
+            float bL = old.live ? inL : buf.rd(buf.l, old.pos), bR = old.live ? inR : buf.rd(buf.r, old.pos);
+            float x = xf * xf * (3.f - 2.f * xf);
+            aL = bL + (aL - bL) * x; aR = bR + (aR - bR) * x;
+            xf = std::min(1.f, xf + 1.f / (0.003f * sr));
+            old.pos += old.inc;
+        }
+        cur.pos += cur.inc;
+        oL = aL; oR = aR;
+    }
+};
 
 // ---------------------------------------------------------------------------------------------
 // GLITCH: on each step (or a GLITCH trigger), with CHANCE, one of:
@@ -41,11 +105,12 @@ static const int kPitchReverse = 7;
 //   REVERSE  the last step played backwards
 //   STOP     a tape-stop: playback slows to a halt over the step
 // then CRUSH (bit depth + sample-rate reduction) on everything.
-// ROLL slice lengths in clock steps (16ths); T = triplet. The last slot picks one at random.
-static const int kRollCount = 11;
-static const float kRollSteps[kRollCount] = {2.f, 4.f / 3.f, 1.f, 2.f / 3.f, 0.5f, 1.f / 3.f, 0.25f, 1.f / 6.f, 0.125f, 0.0625f, 0.f};
-static const char* kRollName[kRollCount] = {"1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T", "1/64", "1/64T", "1/128", "1/256", "RANDOM"};
-static const int kRollOldIndex[5] = {2, 4, 6, 8, 10};   // the old 5-zone ROLL knob -> this list
+// ROLL slice lengths in clock steps (16ths); T = triplet. Rolls start on the beat and last a beat.
+static const int kRollCount = 7;
+static const float kRollSteps[kRollCount] = {4.f, 2.f, 4.f / 3.f, 1.f, 2.f / 3.f, 0.5f, 0.25f};
+static const char* kRollName[kRollCount] = {"1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/64"};
+static const int kRollV1Index[5] = {3, 5, 6, 6, 3};                    // the first 5-zone ROLL knob -> this list
+static const int kRollV2Index[11] = {1, 2, 3, 4, 5, 5, 6, 6, 6, 6, 3}; // the 11-slot ROLL switch -> this list
 
 struct Glitch {
     enum Ev { NONE, ROLL, REVERSE, STOP };
@@ -57,20 +122,21 @@ struct Glitch {
     int sliceLen = 1, evLen = 1, age = 0, rollDiv = 1;
     float holdL = 0.f, holdR = 0.f, holdCount = 0.f;
 
-    // stepLen in samples; roll = index into kRollName; knobs 0..1. force = GLITCH trigger (always fires).
-    void trigger(float stepLen, float chance, int roll, float rev, float stop, bool force) {
+    // stepLen in samples; roll = index into kRollName; knobs 0..1. onBeat = this step starts a beat
+    // (rolls only start there, so they always sit on the grid). force = GLITCH trigger (always fires).
+    void trigger(float stepLen, float chance, int roll, float rev, float stop, bool onBeat, bool force) {
         if (buf.n == 0) return;
-        if (!force && ev != NONE && evLen > stepLen * 1.01f) return;   // let a long (1/8) roll finish
+        if (!force && ev != NONE && evLen > stepLen * 1.01f) return;   // let a roll finish its beat
         if (!force && rng.next() >= chance) { ev = NONE; return; }
-        float wRoll = 1.f, wRev = rev * 2.f, wStop = stop * 2.f;
+        float wRoll = onBeat ? 1.f : 0.f, wRev = rev * 2.f, wStop = stop * 2.f;
+        if (wRoll + wRev + wStop <= 0.f) { ev = NONE; return; }
         float pick = rng.next() * (wRoll + wRev + wStop);
         ev = pick < wRoll ? ROLL : pick < wRoll + wRev ? REVERSE : STOP;
         age = 0;
         rollDiv = clampi(roll, 0, kRollCount - 1);
-        if (rollDiv == kRollCount - 1) rollDiv = 1 + (int)(rng.next() * 8.f) % 8;   // RANDOM: 1/8T .. 1/128
-        sliceLen = std::max(64, (int)(stepLen * kRollSteps[rollDiv]));
-        // a roll longer than a step repeats twice; everything else lasts one step
-        evLen = std::max(64, ev == ROLL ? std::max((int)stepLen, 2 * sliceLen) : (int)stepLen);
+        sliceLen = std::max(64, (int)std::round(stepLen * kRollSteps[rollDiv]));
+        // a roll lasts one beat (two repeats for 1/4); REVERSE and STOP last one step
+        evLen = std::max(64, ev == ROLL ? std::max((int)std::round(stepLen * 4.f), 2 * sliceLen) : (int)stepLen);
         start = buf.w - 1;       // ROLL captures live from here; REVERSE / STOP read back from here
         pos = start;
         speed = 1.f;
@@ -115,63 +181,6 @@ struct Glitch {
             eL = holdL; eR = holdR;
         }
         oL = eL; oR = eR;
-    }
-};
-
-// ---------------------------------------------------------------------------------------------
-// STRETCH: granular time-stretch. A read head creeps through the recording at 1/STRETCH speed
-// while grains (normal speed, so pitch is kept) are cut from around it: 1x = in time, 16x = a
-// moment smeared over 16 times as long. When it falls too far behind it jumps back to "now".
-// FREEZE stops recording; the head keeps scanning the frozen 2 seconds.
-struct Stretch {
-    StereoBuf buf;
-    struct G { bool on = false; double pos = 0.0; float inc = 1.f; int age = 0, len = 1; };
-    G g[10];
-    double rp = 0.0;
-    float spawn = 0.f;
-    Rng rng{11};
-    bool wasFrozen = false;
-
-    void process(float inL, float inR, float sr, float stretch, float size, int pitchSlot, float spray,
-                 bool freeze, float& oL, float& oR) {
-        if (buf.n == 0) { buf.init((int)(sr * 8.f)); rp = 0.0; }
-        if (!freeze) buf.write(inL, inR);
-        int len = (int)(sr * 0.03f * std::pow(13.3f, size));    // 30..400 ms grains
-        bool rev = pitchSlot == kPitchReverse;
-        float ratio = std::pow(2.f, kPitchSemis[pitchSlot] / 12.f);
-        float minLag = len * std::max(1.f, ratio) + 64.f;
-        float frozenSpan = sr * 2.f;
-
-        rp += 1.0 / std::max(1.f, stretch);
-        double lag = buf.w - rp;
-        if (freeze) {
-            if (!wasFrozen) rp = buf.w - frozenSpan;              // start scanning the last 2 s
-            if (buf.w - rp < minLag) rp = buf.w - frozenSpan;     // loop the frozen span
-        } else if (lag < minLag || lag > buf.n - frozenSpan) {
-            rp = buf.w - minLag;                                   // caught up / too far behind: back to now
-        }
-        wasFrozen = freeze;
-
-        spawn -= 1.f;
-        if (spawn <= 0.f) {
-            spawn += len / 6.f;                                    // 6 overlapping grains: smoother
-            for (G& gr : g) if (!gr.on) {
-                gr.on = true; gr.age = 0; gr.len = len;
-                gr.inc = rev ? -ratio : ratio;
-                gr.pos = rp - spray * rng.next() * sr * 0.3f;   // SPRAY: up to 300 ms earlier
-                if (rev) gr.pos += len * ratio;                    // read backwards over the same span
-                break;
-            }
-        }
-        float l = 0.f, r = 0.f;
-        for (G& gr : g) if (gr.on) {
-            float win = 0.5f - 0.5f * std::cos(2.f * float(M_PI) * gr.age / gr.len);
-            l += buf.rd(buf.l, gr.pos) * win;
-            r += buf.rd(buf.r, gr.pos) * win;
-            gr.pos += gr.inc;
-            if (++gr.age >= gr.len) gr.on = false;
-        }
-        oL = l * 0.5f; oR = r * 0.5f;                              // 6 Hann windows overlap to 3; +3.5 dB make-up
     }
 };
 
@@ -284,9 +293,61 @@ struct Robot {
 };
 
 // ---------------------------------------------------------------------------------------------
+// PULSE: a clock-locked gate + resonant filter. Each step of the PATTERN that is on fires an
+// envelope (2 ms attack, DECAY from a click to a few steps long) that opens the gate and sweeps
+// the filter up, both by DEPTH. MODE picks low-, band- or high-pass. OPEN (gate input) opens it fully.
+static const int kPulseCount = 8;
+static const char* kPulseName[kPulseCount] = {"16THS", "8THS", "OFFBEAT", "TRANCE", "DOTTED", "SYNCO", "BUILD", "RANDOM"};
+static const char* kPulsePat[kPulseCount - 1] = {   // x = the step fires
+    "xxxxxxxxxxxxxxxx", "x.x.x.x.x.x.x.x.", "..x...x...x...x.", "x.xx.xx.x.xx.xx.",
+    "x..x..x..x..x.x.", "x..x..x.x..x.x..", "x...x...x.x.xxxx"};
+static const char* kModeName[3] = {"LP", "BP", "HP"};
+
+struct Pulse {
+    float ic1[2] = {}, ic2[2] = {};
+    float env = 0.f, open = 0.f;
+    bool attacking = false;
+    Rng rng{31};
+
+    void process(float inL, float inR, float sr, float stepLen, bool edge, int stepIdx, int pattern,
+                 float cutoff, float res, float depth, float decay, int mode, bool openGate, float& oL, float& oR) {
+        if (edge && stepIdx >= 0) {
+            int p = clampi(pattern, 0, kPulseCount - 1);
+            if (p == kPulseCount - 1 ? rng.next() < 0.6f : kPulsePat[p][stepIdx & 15] == 'x') attacking = true;
+        }
+        if (attacking) {
+            env += (1.05f - env) * (1.f - std::exp(-1.f / (0.002f * sr)));
+            if (env >= 1.f) { env = 1.f; attacking = false; }
+        } else {
+            env *= std::exp(-1.f / (stepLen * (0.12f + 3.9f * decay * decay)));   // ~1/8 step .. 4 steps
+        }
+        open += ((openGate ? 1.f : 0.f) - open) * (1.f - std::exp(-1.f / (0.01f * sr)));
+
+        float fc = 30.f * std::pow(600.f, cutoff) * std::pow(2.f, depth * 4.f * env);   // 30 Hz .. 18 kHz, +4 oct
+        float g = std::tan(float(M_PI) * clampf(fc, 20.f, sr * 0.45f) / sr);
+        float k = 2.f - 1.85f * res;
+        float a1 = 1.f / (1.f + g * (g + k)), a2 = g * a1, a3 = g * a2;
+        float amp = 1.f - depth * (1.f - env);                      // DEPTH 1: silent between hits
+        float in[2] = {inL, inR}, out[2];
+        for (int c = 0; c < 2; c++) {
+            float x = in[c];
+            float v3 = x - ic2[c];
+            float v1 = a1 * ic1[c] + a2 * v3;
+            float v2 = ic2[c] + a2 * ic1[c] + a3 * v3;
+            ic1[c] = 2.f * v1 - ic1[c]; ic2[c] = 2.f * v2 - ic2[c];
+            float y = mode == 0 ? v2 : mode == 1 ? v1 * std::sqrt(k) * 1.6f : x - k * v1 - v2;
+            y *= amp * (mode == 1 ? 1.f : 1.f - 0.35f * res);         // resonant LP / HP peaks run hot: trim
+            y = y / std::sqrt(1.f + 0.3f * y * y);                  // soft saturation tames resonant peaks
+            out[c] = y + (x - y) * open;
+        }
+        oL = out[0]; oR = out[1];
+    }
+};
+
+// ---------------------------------------------------------------------------------------------
 // WARP DELAY: clock-locked stereo delay. Its feedback is pitch-shifted by WARP (semitones per
 // repeat), darkened by TONE, soft-clipped, and either goes straight back in or (ROUTE) loops
-// through STRETCH and ROBOT first. Only steps whose throw buttons are lit are fed in.
+// through ROBOT and PULSE first. Only steps whose throw buttons are lit are fed in.
 struct PitchShift {   // two crossfaded taps sweeping a 60 ms window
     std::vector<float> b; int w = 0, n = 0; float ph = 0.f;
     float process(float x, float ratio, float sr) {
@@ -322,7 +383,7 @@ struct WarpDelay {
     float wetL = 0.f, wetR = 0.f;   // last read, for this sample
     // Read the delay (call first each sample), and build the feedback signal. The loop can't run
     // away: feedback tops out at 85%, a low cut stops bass building up, and a level limiter rides
-    // the feedback down whenever the repeats get loud (e.g. when looped through STRETCH/ROBOT).
+    // the feedback down whenever the repeats get loud (e.g. when looped through ROBOT/PULSE).
     void read(float sr, float targetTime, float fdbk, float warpSemis, float tone, float& fbL, float& fbR) {
         if (buf.n == 0) buf.init((int)(sr * 4.1f));
         time += (clampf(targetTime, 0.01f, 4.f) - time) * 0.0002f;   // slow glide: no pitchy zips on time changes
