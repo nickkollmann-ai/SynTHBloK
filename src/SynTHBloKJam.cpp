@@ -84,7 +84,7 @@ struct SynTHBloKJam : Module {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
         configParam(LEN_PARAM, 1.f, 8.f, 8.f, "Pattern length (steps)");
         configParam(PAT_PARAM, 1.f, 8.f, 1.f, "Pattern");
-        configParam(PAGE_PARAM, 1.f, 6.f, 3.f, "JAM matrix page (must match the JAM)");
+        configParam(PAGE_PARAM, 1.f, 6.f, 1.f, "JAM matrix page (must match the JAM)");
         configParam(OFFC_PARAM, 0.f, 127.f, 0.f, "LED colour: empty step");
         configParam(ONC_PARAM, 0.f, 127.f, 127.f, "LED colour: active step");
         configParam(HEADC_PARAM, 0.f, 127.f, 30.f, "LED colour: playhead over empty step");
