@@ -32,6 +32,13 @@ enum JamButtonCC {
 static const int kBtnCC[] = {CC_SONG, CC_CLEAR, CC_DUPLICATE, CC_UP, CC_LEFT, CC_RIGHT, CC_DOWN,
                              CC_PLAY, CC_REC, CC_PREV, CC_NEXT, CC_TEMPO, CC_GRID, CC_SOLO, CC_MUTE};
 static const int kNumBtn = sizeof(kBtnCC) / sizeof(kBtnCC[0]);
+// "JAM Template 1 Live" (the Ableton template) sends the bottom row as Mackie notes instead:
+// {note, the CC it stands for}. Its grid sits on page 1 (notes 0-63), so these never clash there.
+static const int kBtnNote[][2] = {{91, CC_PREV}, {92, CC_NEXT}, {93, CC_TEMPO}, {94, CC_PLAY}, {95, CC_REC}};
+static int btnNoteFor(int cc) {
+    for (auto& n : kBtnNote) if (n[1] == cc) return n[0];
+    return -1;
+}
 // JAM knob: turning sends CC 42..45 (one per MST/GRP/IN1/CUE page), push sends CC 46.
 // The JAM's level meter lights follow the same CC, so sending the value back shows it there.
 static const int kKnobFirstCC = 42, kKnobLastCC = 45, kKnobPushCC = 46;
@@ -158,6 +165,7 @@ struct SynTHBloKJam : Module {
         for (int r = 0; r < 8; r++) for (int c = 0; c < 8; c++) sendNote(padNote(r, c), 0);
         for (int i = 0; i < 8; i++) { sendCC(i, 0); sendCC(8 + i, 0); sendCC(48 + 8 * stripPage + i, 0); }
         for (int i = 0; i < kNumBtn; i++) sendCC(kBtnCC[i], 0);
+        for (auto& n : kBtnNote) if (n[0] > padNote(0, 7)) sendNote(n[0], 0);
         for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
     }
     void onRemove(const RemoveEvent& e) override { clearLeds(); }
@@ -214,7 +222,13 @@ struct SynTHBloKJam : Module {
         else if (idx < 80) sendCC(48 + 8 * stripPage + (idx - 72), d);
         else if (idx < 88) sendCC(8 + (idx - 80), d);
         else if (idx == kKnobLed) sendCC(knobCC, d);
-        else sendCC(kBtnCC[idx - 88], d);
+        else {
+            int cc = kBtnCC[idx - 88];
+            sendCC(cc, d);
+            // Same light for the Template 1 Live note, unless that note is a pad on this matrix page.
+            int note = btnNoteFor(cc);
+            if (note >= 0 && note > padNote(0, 7)) sendNote(note, d);
+        }
     }
 
     void process(const ProcessArgs& args) override {
@@ -231,13 +245,16 @@ struct SynTHBloKJam : Module {
                     }
                     continue;
                 }
-                for (int r = 0; r < 8; r++) for (int c = 0; c < 8; c++)
+                bool pad = false;
+                for (int r = 0; r < 8 && !pad; r++) for (int c = 0; c < 8; c++)
                     if (padNote(r, c) == a) {
                         if (muteHeld) mute[r] = !mute[r];
                         else if (soloHeld) solo[r] = !solo[r];
                         else togglePad(r, c);
-                        r = 8; break;
+                        pad = true; break;
                     }
+                if (!pad)
+                    for (auto& n : kBtnNote) if (n[0] == a) jamButton(n[1], b);
             } else if (st == 0xB0) {
                 bool isBtn = false;
                 for (int i = 0; i < kNumBtn; i++) if (kBtnCC[i] == a) isBtn = true;
