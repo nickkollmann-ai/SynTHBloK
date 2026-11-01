@@ -57,7 +57,8 @@ struct SynTHBloKGrainForge : Module {
         const std::vector<std::string> offOn = {"Off", "On"};
         configSwitch(GL_ON_PARAM, 0.f, 1.f, 1.f, "GLITCH", offOn);
         configParam(GL_CHANCE_PARAM, 0.f, 1.f, 0.2f, "Glitch chance per step", "%", 0.f, 100.f);
-        configParam(GL_ROLL_PARAM, 0.f, 1.f, 0.4f, "Roll size (1/1, 1/2, 1/4, 1/8 step, random)");
+        configSwitch(GL_ROLL_PARAM, 0.f, kRollCount - 1, 4.f, "Roll size",
+                     std::vector<std::string>(kRollName, kRollName + kRollCount));
         configParam(GL_REV_PARAM, 0.f, 1.f, 0.2f, "Reverse amount", "%", 0.f, 100.f);
         configParam(GL_STOP_PARAM, 0.f, 1.f, 0.1f, "Tape-stop amount", "%", 0.f, 100.f);
         configParam(GL_CRUSH_PARAM, 0.f, 1.f, 0.f, "Crush (bits + sample rate)", "%", 0.f, 100.f);
@@ -76,10 +77,11 @@ struct SynTHBloKGrainForge : Module {
         configSwitch(RB_CHORD_PARAM, 0.f, 7.f, 3.f, "Robot chord", {"Harmonics", "Fifth", "Major", "Minor", "Sus4", "Major 7", "Minor 7", "Cluster"});
         configParam(RB_VOWEL_PARAM, 0.f, 1.f, 0.5f, "Vowel (A - E - I - O - U)");
         configParam(RB_RING_PARAM, 0.f, 1.f, 0.05f, "Ring-mod", "%", 0.f, 100.f);
-        configParam(RB_Q_PARAM, 0.f, 1.f, 0.55f, "Resonance", "%", 0.f, 100.f);
+        configParam(RB_Q_PARAM, 0.f, 1.f, 0.55f, "Resonance (vowel sharpness)", "%", 0.f, 100.f);
         configParam(RB_MIX_PARAM, 0.f, 1.f, 0.25f, "Robot mix", "%", 0.f, 100.f);
         configSwitch(DL_ON_PARAM, 0.f, 1.f, 1.f, "WARP DELAY", offOn);
-        configSwitch(DL_TIME_PARAM, 0.f, 6.f, 2.f, "Delay time", {"1/16", "1/8", "3/16", "1/4", "3/8", "1/2", "1 bar"});
+        configSwitch(DL_TIME_PARAM, 0.f, kDelayCount - 1, 8.f, "Delay time",
+                     std::vector<std::string>(kDelayName, kDelayName + kDelayCount));
         configParam(DL_FDBK_PARAM, 0.f, 1.f, 0.4f, "Feedback", "%", 0.f, 100.f);
         configParam(DL_WARP_PARAM, -12.f, 12.f, 0.f, "Warp (pitch shift per repeat)", " st");
         configParam(DL_ROUTE_PARAM, 0.f, 1.f, 0.3f, "Route repeats through STRETCH + ROBOT", "%", 0.f, 100.f);
@@ -105,6 +107,30 @@ struct SynTHBloKGrainForge : Module {
     static int throwParam(int i) { return i < 8 ? DL_STEP_PARAM + i : DL_STEP2_PARAM + (i - 8); }
 
     void onReset() override { step = -1; }
+
+    // Patches saved before the 13-slot TIME switch and 11-slot ROLL switch stored the old layouts:
+    // TIME as an index into 7 slots, ROLL as a 0..1 knob split into 5 zones.
+    json_t* dataToJson() override {
+        json_t* root = json_object();
+        json_object_set_new(root, "v2", json_true());
+        return root;
+    }
+    void fromJson(json_t* rootJ) override {   // old patches have no "data" block, so dataFromJson never runs for them
+        Module::fromJson(rootJ);
+        json_t* d = json_object_get(rootJ, "data");
+        if (d && json_object_get(d, "v2")) return;
+        int old = clamp((int)std::round(params[DL_TIME_PARAM].getValue()), 0, 6);
+        params[DL_TIME_PARAM].setValue((float)kDelayOldIndex[old]);
+        // the old ROLL value was loaded into the new switch's range, so read it from the patch itself
+        float roll = 0.4f;
+        json_t* ps = json_object_get(rootJ, "params");
+        for (size_t i = 0; ps && i < json_array_size(ps); i++) {
+            json_t* p = json_array_get(ps, i);
+            if (json_integer_value(json_object_get(p, "id")) == GL_ROLL_PARAM)
+                roll = (float)json_number_value(json_object_get(p, "value"));
+        }
+        params[GL_ROLL_PARAM].setValue((float)kRollOldIndex[clamp((int)(roll * 5.f), 0, 4)]);
+    }
 
     void process(const ProcessArgs& args) override {
         const float sr = args.sampleRate;
@@ -143,10 +169,10 @@ struct SynTHBloKGrainForge : Module {
         // Every stage keeps running so switching it on is seamless; ON crossfades it in.
         // ---- GLITCH ----
         if (edge || force) {
-            glitch.trigger(stepSec * sr, params[GL_CHANCE_PARAM].getValue(), params[GL_ROLL_PARAM].getValue(),
+            glitch.trigger(stepSec * sr, params[GL_CHANCE_PARAM].getValue(), slot(GL_ROLL_PARAM),
                            params[GL_REV_PARAM].getValue(), params[GL_STOP_PARAM].getValue(), force);
             static const char* names[4] = {"-", "ROLL", "REVERSE", "TAPE STOP"};
-            glitchEvent = glitch.ev == Glitch::ROLL ? "ROLL 1/" + std::to_string(glitch.rollDiv) : names[glitch.ev];
+            glitchEvent = glitch.ev == Glitch::ROLL ? std::string("ROLL ") + kRollName[glitch.rollDiv] : names[glitch.ev];
         }
         float pL, pR;
         glitch.process(inL, inR, sr, sm[GL_CRUSH_PARAM], pL, pR);
@@ -156,7 +182,7 @@ struct SynTHBloKGrainForge : Module {
         // ---- WARP DELAY read (its feedback may loop through STRETCH and ROBOT) ----
         float fbL = 0.f, fbR = 0.f;
         float route = sm[DL_ROUTE_PARAM], dlOn = sm[DL_ON_PARAM];
-        delay.read(sr, kDelaySteps[clamp(slot(DL_TIME_PARAM), 0, 6)] * stepSec, sm[DL_FDBK_PARAM] * dlOn,
+        delay.read(sr, kDelaySteps[clamp(slot(DL_TIME_PARAM), 0, kDelayCount - 1)] * stepSec, sm[DL_FDBK_PARAM] * dlOn,
                    sm[DL_WARP_PARAM], sm[DL_TONE_PARAM], fbL, fbR);
 
         // ---- STRETCH ----
@@ -350,23 +376,55 @@ struct GFStatus : TransparentWidget {
         nvgFontSize(args.vg, 8.f);
         nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 130));
         nvgText(args.vg, 6.f, H * 0.72f, sub, NULL);
-        // meter: two bars on the right half
+        // OUT L / OUT R: the same segmented dBFS bars as the MIX-24 levels display (full scale = 0 dB)
         float lv[2] = {module ? module->meterL : 0.6f, module ? module->meterR : 0.5f};
-        float mx = W * 0.55f, mw = W * 0.42f, bh = H * 0.18f;
+        static const char* nm[2] = {"L", "R"};
+        float lx = W * 0.40f, bx = W * 0.45f, bw = W * 0.38f, vx = W - 4.f, bh = H * 0.24f;
+        char buf[16];
+        nvgFontSize(args.vg, 8.f);
         for (int i = 0; i < 2; i++) {
-            float y = H * (i ? 0.58f : 0.24f);
-            nvgBeginPath(args.vg);
-            nvgRoundedRect(args.vg, mx, y, mw, bh, 1.f);
-            nvgFillColor(args.vg, nvgRGBA(40, 25, 8, 255));
-            nvgFill(args.vg);
-            float v = clamp(lv[i], 0.f, 1.f);
-            if (v > 0.f) {
-                nvgBeginPath(args.vg);
-                nvgRoundedRect(args.vg, mx, y, mw * v, bh, 1.f);
-                nvgFillColor(args.vg, v > 0.9f ? nvgRGB(0xf0, 0x40, 0x00) : nvgRGBA(255, 112, 15, 235));
-                nvgFill(args.vg);
-            }
+            float y = H * (i ? 0.56f : 0.2f);
+            nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+            nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 255));
+            nvgText(args.vg, lx, y + bh * 0.5f, nm[i], NULL);
+            bar(args, bx, y, bw, bh, lv[i], peak[i]);
+            float db = toDb(lv[i]);
+            if (db < -60.f) snprintf(buf, sizeof buf, "-inf"); else snprintf(buf, sizeof buf, "%.1f", db);
+            nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+            nvgFillColor(args.vg, db > -1.f ? nvgRGBA(255, 50, 40, 255) : nvgRGBA(255, 190, 90, 255));
+            nvgText(args.vg, vx, y + bh * 0.5f, buf, NULL);
         }
+    }
+
+    float peak[2] = {};
+    static float toDb(float v) { return v > 1e-5f ? 20.f * std::log10(v) : -120.f; }
+    // 24 segments, -48..+6 dB: light amber, amber above -9, red above -1; a peak-hold segment falls back slowly.
+    void bar(const DrawArgs& a, float x, float y, float w, float h, float lvl, float& pk) {
+        const int N = 24;
+        const float DB_LO = -48.f, DB_HI = 6.f;
+        float pos = clamp((toDb(lvl) - DB_LO) / (DB_HI - DB_LO), 0.f, 1.f);
+        pk = std::max(lvl, pk * 0.9975f);
+        float ppos = clamp((toDb(pk) - DB_LO) / (DB_HI - DB_LO), 0.f, 1.f);
+        float sw = w / N;
+        for (int i = 0; i < N; i++) {
+            float segPos = (i + 1.f) / N;
+            float segDb = DB_LO + (DB_HI - DB_LO) * segPos;
+            bool lit = segPos <= pos + 1e-4f;
+            bool pkSeg = (int)std::ceil(ppos * N) == i + 1;
+            NVGcolor c;
+            if (segDb > -1.f)      c = nvgRGBA(255, 40, 30, 255);
+            else if (segDb > -9.f) c = nvgRGBA(255, 112, 15, 255);
+            else                   c = nvgRGBA(255, 176, 60, 255);
+            if (!lit && !(pkSeg && ppos > 0.02f)) c = nvgRGBA(46, 29, 10, 255);
+            else if (!lit) c.a = 0.5f;
+            nvgBeginPath(a.vg);
+            nvgRect(a.vg, x + i * sw + 0.4f, y, sw - 0.8f, h);
+            nvgFillColor(a.vg, c);
+            nvgFill(a.vg);
+        }
+    }
+    void onButton(const ButtonEvent& e) override {   // click resets the peak hold, like MIX-24
+        if (e.action == GLFW_PRESS && e.button == GLFW_MOUSE_BUTTON_LEFT) { peak[0] = peak[1] = 0.f; e.consume(this); }
     }
 };
 
@@ -433,7 +491,7 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
         knob(c - 9.f, 59.f, G::RB_Q_PARAM, "RES");       knob(c + 9.f, 59.f, G::RB_MIX_PARAM, "MIX");
 
         c = stage(3, G::DL_ON_PARAM, "WARP DELAY", [m]() -> std::string {
-            int t = m ? clamp(m->slot(G::DL_TIME_PARAM), 0, 6) : 2;
+            int t = m ? clamp(m->slot(G::DL_TIME_PARAM), 0, kDelayCount - 1) : 8;
             float w = m ? m->params[G::DL_WARP_PARAM].getValue() : 0.f;
             char b[24]; snprintf(b, sizeof b, "%s  %+.0f st", kDelayName[t], w);
             return b;

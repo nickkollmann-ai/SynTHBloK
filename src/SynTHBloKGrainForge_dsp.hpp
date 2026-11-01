@@ -10,6 +10,7 @@
 namespace gforge {
 
 static inline float clampf(float x, float a, float b) { return std::min(std::max(x, a), b); }
+static inline int clampi(int x, int a, int b) { return std::min(std::max(x, a), b); }
 
 struct Rng {
     uint32_t s;
@@ -40,6 +41,12 @@ static const int kPitchReverse = 7;
 //   REVERSE  the last step played backwards
 //   STOP     a tape-stop: playback slows to a halt over the step
 // then CRUSH (bit depth + sample-rate reduction) on everything.
+// ROLL slice lengths in clock steps (16ths); T = triplet. The last slot picks one at random.
+static const int kRollCount = 11;
+static const float kRollSteps[kRollCount] = {2.f, 4.f / 3.f, 1.f, 2.f / 3.f, 0.5f, 1.f / 3.f, 0.25f, 1.f / 6.f, 0.125f, 0.0625f, 0.f};
+static const char* kRollName[kRollCount] = {"1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T", "1/64", "1/64T", "1/128", "1/256", "RANDOM"};
+static const int kRollOldIndex[5] = {2, 4, 6, 8, 10};   // the old 5-zone ROLL knob -> this list
+
 struct Glitch {
     enum Ev { NONE, ROLL, REVERSE, STOP };
     StereoBuf buf;
@@ -50,19 +57,20 @@ struct Glitch {
     int sliceLen = 1, evLen = 1, age = 0, rollDiv = 1;
     float holdL = 0.f, holdR = 0.f, holdCount = 0.f;
 
-    // stepLen in samples; knobs 0..1. force = GLITCH trigger (always fires).
-    void trigger(float stepLen, float chance, float roll, float rev, float stop, bool force) {
+    // stepLen in samples; roll = index into kRollName; knobs 0..1. force = GLITCH trigger (always fires).
+    void trigger(float stepLen, float chance, int roll, float rev, float stop, bool force) {
         if (buf.n == 0) return;
+        if (!force && ev != NONE && evLen > stepLen * 1.01f) return;   // let a long (1/8) roll finish
         if (!force && rng.next() >= chance) { ev = NONE; return; }
         float wRoll = 1.f, wRev = rev * 2.f, wStop = stop * 2.f;
         float pick = rng.next() * (wRoll + wRev + wStop);
         ev = pick < wRoll ? ROLL : pick < wRoll + wRev ? REVERSE : STOP;
-        evLen = std::max(64, (int)stepLen);
         age = 0;
-        int slot = std::min(4, (int)(roll * 5.f));
-        static const int divs[4] = {1, 2, 4, 8};
-        rollDiv = slot < 4 ? divs[slot] : divs[(int)(rng.next() * 4.f) % 4];
-        sliceLen = std::max(64, (int)(stepLen / rollDiv));
+        rollDiv = clampi(roll, 0, kRollCount - 1);
+        if (rollDiv == kRollCount - 1) rollDiv = 1 + (int)(rng.next() * 8.f) % 8;   // RANDOM: 1/8T .. 1/128
+        sliceLen = std::max(64, (int)(stepLen * kRollSteps[rollDiv]));
+        // a roll longer than a step repeats twice; everything else lasts one step
+        evLen = std::max(64, ev == ROLL ? std::max((int)stepLen, 2 * sliceLen) : (int)stepLen);
         start = buf.w - 1;       // ROLL captures live from here; REVERSE / STOP read back from here
         pos = start;
         speed = 1.f;
@@ -168,8 +176,8 @@ struct Stretch {
 };
 
 // ---------------------------------------------------------------------------------------------
-// ROBOT: a chord of tuned resonators (root + chord intervals) rings on the input, then a
-// three-formant vowel filter (A-E-I-O-U morph) shapes it into a voice, plus ring-mod at the root.
+// ROBOT: a vocoder whose carrier is a saw chord (root + chord intervals), then a three-formant
+// vowel filter (A-E-I-O-U morph) shapes it into a voice, plus ring-mod at the root.
 struct Svf {
     float ic1 = 0.f, ic2 = 0.f, a1 = 0.f, a2 = 0.f, a3 = 0.f, k = 1.f;
     void set(float fc, float sr, float kk) {
@@ -192,34 +200,86 @@ static const float kChord[8][4] = {
 // Vowel formants F1..F3 in Hz: A E I O U.
 static const float kVowel[5][3] = {{800, 1150, 2900}, {400, 1600, 2700}, {350, 2300, 3000}, {450, 800, 2830}, {325, 700, 2530}};
 
+// A 14-band vocoder: the input's band levels shape a buzzing saw chord (ROOT + CHORD), so the
+// input "speaks" through the chord. Its hiss is mixed back in for consonants, and the vowel
+// formants move a little with the input level, so the voice "talks".
+static inline float blep(float t, float dt) {
+    if (t < dt) { t /= dt; return t + t - t * t - 1.f; }
+    if (t > 1.f - dt) { t = (t - 1.f) / dt; return t * t + t + t + 1.f; }
+    return 0.f;
+}
+
 struct Robot {
-    Svf resL[4], resR[4], fL[3], fR[3];
-    float ph = 0.f;
+    static const int NB = 14;
+    struct Ch {
+        Svf ana[NB], syn[NB], form[3];
+        float env[NB] = {}, ph[4] = {}, hp1 = 0.f, hp2 = 0.f;
+    } ch[2];
+    float bandK[NB] = {}, bandGain[NB] = {};
+    float lastSr = 0.f, atk = 0.f, rel = 0.f, talkEnv = 0.f, talkC = 0.f, hpC = 0.f, ringPh = 0.f;
     int count = 0;
-    // rootSemis 0..24 above A1 (55 Hz); chord 0..7; vowel/ring/q 0..1.
+
+    void setup(float sr) {
+        lastSr = sr;
+        for (int b = 0; b < NB; b++) {
+            float fc = 120.f * std::pow(7000.f / 120.f, b / float(NB - 1));
+            bandK[b] = 0.28f;
+            bandGain[b] = 1.f + 0.6f * b / float(NB - 1);           // a little presence lift up top
+            for (Ch& c : ch) { c.ana[b].set(fc, sr, bandK[b]); c.syn[b].set(fc, sr, bandK[b]); }
+        }
+        atk = 1.f - std::exp(-1.f / (0.002f * sr));
+        rel = 1.f - std::exp(-1.f / (0.03f * sr));
+        talkC = 1.f - std::exp(-1.f / (0.06f * sr));
+        hpC = 1.f - std::exp(-2.f * float(M_PI) * 4000.f / sr);
+    }
+
+    // rootSemis 0..24 above A1 (55 Hz); chord 0..7; vowel/ring/q 0..1 (q = formant sharpness).
     void process(float inL, float inR, float sr, float rootSemis, int chord, float vowel, float ring, float q,
                  float& oL, float& oR) {
+        if (sr != lastSr) setup(sr);
         float root = 55.f * std::pow(2.f, rootSemis / 12.f);
-        if ((count++ & 31) == 0) {                                 // retune every 32 samples (inputs are smoothed)
-            float kr = 2.f - 1.85f * q;                            // gentler peak at full RES
-            for (int i = 0; i < 4; i++) { resL[i].set(root * kChord[chord][i], sr, kr); resR[i].set(root * kChord[chord][i] * 1.003f, sr, kr); }
-            float v = clampf(vowel, 0.f, 1.f) * 4.f;
+        // syllables: louder input opens the vowel a little
+        float lvl = 0.5f * (std::fabs(inL) + std::fabs(inR));
+        talkEnv += (lvl - talkEnv) * talkC;
+        if ((count++ & 31) == 0) {                                 // retune formants every 32 samples
+            float v = clampf(vowel + 0.22f * std::tanh(talkEnv * 3.f) - 0.06f, 0.f, 1.f) * 4.f;
             int a = std::min(3, (int)v); float f = v - a;
+            float fk = 0.7f - 0.55f * q;                           // RES sharpens the vowel
             for (int i = 0; i < 3; i++) {
                 float fc = kVowel[a][i] + (kVowel[a + 1][i] - kVowel[a][i]) * f;
-                fL[i].set(fc, sr, 0.5f); fR[i].set(fc * 1.01f, sr, 0.5f);   // wider, softer formants
+                ch[0].form[i].set(fc, sr, fk); ch[1].form[i].set(fc * 1.01f, sr, fk);
             }
         }
-        float rl = 0.f, rr = 0.f;
-        for (int i = 0; i < 4; i++) { rl += resL[i].bp(inL) * resL[i].k; rr += resR[i].bp(inR) * resR[i].k; }
-        rl *= 0.6f; rr *= 0.6f;
-        static const float fg[3] = {1.2f, 0.85f, 0.6f};
-        float vl = 0.f, vr = 0.f;
-        for (int i = 0; i < 3; i++) { vl += fL[i].bp(rl) * fg[i]; vr += fR[i].bp(rr) * fg[i]; }
-        ph += root / sr; if (ph >= 1.f) ph -= 1.f;
-        float car = std::sin(2.f * float(M_PI) * ph);
-        oL = vl * (1.f - ring) + vl * car * ring * 1.6f;
-        oR = vr * (1.f - ring) + vr * car * ring * 1.6f;
+        static const float fg[3] = {1.f, 0.8f, 0.55f};
+        float in[2] = {inL, inR}, out[2];
+        for (int c = 0; c < 2; c++) {
+            Ch& h = ch[c];
+            // carrier: four saws on the chord notes, right side detuned slightly for width
+            float car = 0.f;
+            for (int i = 0; i < 4; i++) {
+                float dt = root * kChord[chord][i] * (c ? 1.004f : 1.f) / sr;
+                h.ph[i] += dt; if (h.ph[i] >= 1.f) h.ph[i] -= 1.f;
+                car += (2.f * h.ph[i] - 1.f - blep(h.ph[i], dt)) * (i ? 0.7f : 1.f);
+            }
+            car *= 0.35f;
+            float voc = 0.f;
+            for (int b = 0; b < NB; b++) {
+                float a = std::fabs(h.ana[b].bp(in[c]) * bandK[b]);
+                h.env[b] += (a - h.env[b]) * (a > h.env[b] ? atk : rel);
+                voc += h.syn[b].bp(car) * bandK[b] * h.env[b] * bandGain[b];
+            }
+            voc *= 3.5f;
+            float fo = 0.f;
+            for (int i = 0; i < 3; i++) fo += h.form[i].bp(voc) * h.form[i].k * fg[i];
+            float y = voc * 0.45f + fo * (1.2f + 1.5f * q);
+            // consonants: the input's hiss above ~4 kHz goes straight through
+            h.hp1 += (in[c] - h.hp1) * hpC; h.hp2 += (h.hp1 - h.hp2) * hpC;
+            y += (in[c] - h.hp2) * 0.25f;
+            out[c] = y;
+        }
+        ringPh += root / sr; if (ringPh >= 1.f) ringPh -= 1.f;
+        float rm = 1.f - ring + ring * 1.6f * std::sin(2.f * float(M_PI) * ringPh);
+        oL = out[0] * rm; oR = out[1] * rm;
     }
 };
 
@@ -248,8 +308,11 @@ struct PitchShift {   // two crossfaded taps sweeping a 60 ms window
     }
 };
 
-static const float kDelaySteps[7] = {1.f, 2.f, 3.f, 4.f, 6.f, 8.f, 16.f};   // in clock steps (16ths)
-static const char* kDelayName[7] = {"1/16", "1/8", "3/16", "1/4", "3/8", "1/2", "1 BAR"};
+// in clock steps (16ths); T = triplet, D = dotted
+static const int kDelayCount = 13;
+static const float kDelaySteps[kDelayCount] = {0.25f, 0.5f, 2.f / 3.f, 1.f, 4.f / 3.f, 1.5f, 2.f, 8.f / 3.f, 3.f, 4.f, 6.f, 8.f, 16.f};
+static const char* kDelayName[kDelayCount] = {"1/64", "1/32", "1/16T", "1/16", "1/8T", "1/16D", "1/8", "1/4T", "1/8D", "1/4", "1/4D", "1/2", "1 BAR"};
+static const int kDelayOldIndex[7] = {3, 6, 8, 9, 10, 11, 12};   // the old 7-slot TIME switch -> this list
 
 struct WarpDelay {
     StereoBuf buf;
