@@ -83,7 +83,7 @@ struct SynTHBloKGrainForge : Module {
     };
     enum InputIds { IN_L_INPUT, IN_R_INPUT, CLOCK_INPUT, RESET_INPUT, OPEN_INPUT, GLITCH_INPUT, GATE_INPUT, NUM_INPUTS };
     enum OutputIds { OUT_L_OUTPUT, OUT_R_OUTPUT, NUM_OUTPUTS };
-    enum LightIds { NUM_LIGHTS };
+    enum LightIds { ENUMS(ADSR_LED, 4 * 3), NUM_LIGHTS };
 
     Shuffle shuffle;
     Glitch glitch;
@@ -95,6 +95,20 @@ struct SynTHBloKGrainForge : Module {
     float fltGate = 0.f;               // samples left before the envelope's release
     float fltEnvOut = 0.f;             // for the SEQ screen
     float envS1 = 0.f, envS2 = 0.f;    // envelope corner smoothing
+    float stageLvl[4] = {};            // ADSR LED activity, falls off over 150 ms
+    // the main synth's LED ramp: knob low = amber/yellow .. high = deep red
+    static void ledRamp(float w, float& r, float& g, float& b) {
+        static const float C[10][3] = {
+            {1.00f, 0.72f, 0.00f}, {1.00f, 0.55f, 0.00f}, {1.00f, 0.38f, 0.00f},
+            {1.00f, 0.20f, 0.00f}, {1.00f, 0.04f, 0.00f}, {0.70f, 0.00f, 0.00f},
+            {0.28f, 0.00f, 0.00f}, {0.16f, 0.00f, 0.00f}, {0.08f, 0.00f, 0.00f}, {0.03f, 0.00f, 0.00f}};
+        float p = clamp(w, 0.f, 1.f) * 9.f;
+        int i = std::min((int)p, 8);
+        float f = p - (float)i;
+        r = C[i][0] + (C[i + 1][0] - C[i][0]) * f;
+        g = C[i][1] + (C[i + 1][1] - C[i][1]) * f;
+        b = C[i][2] + (C[i + 1][2] - C[i][2]) * f;
+    }
     dsp::SchmittTrigger clkTrig, rstTrig, glitchTrig, gateTrig;
 
     // ---- filter SEQ: 16 steps (on + height); height = a cutoff offset snapped to ROBOT's key, so with
@@ -553,6 +567,18 @@ struct SynTHBloKGrainForge : Module {
         float ec = 1.f - std::exp(-1.f / (0.0015f * sr));
         envS1 += (envRaw - envS1) * ec; envS2 += (envS1 - envS2) * ec;
         fltEnvOut = envS2;
+        {   // stage LEDs, as on the main synth: colour follows the knob, the active stage flashes and fades over 150 ms
+            int st = fltEnv.st == Adsr::ATK ? 0 : fltEnv.st == Adsr::REL ? 3
+                   : fltEnv.st == Adsr::DEC ? (std::fabs(fltEnv.v - sm[FLT_SUS_PARAM]) < 0.02f ? 2 : 1) : -1;
+            static const int knobs[4] = {FLT_ATK_PARAM, FLT_DEC_PARAM, FLT_SUS_PARAM, FLT_REL_PARAM};
+            for (int k = 0; k < 4; k++) {
+                stageLvl[k] = std::max(k == st ? 1.f : 0.f, stageLvl[k] - args.sampleTime / 0.15f);
+                float r, g, b; ledRamp(params[knobs[k]].getValue(), r, g, b);
+                lights[ADSR_LED + k * 3 + 0].setBrightness(r * stageLvl[k]);
+                lights[ADSR_LED + k * 3 + 1].setBrightness(g * stageLvl[k]);
+                lights[ADSR_LED + k * 3 + 2].setBrightness(b * stageLvl[k]);
+            }
+        }
         // BYP takes the envelope and SEQ off the filter (smoothed); the filter itself stays as set
         float env = envS2 * (1.f - sm[FLT_BYPASS_PARAM]);
         // SEQ: each step's note moves the cutoff (a quick 3 ms slew, so jumps never click)
@@ -988,34 +1014,10 @@ struct GFPresetBar : TransparentWidget {
     }
 };
 
-// Four tiny LEDs under A D S R: the envelope's current stage lights, as bright as the envelope.
-struct GFAdsrLeds : TransparentWidget {
-    SynTHBloKGrainForge* module = NULL;
-    float pitch = 0.f;   // px between LEDs
-    void drawLayer(const DrawArgs& args, int layer) override {
-        if (layer != 1) return;
-        int lit = -1; float v = 0.f;
-        if (module) {
-            const Adsr& e = module->fltEnv;
-            float sus = module->params[SynTHBloKGrainForge::FLT_SUS_PARAM].getValue();
-            v = clamp(e.v, 0.f, 1.f);
-            lit = e.st == Adsr::ATK ? 0 : e.st == Adsr::DEC ? (std::fabs(e.v - sus) < 0.02f ? 2 : 1) : e.st == Adsr::REL ? 3 : -1;
-        }
-        float r = box.size.y * 0.5f;
-        for (int i = 0; i < 4; i++) {
-            float b = i == lit ? 0.35f + 0.65f * std::max(v, 0.3f) : 0.f;
-            nvgBeginPath(args.vg);
-            nvgCircle(args.vg, r + i * pitch, r, r);
-            nvgFillColor(args.vg, b > 0.f ? nvgRGBA(255, 112, 15, (int)(255 * b)) : nvgRGBA(60, 35, 10, 255));
-            nvgFill(args.vg);
-            if (b > 0.f) {   // soft glow
-                nvgBeginPath(args.vg);
-                nvgCircle(args.vg, r + i * pitch, r, r * 2.2f);
-                nvgFillColor(args.vg, nvgRGBA(255, 112, 15, (int)(60 * b)));
-                nvgFill(args.vg);
-            }
-        }
-    }
+// extra-small RGB LED, same as the main SynTHBloK synth's
+template <typename TBase>
+struct GFMicroLight : TinyLight<TBase> {
+    GFMicroLight() { this->box.size = mm2px(Vec(0.9f, 0.9f)); }
 };
 
 // Filter SEQ screen: left, the TRIG source (click = next, right-click = menu); right, 16 bars.
@@ -1263,9 +1265,8 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
             addParam(createParamCentered<Trimpot>(mm2px(Vec(x, 98.5f)), module, adsr[i]));
             label(x - 4.6f, 98.5f, an[i]);
         }
-        GFAdsrLeds* leds = createWidget<GFAdsrLeds>(mm2px(Vec(120.f - 0.6f, 102.6f)));   // under the trimpots
-        leds->box.size = mm2px(Vec(31.2f, 1.2f)); leds->pitch = mm2px(10.f); leds->module = module;
-        addChild(leds);
+        for (int i = 0; i < 4; i++)   // stage LEDs under the trimpots
+            addChild(createLightCentered<GFMicroLight<RedGreenBlueLight>>(mm2px(Vec(120.f + i * 10.f, 103.2f)), module, G::ADSR_LED + i * 3));
         addParam(createParamCentered<Trimpot>(mm2px(Vec(161.f, 98.5f)), module, G::FLT_AMP_PARAM));   // env -> level
         label(156.2f, 98.5f, "V");
         midKnob(174.f, 86.5f, G::DRYWET_PARAM, "DRY / WET");
