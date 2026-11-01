@@ -2,7 +2,8 @@
 // SynTHBloK MATRIX-DUO  (LEAD + BASS: two dual-oscillator mono synths with their own note sequencer)
 //  Pulled out of MATRIX FORGE. Each synth: wave morph, OSC 2 tune, hard sync, FM, sub, 24 dB filter,
 //  ADSR, drive, glide. The grid is 8 steps x 8 notes of the KEY + SCALE (bottom row = root, top = its
-//  octave) for the synth LEAD | BASS picks: a pad sets that step's note, again clears it.
+//  octave) for the synth LEAD | BASS picks: a pad adds that note to the step, again removes it;
+//  several notes on a step play as a chord (up to 4 voices per synth).
 //  8 patterns, 1..8 steps. CLOCK = 16th notes; unpatched, the internal clock runs at the BPM knob.
 //  OUT L / R = both synths through FORGE FX (GRAIN-FORGE's whole FX chain, condensed into one OLED and
 //  small knobs on the right) and MASTER.
@@ -118,11 +119,13 @@ struct SynTHBloKDuo : Module {
     enum LightIds { ENUMS(ADSR_LIGHT, 4), NUM_LIGHTS };
     static const int kFltSm = FLT_DRYWET_PARAM - FLT_CUT_PARAM + 1;
 
-    int8_t note[8][2][8];         // [pattern][LEAD, BASS][step]: scale degree 0..7, -1 = rest
+    uint8_t note[8][2][8];        // [pattern][LEAD, BASS][step]: bit d = scale degree d (a chord), 0 = rest
     bool mute[2] = {};
-    DualOscVoice eng[2];
-    int curNote[2] = {-1, -1};    // MIDI note each synth last played (CV out, display)
+    static const int kVoices = 4; // a step plays its lowest 4 notes
+    DualOscVoice eng[2][kVoices];
+    int curNote[2] = {-1, -1};    // MIDI note each synth last played, the chord's lowest (CV out, display)
     bool tied[2] = {};
+    float chordGain[2] = {1.f, 1.f}, chordGainSm[2] = {1.f, 1.f};
 
     int step = -1;
     bool running = true, pendingReset = false;
@@ -247,19 +250,17 @@ struct SynTHBloKDuo : Module {
         clearAll();
         // Pattern 1 starts with a LEAD riff and a BASS line, so the synths sound before you program them.
         static const int8_t defNote[2][8] = {{4, -1, 2, 4, -1, 7, 5, 2}, {0, -1, -1, 0, -1, -1, 3, 4}};
-        for (int e = 0; e < 2; e++) for (int c = 0; c < 8; c++) note[0][e][c] = defNote[e][c];
+        for (int e = 0; e < 2; e++) for (int c = 0; c < 8; c++) note[0][e][c] = defNote[e][c] < 0 ? 0 : 1 << defNote[e][c];
     }
 
-    void clearAll() { for (int p = 0; p < 8; p++) for (int e = 0; e < 2; e++) for (int c = 0; c < 8; c++) note[p][e][c] = -1; }
+    void clearAll() { for (int p = 0; p < 8; p++) for (int e = 0; e < 2; e++) for (int c = 0; c < 8; c++) note[p][e][c] = 0; }
+    bool gateOn(int e) { for (auto& v : eng[e]) if (v.gateOn()) return true; return false; }
     int curPat() { return clamp((int)params[PAT_PARAM].getValue(), 1, 8) - 1; }
     int view() { return clamp((int)params[VIEW_PARAM].getValue(), 0, 1); }
     int engParam(int e, int p) { return (e ? BASS_PARAM : LEAD_PARAM) + p; }
-    // Pad (r, c): the note 7 - r at step c of the shown synth.
-    bool padOn(int r, int c) { return note[curPat()][view()][c] == 7 - r; }
-    void togglePad(int r, int c) {
-        int8_t& n = note[curPat()][view()][c];
-        n = n == 7 - r ? -1 : 7 - r;
-    }
+    // Pad (r, c): the note 7 - r at step c of the shown synth; several per step make a chord.
+    bool padOn(int r, int c) { return note[curPat()][view()][c] >> (7 - r) & 1; }
+    void togglePad(int r, int c) { note[curPat()][view()][c] ^= 1 << (7 - r); }
 
     // MIDI note of scale degree deg (0..7) for LEAD (from C4) or BASS (from C2).
     int midiNote(int e, int deg) {
@@ -270,15 +271,22 @@ struct SynTHBloKDuo : Module {
     }
 
     // LEAD (e = 0) / BASS (1) on a new step; true when it played a note.
+    // A chord's notes go to voices 0, 1, .. from the lowest, so a single note always lands on voice 0 (glide, tie).
     bool playEngine(int e, float stepSec) {
-        int deg = note[curPat()][e][step];
-        if (deg < 0 || !trackOn(e)) { tied[e] = false; return false; }
-        trigPulse[7 - clamp((int)deg, 0, 7)].trigger(0.01f);
-        int n = midiNote(e, deg);
-        curNote[e] = n;
+        int mask = note[curPat()][e][step];
+        if (!mask || !trackOn(e)) { tied[e] = false; return false; }
         float gate = params[engParam(e, DO_GATE)].getValue();
         bool tie = gate >= 0.99f;
-        eng[e].noteOn(440.f * std::pow(2.f, (n - 69) / 12.f), tie ? stepSec * 1.1f : std::max(0.01f, gate * stepSec), tie && tied[e]);
+        int k = 0;
+        for (int deg = 0; deg < 8 && k < kVoices; deg++) {
+            if (!(mask >> deg & 1)) continue;
+            trigPulse[7 - deg].trigger(0.01f);
+            int n = midiNote(e, deg);
+            if (k == 0) curNote[e] = n;
+            eng[e][k].noteOn(440.f * std::pow(2.f, (n - 69) / 12.f), tie ? stepSec * 1.1f : std::max(0.01f, gate * stepSec), tie && tied[e]);
+            k++;
+        }
+        chordGain[e] = 1.f / std::sqrt((float)k);
         tied[e] = tie;
         return true;
     }
@@ -359,7 +367,7 @@ struct SynTHBloKDuo : Module {
         switch (cc) {
             // CLEAR: the shown synth's notes in this pattern; held for a second, every pattern.
             case CC_CLEAR:
-                for (int c = 0; c < 8; c++) note[curPat()][view()][c] = -1;
+                for (int c = 0; c < 8; c++) note[curPat()][view()][c] = 0;
                 clearHeld = true; clearHeldT = 0.f; clearAllDone = false;
                 break;
             case CC_DUPLICATE: copyToNext(); break;
@@ -377,6 +385,58 @@ struct SynTHBloKDuo : Module {
             case CC_MUTE: mute[view()] = !mute[view()]; break;
         }
     }
+    // The OLED buttons on JAM CCs: SONG / 17 = FX / BYP, 18 = next JAM page, 25..34 = CLEAR, LEARN, +-5V,
+    // the five FX RNDs, THROW's RND, FREEZE, 35 / 36 = BASS / LEAD. Returns false for any other CC.
+    const int kOledCC[14] = {17, 18, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36};
+    int lastOledLed[14] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+    void toggle(Param& p) { p.setValue(p.getValue() > 0.5f ? 0.f : 1.f); }
+    bool oledButton(int cc, int b) {
+        if (cc == CC_CLEAR) return false;
+        if (cc == 25) { jamButton(CC_CLEAR, b); return true; }   // held for a second clears every pattern
+        bool known = cc == CC_SONG;
+        for (int c : kOledCC) known |= c == cc;
+        if (!known) return false;
+        if (b <= 0) return true;
+        switch (cc) {
+            case CC_SONG: toggle(params[FX_ON_PARAM]); break;
+            case 17: toggle(fx.params[SynTHBloKGrainForge::FLT_BYPASS_PARAM]); break;
+            case 18: stepParam(PAGE_PARAM, 1, 1, 6, true); break;
+            case 26: toggle(params[LEARN_PARAM]); break;
+            case 27: toggle(params[RANGE_PARAM]); break;
+            case 33: {   // THROW's RND: a fresh random throw pattern, like the panel button
+                bool on[SynTHBloKGrainForge::kThrowSteps];
+                int count = 0;
+                float density = 0.2f + 0.3f * random::uniform();
+                for (int i = 0; i < SynTHBloKGrainForge::kThrowSteps; i++) { on[i] = random::uniform() < density; count += on[i]; }
+                while (count < 2) {
+                    int i = (int)(random::uniform() * SynTHBloKGrainForge::kThrowSteps) % SynTHBloKGrainForge::kThrowSteps;
+                    if (!on[i]) { on[i] = true; count++; }
+                }
+                for (int i = 0; i < SynTHBloKGrainForge::kThrowSteps; i++) fx.params[SynTHBloKGrainForge::throwParam(i)].setValue(on[i] ? 1.f : 0.f);
+                break;
+            }
+            case 34: toggle(fx.params[SynTHBloKGrainForge::RND_FREEZE_PARAM]); break;
+            case 35: params[VIEW_PARAM].setValue(1.f); break;
+            case 36: params[VIEW_PARAM].setValue(0.f); break;
+            default: toggle(fx.params[SynTHBloKGrainForge::RND_PARAM + (cc - 28)]); break;   // 28..32
+        }
+        return true;
+    }
+    int oledLed(int cc) {
+        auto lit = [](Param& p) { return p.getValue() > 0.5f ? 127 : 0; };
+        switch (cc) {
+            case 17: return lit(fx.params[SynTHBloKGrainForge::FLT_BYPASS_PARAM]);
+            case 18: return 127;
+            case 25: return clearHeld ? 127 : 0;
+            case 26: return lit(params[LEARN_PARAM]);
+            case 27: return lit(params[RANGE_PARAM]);
+            case 33: return 40;
+            case 34: return lit(fx.params[SynTHBloKGrainForge::RND_FREEZE_PARAM]);
+            case 35: return view() == 1 ? 127 : 0;
+            case 36: return view() == 0 ? 127 : 0;
+            default: return lit(fx.params[SynTHBloKGrainForge::RND_PARAM + (cc - 28)]);
+        }
+    }
 
     void sendNote(int n, int vel) { midi::Message m; m.bytes = {0x90, (uint8_t)n, (uint8_t)clamp(vel, 0, 127)}; midiOut.sendMessage(m); }
     void sendCC(int cc, int v) { midi::Message m; m.bytes = {0xB0, (uint8_t)cc, (uint8_t)clamp(v, 0, 127)}; midiOut.sendMessage(m); }
@@ -384,6 +444,7 @@ struct SynTHBloKDuo : Module {
         for (int r = 0; r < 8; r++) for (int c = 0; c < 8; c++) sendNote(padNote(r, c), 0);
         for (int i = 0; i < 8; i++) { sendCC(i, 0); sendCC(8 + i, 0); sendCC(48 + 8 * stripPage + i, 0); }
         for (int i = 0; i < kNumBtn; i++) sendCC(kBtnCC[i], 0);
+        for (int i = 0; i < 14; i++) { sendCC(kOledCC[i], 0); lastOledLed[i] = -1; }
         for (auto& n : kBtnNote) if (n[0] > padNote(0, 7)) sendNote(n[0], 0);
         sendCC(knobCC, 0);
         for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
@@ -401,7 +462,7 @@ struct SynTHBloKDuo : Module {
         if (idx == kKnobLed) return (int)std::round(paramQuantities[knobParam()]->getScaledValue() * 127.f);
         if (idx >= 88) {
             switch (kBtnCC[idx - 88]) {
-                case CC_SONG: return 0;
+                case CC_SONG: return params[FX_ON_PARAM].getValue() > 0.5f ? 127 : 0;   // the OLED's FX
                 case CC_PLAY: return running ? 127 : 0;
                 case CC_REC: return params[LEARN_PARAM].getValue() > 0.5f ? 127 : 0;
                 case CC_TEMPO: return resetFlash > 0.f ? 127 : 0;
@@ -415,7 +476,7 @@ struct SynTHBloKDuo : Module {
         if (matchColors) {
             if (idx < 64) {
                 int r = idx / 8, c = idx % 8;
-                bool a = note[p][v][c] == 7 - r, root = r == 0 || r == 7;
+                bool a = note[p][v][c] >> (7 - r) & 1, root = r == 0 || r == 7;
                 if (!trackOn(v)) return a ? kJamDim[p] : 0;
                 if (running && step >= 0 && c == step) return a ? kJamWhite : kJamWhite - 2;
                 return a ? kJamBright[p] : root ? kJamDim[p] : 0;
@@ -429,7 +490,7 @@ struct SynTHBloKDuo : Module {
             int head = (int)params[HEADC_PARAM].getValue(), hit = (int)params[HITC_PARAM].getValue();
             if (idx < 64) {
                 int r = idx / 8, c = idx % 8;
-                bool a = note[p][v][c] == 7 - r;
+                bool a = note[p][v][c] >> (7 - r) & 1;
                 if (running && step >= 0 && c == step) return a ? hit : head;
                 return a ? on : off;
             }
@@ -470,6 +531,7 @@ struct SynTHBloKDuo : Module {
                 if (!pad)
                     for (auto& n : kBtnNote) if (n[0] == a) jamButton(n[1], b);
             } else if (st == 0xB0) {
+                if (oledButton(a, b)) continue;
                 bool isBtn = false;
                 for (int i = 0; i < kNumBtn; i++) if (kBtnCC[i] == a) isBtn = true;
                 if (isBtn) jamButton(a, b);
@@ -519,6 +581,7 @@ struct SynTHBloKDuo : Module {
         // A new bank, view or strip page resends everything, so the JAM shows it at once.
         if (curPage() != lastPage || bank() != lastBank || view() != lastView || stripPage != lastStripPage || resync > 3.f) {
             for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
+            for (int i = 0; i < 14; i++) lastOledLed[i] = -1;
             lastPage = curPage(); lastBank = bank(); lastView = view(); lastStripPage = stripPage; resync = 0.f;
         }
         tokens = std::min(16.f, tokens + args.sampleTime * 2000.f);
@@ -531,6 +594,13 @@ struct SynTHBloKDuo : Module {
                 lastLed[ledScan] = d;
             }
             ledScan = (ledScan + 1) % kNumLed;
+        }
+        for (int i = 0; i < 14 && tokens >= 1.f; i++) {
+            int d = oledLed(kOledCC[i]);
+            if (d == lastOledLed[i]) continue;
+            tokens -= 1.f;
+            sendCC(kOledCC[i], d);
+            lastOledLed[i] = d;
         }
     }
 
@@ -562,7 +632,7 @@ struct SynTHBloKDuo : Module {
         if (rst) { step = -1; pendingReset = true; internalTimer = 0.f; resetFlash = 0.15f; }
         resetFlash = std::max(0.f, resetFlash - args.sampleTime);
         if (clrTrig.process(params[CLEAR_PARAM].getValue()))
-            for (int c = 0; c < 8; c++) note[curPat()][view()][c] = -1;
+            for (int c = 0; c < 8; c++) note[curPat()][view()][c] = 0;
 
         if (edge && running) {
             int len = clamp((int)params[LEN_PARAM].getValue(), 1, 8);
@@ -589,11 +659,16 @@ struct SynTHBloKDuo : Module {
             for (int i = 0; i < DO_NUM; i++) p[i] = params[engParam(e, i)].getValue();
             float tv = p[DO_TUNE];
             p[DO_TUNE] = 12.f * tv * std::fabs(tv);
-            float s = eng[e].process(args.sampleRate, p);
+            // idle voices are skipped; the chord level drops as 1 / sqrt(notes)
+            chordGainSm[e] += (chordGain[e] - chordGainSm[e]) * km;
+            float s = 0.f;
+            for (int k = 0; k < kVoices; k++)
+                if (k == 0 || eng[e][k].stage != 0 || std::fabs(eng[e][k].adsr) > 1e-5f) s += eng[e][k].process(args.sampleRate, p);
+            s *= chordGainSm[e];
             mix += s * mixGain[e];
             outputs[e ? BASS_OUTPUT : LEAD_OUTPUT].setVoltage(5.f * s);
             outputs[e ? BASS_CV_OUTPUT : LEAD_CV_OUTPUT].setVoltage(curNote[e] < 0 ? 0.f : (curNote[e] - 60) / 12.f);
-            outputs[e ? BASS_GATE_OUTPUT : LEAD_GATE_OUTPUT].setVoltage(eng[e].gateOn() ? 10.f : 0.f);
+            outputs[e ? BASS_GATE_OUTPUT : LEAD_GATE_OUTPUT].setVoltage(gateOn(e) ? 10.f : 0.f);
         }
         // ---- master filter (GRAIN-FORGE's): cutoff + ADSR sweep, resonance, stages, LP / BP / HP ----
         float sr = args.sampleRate;
@@ -639,12 +714,20 @@ struct SynTHBloKDuo : Module {
     json_t* dataToJson() override {
         json_t* root = json_object();
         json_t* na = json_array();
+        json_t* ca = json_array();
         for (int p = 0; p < 8; p++) {
-            std::string n;
-            for (int i = 0; i < 16; i++) { int d = note[p][i / 8][i % 8]; n += d < 0 ? '-' : (char)('0' + d); }
+            std::string n, c;
+            for (int i = 0; i < 16; i++) {   // the lowest note, for older versions; "chords" has them all
+                int m = note[p][i / 8][i % 8], d = 0;
+                while (m && !(m >> d & 1)) d++;
+                n += m ? (char)('0' + d) : '-';
+                char h[3]; std::snprintf(h, sizeof(h), "%02x", m); c += h;
+            }
             json_array_append_new(na, json_string(n.c_str()));
+            json_array_append_new(ca, json_string(c.c_str()));
         }
         json_object_set_new(root, "notes", na);
+        json_object_set_new(root, "chords", ca);   // per step: two hex digits, bit d = scale degree d
         std::string ms;
         for (int e = 0; e < 2; e++) ms += mute[e] ? '1' : '0';
         json_object_set_new(root, "mute", json_string(ms.c_str()));
@@ -688,7 +771,13 @@ struct SynTHBloKDuo : Module {
             for (int p = 0; p < 8; p++) {
                 const char* n = json_string_value(json_array_get(na, p));
                 if (n && strlen(n) >= 16)
-                    for (int i = 0; i < 16; i++) note[p][i / 8][i % 8] = n[i] >= '0' && n[i] <= '7' ? n[i] - '0' : -1;
+                    for (int i = 0; i < 16; i++) note[p][i / 8][i % 8] = n[i] >= '0' && n[i] <= '7' ? 1 << (n[i] - '0') : 0;
+            }
+        if (json_t* ca = json_object_get(r, "chords"))
+            for (int p = 0; p < 8; p++) {
+                const char* c = json_string_value(json_array_get(ca, p));
+                if (c && strlen(c) >= 32)
+                    for (int i = 0; i < 16; i++) note[p][i / 8][i % 8] = (uint8_t)std::strtol(std::string(c + 2 * i, 2).c_str(), NULL, 16);
             }
         const char* ms = json_string_value(json_object_get(r, "mute"));
         for (int e = 0; e < 2; e++) mute[e] = ms && strlen(ms) >= 2 && ms[e] == '1';
@@ -858,7 +947,7 @@ struct DUHeader : TransparentWidget {
         nvgFillColor(args.vg, on ? nvgRGBA(120, 230, 90, 255) : nvgRGBA(255, 190, 90, 90));
         nvgText(args.vg, W - 5.f, H * 0.3f, on ? "ON" : "MUTE", NULL);
         std::string s = noteName(module ? module->curNote[e] : (e ? 36 : 60));
-        bool gate = module && module->eng[e].gateOn();
+        bool gate = module && module->gateOn(e);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
         nvgFontSize(args.vg, 9.5f);
         nvgFillColor(args.vg, nvgRGBA(255, 190, 90, gate ? 255 : 130));
