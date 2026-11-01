@@ -11,11 +11,11 @@
 //  are in the right-click menu. All JAM lights go dark when the module is removed or bypassed.
 // ============================================================================
 #include "plugin.hpp"
-#include "SynTHBloKMix24_fx.hpp"   // MIX-24's onboard FX engine, shared
 #include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <functional>
 
 namespace {
 
@@ -224,14 +224,125 @@ struct M8Reverb {
     }
 };
 
+// ---- GRAIN: cloud (overlapping grains) or stutter (clock-locked slice rolls) ----------------
+// PITCH slots: semitone shifts, the last one plays the grain backwards.
+static const float kGrainSemis[8] = {-12.f, -7.f, -5.f, 0.f, 5.f, 7.f, 12.f, 0.f};
+static const int kGrainReverse = 7;
+
+struct M8Grain {
+    std::vector<float> bl, br;   // ~2.5 s, written continuously unless frozen
+    int w = 0, n = 0;
+    struct G { bool on = false; double pos = 0.0; float inc = 1.f; int age = 0, len = 1; };
+    G g[12];
+    float spawn = 0.f;
+    uint32_t rng = 12345u;
+    // stutter
+    bool stut = false; double sStart = 0.0; float sPhase = 0.f; int sLen = 1;
+
+    float rand01() { rng = rng * 1664525u + 1013904223u; return (rng >> 8) * (1.f / 16777216.f); }
+    void init(float sr) { n = (int)(sr * 2.5f); bl.assign(n, 0.f); br.assign(n, 0.f); w = 0; }
+    float read(const std::vector<float>& b, double p) {
+        p = std::fmod(p, (double)n); if (p < 0) p += n;
+        int i = (int)p; float f = (float)(p - i);
+        return b[i] + (b[(i + 1) % n] - b[i]) * f;
+    }
+    // size/dens/spray 0..1; pitchSlot 0..7; stepEdge = a new sequencer step started; stepLen in samples.
+    void process(float inL, float inR, float sr, bool stutterMode, bool freeze,
+                 float size, float dens, int pitchSlot, float spray, bool stepEdge, float stepLen,
+                 float& outL, float& outR) {
+        if (n == 0) init(sr);
+        if (!freeze) { bl[w] = inL; br[w] = inR; w = (w + 1) % n; }
+        bool rev = pitchSlot == kGrainReverse;
+        float inc = (rev ? -1.f : 1.f) * std::pow(2.f, kGrainSemis[pitchSlot] / 12.f);
+        outL = outR = 0.f;
+
+        if (!stutterMode) {
+            // CLOUD: a new grain every 1/density seconds; length 20..500 ms; SPRAY reaches up to 1.5 s back
+            int len = (int)(sr * 0.02f * std::pow(25.f, size));
+            float density = 1.f * std::pow(40.f, dens);
+            spawn -= density / sr;
+            if (spawn <= 0.f) {
+                spawn += 1.f;
+                for (G& gr : g) if (!gr.on) {
+                    float back = len * std::max(1.f, std::fabs(inc)) + 64.f + spray * rand01() * sr * 1.5f;
+                    gr.on = true; gr.age = 0; gr.len = len; gr.inc = inc;
+                    gr.pos = w - back + (rev ? len * std::fabs(inc) : 0.f);
+                    break;
+                }
+            }
+            float norm = 1.f / std::max(1.f, std::sqrt(density * len / sr));
+            for (G& gr : g) if (gr.on) {
+                float win = 0.5f - 0.5f * std::cos(2.f * float(M_PI) * gr.age / gr.len);
+                outL += read(bl, gr.pos) * win;
+                outR += read(br, gr.pos) * win;
+                gr.pos += gr.inc;
+                if (++gr.age >= gr.len) gr.on = false;
+            }
+            outL *= norm; outR *= norm;
+            return;
+        }
+
+        // STUTTER: on each step, with CHANCE (dens), take a slice 1/16, 1/32 or 1/64 long (size)
+        // starting at this step (captured live as it plays), or REACH (spray) up to 4 steps back,
+        // and roll it for the rest of the step. Reverse and pitch-up need audio that is already
+        // recorded, so they reach back one slice.
+        if (stepEdge) {
+            stut = rand01() < dens;
+            int div = size < 0.34f ? 1 : size < 0.67f ? 2 : 4;
+            sLen = std::max(64, (int)(stepLen / div));
+            float ahead = (rev || std::fabs(inc) > 1.f) ? sLen * std::fabs(inc) : 0.f;
+            sStart = w - 1 - spray * stepLen * 4.f - ahead;
+            sPhase = 0.f;
+        }
+        if (!stut) { outL = inL; outR = inR; return; }
+        float ph = rev ? (sLen - 1 - sPhase) : sPhase;
+        float fade = std::min(1.f, std::min(sPhase, sLen - sPhase) / (0.002f * sr));   // 2 ms edges, no clicks
+        outL = read(bl, sStart + ph) * fade;
+        outR = read(br, sStart + ph) * fade;
+        sPhase += std::fabs(inc);
+        if (sPhase >= sLen) sPhase -= sLen;
+    }
+};
+
+// ---- SEQ DELAY: clock-locked delay; only the lit steps are thrown into it ----------------------
+// TIME slots in clock steps (16ths): 1/16, 1/8, 3/16, 1/4, 3/8, 1/2, 1 bar.
+static const float kDelaySteps[7] = {1.f, 2.f, 3.f, 4.f, 6.f, 8.f, 16.f};
+
+struct M8SeqDelay {
+    std::vector<float> bl, br;
+    int w = 0, n = 0;
+    float time = 0.375f, gate = 0.f, lpL = 0.f, lpR = 0.f;
+    void process(float inL, float inR, float sr, bool throwOn, float targetTime, float fdbk, float tone,
+                 float& wetL, float& wetR) {
+        if (n == 0) { n = (int)(sr * 4.1f); bl.assign(n, 0.f); br.assign(n, 0.f); }
+        gate += ((throwOn ? 1.f : 0.f) - gate) * (1.f - std::exp(-1.f / (0.003f * sr)));   // 3 ms, no clicks
+        time += (clamp(targetTime, 0.01f, 4.f) - time) * 0.0005f;
+        float d = time * sr;
+        int i0 = (int)d; float f = d - i0;
+        auto tap = [&](std::vector<float>& b) {
+            int a = (w - i0 + n) % n, c = (w - i0 - 1 + n) % n;
+            return b[a] + (b[c] - b[a]) * f;
+        };
+        wetL = tap(bl); wetR = tap(br);
+        float k = 1.f - std::exp(-2.f * float(M_PI) * 300.f * std::pow(40.f, tone) / sr);
+        lpL += (wetL - lpL) * k; lpR += (wetR - lpR) * k;
+        float fb = fdbk * 0.95f;
+        bl[w] = inL * gate + fb * (0.7f * lpL + 0.3f * lpR);   // a little cross-feed for width
+        br[w] = inR * gate + fb * (0.7f * lpR + 0.3f * lpL);
+        w = (w + 1) % n;
+    }
+};
+
 struct SynTHBloKMatrix8 : Module {
     enum ParamIds { LEN_PARAM, PAT_PARAM, PAGE_PARAM, OFFC_PARAM, ONC_PARAM, HEADC_PARAM, HITC_PARAM, CLEAR_PARAM, LEARN_PARAM,
                     BANK_PARAM, RANGE_PARAM, BONC_PARAM, BOFFC_PARAM, RUN_PARAM, RESET_PARAM, KNOB_PARAM,
                     DELAY_PARAM, SPACE_PARAM,
                     F2_CUTOFF_PARAM, F2_RES_PARAM, F2_ENV_PARAM, F2_MODE_PARAM,
                     ENV_A_PARAM, ENV_D_PARAM, ENV_S_PARAM, ENV_R_PARAM,
-                    FX_PROG_PARAM, FX_P1_PARAM, FX_P2_PARAM, FX_P3_PARAM, FX_SEND_PARAM, FX_RET_PARAM,
-                    FXB_PROG_PARAM, FXB_P1_PARAM, FXB_P2_PARAM, FXB_P3_PARAM, FXA_MIX_PARAM, FXB_MIX_PARAM,
+                    // aux chain: SEND -> GRAIN -> SEQ DELAY -> RETURN
+                    GR_MODE_PARAM, GR_SIZE_PARAM, GR_DENS_PARAM, GR_PITCH_PARAM, FX_SEND_PARAM, FX_RET_PARAM,
+                    GR_FREEZE_PARAM, DL_TIME_PARAM, DL_FDBK_PARAM, DL_TONE_PARAM, GR_MIX_PARAM, DL_MIX_PARAM,
+                    GR_SPRAY_PARAM, ENUMS(DL_STEP_PARAM, 8),
                     NUM_PARAMS };
     enum InputIds { CLOCK_INPUT, RESET_INPUT, RUN_INPUT, FX_RTN_L_INPUT, FX_RTN_R_INPUT, NUM_INPUTS };
     enum OutputIds { TRIG_OUTPUT, STRIP_OUTPUT = TRIG_OUTPUT + 8, KNOB_OUTPUT = STRIP_OUTPUT + 8,
@@ -263,8 +374,10 @@ struct SynTHBloKMatrix8 : Module {
     M8Delay delay;
     M8Reverb reverb;
     float delayMix = 0.f, spaceMix = 0.f;
-    // Dual-stage FX: two MIX-24 FX engines in series, FX A -> FX B.
-    MixFx fxA, fxB;
+    // Aux chain: GRAIN -> SEQ DELAY.
+    M8Grain grain;
+    M8SeqDelay seqDelay;
+    bool stepEdge = false;   // a sequencer step started this sample (drives the stutter)
     float meterL = 0.f, meterR = 0.f;   // output level 0..1, for the panel meter
 
     // JAM knob pages: MST = master, GRP = delay, IN1 = space, CUE = master.
@@ -311,19 +424,22 @@ struct SynTHBloKMatrix8 : Module {
         configParam(ENV_D_PARAM, 0.f, 1.f, 0.5f, "Envelope decay", " ms", 400.f, 5.f);
         configParam(ENV_S_PARAM, 0.f, 1.f, 1.f, "Envelope sustain", "%", 0.f, 100.f);
         configParam(ENV_R_PARAM, 0.f, 1.f, 0.6f, "Envelope release", " ms", 800.f, 5.f);
-        const std::vector<std::string> progs = {"Off", "Room", "Hall", "Plate", "Echo", "Ping-pong", "Chorus", "Flanger"};
-        configSwitch(FX_PROG_PARAM, 0.f, 7.f, 4.f, "FX A program", progs);
-        configParam(FX_P1_PARAM, 0.f, 1.f, 0.5f, "FX A param 1");
-        configParam(FX_P2_PARAM, 0.f, 1.f, 0.4f, "FX A param 2");
-        configParam(FX_P3_PARAM, 0.f, 1.f, 0.5f, "FX A param 3");
-        configParam(FXA_MIX_PARAM, 0.f, 1.f, 1.f, "FX A mix (dry -> wet)", "%", 0.f, 100.f);
-        configSwitch(FXB_PROG_PARAM, 0.f, 7.f, 2.f, "FX B program", progs);
-        configParam(FXB_P1_PARAM, 0.f, 1.f, 0.5f, "FX B param 1");
-        configParam(FXB_P2_PARAM, 0.f, 1.f, 0.5f, "FX B param 2");
-        configParam(FXB_P3_PARAM, 0.f, 1.f, 0.4f, "FX B param 3");
-        configParam(FXB_MIX_PARAM, 0.f, 1.f, 0.5f, "FX B mix (dry -> wet)", "%", 0.f, 100.f);
-        configParam(FX_SEND_PARAM, 0.f, 1.f, 0.f, "FX send (into FX A)", "%", 0.f, 100.f);
-        configParam(FX_RET_PARAM, 0.f, 1.f, 0.6f, "FX return (after FX B)", "%", 0.f, 100.f);
+        configSwitch(GR_MODE_PARAM, 0.f, 1.f, 0.f, "Grain mode", {"Cloud", "Stutter"});
+        configParam(GR_SIZE_PARAM, 0.f, 1.f, 0.4f, "Grain size (cloud) / roll 1/16-1/32-1/64 (stutter)", "%", 0.f, 100.f);
+        configParam(GR_DENS_PARAM, 0.f, 1.f, 0.5f, "Grain density (cloud) / chance per step (stutter)", "%", 0.f, 100.f);
+        configSwitch(GR_PITCH_PARAM, 0.f, 7.f, 3.f, "Grain pitch", {"-12", "-7", "-5", "0", "+5", "+7", "+12", "Reverse"});
+        configParam(GR_SPRAY_PARAM, 0.f, 1.f, 0.3f, "Grain spray (cloud) / reach back (stutter)", "%", 0.f, 100.f);
+        configSwitch(GR_FREEZE_PARAM, 0.f, 1.f, 0.f, "Grain freeze (stop recording)", {"Off", "Frozen"});
+        configParam(GR_MIX_PARAM, 0.f, 1.f, 1.f, "Grain mix (dry -> grains)", "%", 0.f, 100.f);
+        configSwitch(DL_TIME_PARAM, 0.f, 6.f, 2.f, "Seq delay time", {"1/16", "1/8", "3/16", "1/4", "3/8", "1/2", "1 bar"});
+        configParam(DL_FDBK_PARAM, 0.f, 1.f, 0.45f, "Seq delay feedback", "%", 0.f, 100.f);
+        configParam(DL_TONE_PARAM, 0.f, 1.f, 0.6f, "Seq delay tone (dark -> bright)", "%", 0.f, 100.f);
+        configParam(DL_MIX_PARAM, 0.f, 1.f, 0.7f, "Seq delay echo level", "%", 0.f, 100.f);
+        for (int i = 0; i < 8; i++)
+            configSwitch(DL_STEP_PARAM + i, 0.f, 1.f, (i == 3 || i == 7) ? 1.f : 0.f,
+                         "Throw step " + std::to_string(i + 1) + " into the delay", {"Dry", "Throw"});
+        configParam(FX_SEND_PARAM, 0.f, 1.f, 0.f, "Send (into GRAIN)", "%", 0.f, 100.f);
+        configParam(FX_RET_PARAM, 0.f, 1.f, 0.6f, "Return (after SEQ DELAY)", "%", 0.f, 100.f);
         configInput(FX_RTN_L_INPUT, "FX return left (mono if R unpatched)");
         configInput(FX_RTN_R_INPUT, "FX return right");
         configOutput(FX_SEND_L_OUTPUT, "FX send left");
@@ -521,9 +637,11 @@ struct SynTHBloKMatrix8 : Module {
         bool clk = clkTrig.process(inputs[CLOCK_INPUT].getVoltage());
         sinceClock += args.sampleTime;
         if (clk) { if (sinceClock < 4.f) clockPeriod = sinceClock; sinceClock = 0.f; }
+        stepEdge = false;
         if (clk && running) {
             int len = clamp((int)params[LEN_PARAM].getValue(), 1, 8);
             step = (pendingReset || step < 0) ? 0 : (step + 1) % len;
+            stepEdge = true;
             pendingReset = false;
             for (int r = 0; r < 8; r++)
                 if (pat[curPat()][r][step] && trackOn(r)) {
@@ -575,25 +693,30 @@ struct SynTHBloKMatrix8 : Module {
             l += rl * spaceMix;
             r += rr * spaceMix;
 
-            // ---- dual-stage FX aux: SEND -> FX A -> FX B -> RETURN ----
-            // Each stage blends its input (dry) with its effect (wet) by its MIX knob, so FX B
-            // processes whatever FX A hands it. The external loop's return joins after FX B.
+            // ---- aux chain: SEND -> GRAIN -> SEQ DELAY -> RETURN ----
+            // GRAIN blends dry with grains by its MIX; the delay adds echoes of the steps whose
+            // throw buttons are lit. The external loop's return joins at the end.
             float send = params[FX_SEND_PARAM].getValue();
             float sendL = l * send, sendR = r * send;
             outputs[FX_SEND_L_OUTPUT].setVoltage(sendL * 5.f);
             outputs[FX_SEND_R_OUTPUT].setVoltage(sendR * 5.f);
-            // A stage set to OFF is bypassed (passes its input straight through).
-            float al, ar, bl, br;
-            int progA = (int)std::round(params[FX_PROG_PARAM].getValue());
-            int progB = (int)std::round(params[FXB_PROG_PARAM].getValue());
-            fxA.process(sendL, sendR, args.sampleRate, progA,
-                        params[FX_P1_PARAM].getValue(), params[FX_P2_PARAM].getValue(), params[FX_P3_PARAM].getValue(), al, ar);
-            float mixA = progA ? params[FXA_MIX_PARAM].getValue() : 0.f;
-            float aL = sendL + (al - sendL) * mixA, aR = sendR + (ar - sendR) * mixA;
-            fxB.process(aL, aR, args.sampleRate, progB,
-                        params[FXB_P1_PARAM].getValue(), params[FXB_P2_PARAM].getValue(), params[FXB_P3_PARAM].getValue(), bl, br);
-            float mixB = progB ? params[FXB_MIX_PARAM].getValue() : 0.f;
-            float wl = aL + (bl - aL) * mixB, wr = aR + (br - aR) * mixB;
+            float stepSec = (clockPeriod > 0.f && sinceClock < 2.f) ? clockPeriod : 0.125f;   // 120 BPM without a clock
+            float gl, gr;
+            grain.process(sendL, sendR, args.sampleRate,
+                          params[GR_MODE_PARAM].getValue() > 0.5f, params[GR_FREEZE_PARAM].getValue() > 0.5f,
+                          params[GR_SIZE_PARAM].getValue(), params[GR_DENS_PARAM].getValue(),
+                          clamp((int)std::round(params[GR_PITCH_PARAM].getValue()), 0, 7),
+                          params[GR_SPRAY_PARAM].getValue(), stepEdge, stepSec * args.sampleRate, gl, gr);
+            float gmix = params[GR_MIX_PARAM].getValue();
+            float gL = sendL + (gl - sendL) * gmix, gR = sendR + (gr - sendR) * gmix;
+            // Throw: the playing step's button; when stopped, everything goes into the delay.
+            bool throwOn = !running || step < 0 || params[DL_STEP_PARAM + (step % 8)].getValue() > 0.5f;
+            int tslot = clamp((int)std::round(params[DL_TIME_PARAM].getValue()), 0, 6);
+            float el, er;
+            seqDelay.process(gL, gR, args.sampleRate, throwOn, kDelaySteps[tslot] * stepSec,
+                             params[DL_FDBK_PARAM].getValue(), params[DL_TONE_PARAM].getValue(), el, er);
+            float dmix = params[DL_MIX_PARAM].getValue();
+            float wl = gL + el * dmix, wr = gR + er * dmix;
             bool rtnL = inputs[FX_RTN_L_INPUT].isConnected(), rtnR = inputs[FX_RTN_R_INPUT].isConnected();
             float xl = rtnL ? inputs[FX_RTN_L_INPUT].getVoltage() * 0.2f : 0.f;
             float xr = rtnR ? inputs[FX_RTN_R_INPUT].getVoltage() * 0.2f : 0.f;
@@ -1055,7 +1178,7 @@ struct JKnobRing : TransparentWidget {
     JKnobRing() { box.size = mm2px(Vec(19.f, 19.f)); }
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
-        float v = module ? module->params[param].getValue() : 0.6f;
+        float v = module ? module->paramQuantities[param]->getScaledValue() : 0.6f;   // 0..1 whatever the range
         float cx = box.size.x * 0.5f, cy = box.size.y * 0.5f, rr = box.size.x * 0.5f - 2.f;
         float a0 = M_PI * 0.75f, a1 = M_PI * 2.25f;
         nvgBeginPath(args.vg);
@@ -1073,20 +1196,11 @@ struct JKnobRing : TransparentWidget {
     }
 };
 
-// FX program names and what P1..P3 mean for each (MIX-24's onboard FX).
-static const char* kFxProg[8] = {"OFF", "ROOM", "HALL", "PLATE", "ECHO", "PING-PONG", "CHORUS", "FLANGER"};
-static const char* kFxParamName[8][3] = {
-    {"-", "-", "-"}, {"SIZE", "DAMP", "PRE"}, {"SIZE", "DAMP", "PRE"}, {"SIZE", "TONE", "PRE"},
-    {"TIME", "FDBK", "TONE"}, {"TIME", "FDBK", "TONE"}, {"RATE", "DEPTH", "SPREAD"}, {"RATE", "DEPTH", "FDBK"}};
-static int fxProgParam(int stage) { return stage ? SynTHBloKMatrix8::FXB_PROG_PARAM : SynTHBloKMatrix8::FX_PROG_PARAM; }
-static int fxProg(SynTHBloKMatrix8* m, int stage) {
-    return m ? clamp((int)std::round(m->params[fxProgParam(stage)].getValue()), 0, 7) : (stage ? 2 : 4);
-}
-
-// FX stage program display (MIDI + style): click = next program, right-click = previous.
-struct JFxDisplay : TransparentWidget {
-    SynTHBloKMatrix8* module = NULL;
-    int stage = 0;   // 0 = FX A, 1 = FX B
+// Section display (MIDI + style): a small title over a value; click = next, right-click = previous.
+struct JSecDisplay : TransparentWidget {
+    const char* title = "";
+    std::function<std::string()> value;
+    std::function<void(int)> step;   // +1 / -1
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
         float W = box.size.x, H = box.size.y;
@@ -1103,34 +1217,62 @@ struct JFxDisplay : TransparentWidget {
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
         nvgFontSize(args.vg, 6.5f);
         nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 130));
-        nvgText(args.vg, W * 0.5f, H * 0.28f, stage ? "FX B" : "FX A", NULL);
-        nvgFontSize(args.vg, 9.5f);
+        nvgText(args.vg, W * 0.5f, H * 0.28f, title, NULL);
+        nvgFontSize(args.vg, 9.f);
         nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 255));
-        nvgText(args.vg, W * 0.5f, H * 0.68f, kFxProg[fxProg(module, stage)], NULL);
+        std::string v = value ? value() : "";
+        nvgText(args.vg, W * 0.5f, H * 0.68f, v.c_str(), NULL);
     }
     void onButton(const ButtonEvent& e) override {
-        if (e.action != GLFW_PRESS || !module) return;
+        if (e.action != GLFW_PRESS || !step) return;
         if (e.button == GLFW_MOUSE_BUTTON_LEFT || e.button == GLFW_MOUSE_BUTTON_RIGHT) {
-            int p = (fxProg(module, stage) + (e.button == GLFW_MOUSE_BUTTON_LEFT ? 1 : 7)) % 8;
-            module->params[fxProgParam(stage)].setValue((float)p);
+            step(e.button == GLFW_MOUSE_BUTTON_LEFT ? 1 : -1);
             e.consume(this);
         }
     }
 };
 
-// Caption for FX knob 1..3 that follows the program (SIZE, TIME, RATE, ...).
-struct JFxLabel : TransparentWidget {
+// Knob caption that follows the GRAIN mode: cloud name / stutter name.
+struct JModeLabel : TransparentWidget {
     SynTHBloKMatrix8* module = NULL;
-    int stage = 0, which = 0;
+    const char* cloud = "";
+    const char* stutter = "";
     void draw(const DrawArgs& args) override {
         std::shared_ptr<window::Font> font = APP->window->uiFont;
         if (!font) return;
+        bool st = module && module->params[SynTHBloKMatrix8::GR_MODE_PARAM].getValue() > 0.5f;
         nvgFontFaceId(args.vg, font->handle);
-        nvgFontSize(args.vg, 7.f);
-        nvgTextLetterSpacing(args.vg, 0.6f);
+        nvgFontSize(args.vg, 6.5f);
+        nvgTextLetterSpacing(args.vg, 0.4f);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
         nvgFillColor(args.vg, nvgRGB(0xbb, 0xbb, 0xbb));
-        nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, kFxParamName[fxProg(module, stage)][which], NULL);
+        nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, st ? stutter : cloud, NULL);
+    }
+};
+
+// SEQ DELAY throw step: lit = that step goes into the delay; the playing step is outlined white.
+struct JThrowBtn : app::ParamWidget {
+    SynTHBloKMatrix8* m8 = NULL;
+    int idx = 0;
+    void draw(const DrawArgs& args) override {
+        ParamQuantity* pq = getParamQuantity();
+        bool on = pq && pq->getValue() > 0.5f;
+        bool now = m8 && m8->running && m8->step >= 0 && (m8->step % 8) == idx;
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.f);
+        nvgFillColor(args.vg, on ? nvgRGBA(255, 112, 15, 235) : nvgRGBA(40, 25, 8, 255));
+        nvgFill(args.vg);
+        nvgStrokeColor(args.vg, now ? nvgRGB(0xff, 0xff, 0xff) : nvgRGBA(255, 180, 90, on ? 255 : 110));
+        nvgStrokeWidth(args.vg, now ? 1.2f : 0.7f);
+        nvgStroke(args.vg);
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
+            if (ParamQuantity* pq = getParamQuantity()) pq->setValue(pq->getValue() > 0.5f ? 0.f : 1.f);
+            e.consume(this);
+            return;
+        }
+        ParamWidget::onButton(e);
     }
 };
 
@@ -1277,36 +1419,69 @@ struct SynTHBloKMatrix8Widget : ModuleWidget {
             else addOutput(createOutputCentered<SmallJack>(mm2px(Vec(x, 107.f)), module, JOUT[i - 3]));
         }
 
-        // ---------------- third section: dual-stage FX (two MIX-24 FX engines, A -> B) ----------------
+        // ---------------- third section: GRAIN -> SEQ DELAY (the aux chain) ----------------
         const float SX = 128.8f, SW = 24.9f;
-        const float C1 = SX + 6.f, C2 = SX + SW - 6.f;
-        auto fxKnob = [&](float x, float y, int param, int stage, int which) {
-            JKnobRing* fr = createWidget<JKnobRing>(mm2px(Vec(x - 5.5f, y - 5.5f)));
-            fr->box.size = mm2px(Vec(11.f, 11.f));
+        auto col3 = [&](int i) { return SX + SW * (i + 0.5f) / 3.f; };
+        // Trimpot with an amber value ring and a caption (fixed, or following the GRAIN mode).
+        auto trim = [&](float x, float y, int param, const char* cloud, const char* stutter) {
+            JKnobRing* fr = createWidget<JKnobRing>(mm2px(Vec(x - 3.9f, y - 3.9f)));
+            fr->box.size = mm2px(Vec(7.8f, 7.8f));
             fr->module = module; fr->param = param;
             addChild(fr);
-            addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(x, y)), module, param));
-            JFxLabel* l = createWidget<JFxLabel>(mm2px(Vec(x - 6.f, y + 5.f)));
-            l->box.size = mm2px(Vec(12.f, 4.f)); l->module = module; l->stage = stage; l->which = which;
+            addParam(createParamCentered<Trimpot>(mm2px(Vec(x, y)), module, param));
+            JModeLabel* l = createWidget<JModeLabel>(mm2px(Vec(x - 4.5f, y + 3.6f)));
+            l->box.size = mm2px(Vec(9.f, 3.4f)); l->module = module;
+            l->cloud = cloud; l->stutter = stutter ? stutter : cloud;
             addChild(l);
         };
-        // Each stage: program display, its three program knobs, and MIX (dry -> wet).
-        struct StageDef { int p1, p2, p3, mix; float y; };
-        const StageDef stages[2] = {
-            {SynTHBloKMatrix8::FX_P1_PARAM, SynTHBloKMatrix8::FX_P2_PARAM, SynTHBloKMatrix8::FX_P3_PARAM, SynTHBloKMatrix8::FXA_MIX_PARAM, 10.5f},
-            {SynTHBloKMatrix8::FXB_P1_PARAM, SynTHBloKMatrix8::FXB_P2_PARAM, SynTHBloKMatrix8::FXB_P3_PARAM, SynTHBloKMatrix8::FXB_MIX_PARAM, 48.f}};
-        for (int s = 0; s < 2; s++) {
-            const StageDef& d = stages[s];
-            JFxDisplay* fd = createWidget<JFxDisplay>(mm2px(Vec(SX, d.y)));
-            fd->box.size = mm2px(Vec(SW, 8.f)); fd->module = module; fd->stage = s;
-            addChild(fd);
-            fxKnob(C1, d.y + 14.5f, d.p1, s, 0);
-            fxKnob(C2, d.y + 14.5f, d.p2, s, 1);
-            fxKnob(C1, d.y + 28.5f, d.p3, s, 2);
-            smallKnob(C2, d.y + 28.5f, d.mix, "MIX");
+        SynTHBloKMatrix8* m = module;
+        auto stepParam = [m](int id, int dir) {
+            if (!m) return;
+            ParamQuantity* pq = m->paramQuantities[id];
+            int n = (int)pq->getMaxValue() + 1;
+            pq->setValue((float)(((int)std::round(pq->getValue()) + dir + n) % n));
+        };
+
+        // GRAIN: display (click = cloud / stutter), knobs, freeze.
+        JSecDisplay* gd = createWidget<JSecDisplay>(mm2px(Vec(SX, 10.5f)));
+        gd->box.size = mm2px(Vec(SW, 8.f)); gd->title = "GRAIN";
+        gd->value = [m]() -> std::string {
+            if (!m) return "CLOUD";
+            std::string s = m->params[SynTHBloKMatrix8::GR_MODE_PARAM].getValue() > 0.5f ? "STUTTER" : "CLOUD";
+            return m->params[SynTHBloKMatrix8::GR_FREEZE_PARAM].getValue() > 0.5f ? s + " *" : s;
+        };
+        gd->step = [stepParam](int dir) { stepParam(SynTHBloKMatrix8::GR_MODE_PARAM, dir); };
+        addChild(gd);
+        trim(col3(0), 25.f, SynTHBloKMatrix8::GR_SIZE_PARAM, "SIZE", "ROLL");
+        trim(col3(1), 25.f, SynTHBloKMatrix8::GR_DENS_PARAM, "DENS", "CHANCE");
+        trim(col3(2), 25.f, SynTHBloKMatrix8::GR_PITCH_PARAM, "PITCH", nullptr);
+        trim(col3(0), 37.f, SynTHBloKMatrix8::GR_SPRAY_PARAM, "SPRAY", "REACH");
+        trim(col3(1), 37.f, SynTHBloKMatrix8::GR_MIX_PARAM, "MIX", nullptr);
+        JAmberBtn* frz = createParam<JAmberBtn>(mm2px(Vec(col3(2) - 3.6f, 35.f)), module, SynTHBloKMatrix8::GR_FREEZE_PARAM);
+        frz->box.size = mm2px(Vec(7.2f, 5.f)); frz->fontSize = 6.f;
+        frz->jam = module; frz->label = "FRZ"; frz->latch = true;
+        addParam(frz);
+
+        // SEQ DELAY: display (shows / steps TIME), 8 throw buttons, knobs.
+        JSecDisplay* dd = createWidget<JSecDisplay>(mm2px(Vec(SX, 45.f)));
+        dd->box.size = mm2px(Vec(SW, 8.f)); dd->title = "SEQ DELAY";
+        dd->value = [m]() -> std::string {
+            static const char* t[7] = {"1/16", "1/8", "3/16", "1/4", "3/8", "1/2", "1 BAR"};
+            return t[m ? clamp((int)std::round(m->params[SynTHBloKMatrix8::DL_TIME_PARAM].getValue()), 0, 6) : 2];
+        };
+        dd->step = [stepParam](int dir) { stepParam(SynTHBloKMatrix8::DL_TIME_PARAM, dir); };
+        addChild(dd);
+        for (int i = 0; i < 8; i++) {
+            JThrowBtn* tb = createParam<JThrowBtn>(mm2px(Vec(SX + SW * i / 8.f + 0.2f, 55.f)), module, SynTHBloKMatrix8::DL_STEP_PARAM + i);
+            tb->box.size = mm2px(Vec(SW / 8.f - 0.4f, 4.5f)); tb->m8 = module; tb->idx = i;
+            addParam(tb);
         }
-        smallKnob(C1, 91.f, SynTHBloKMatrix8::FX_SEND_PARAM, "SEND");
-        smallKnob(C2, 91.f, SynTHBloKMatrix8::FX_RET_PARAM, "RETURN");
+        trim(col3(0), 67.f, SynTHBloKMatrix8::DL_TIME_PARAM, "TIME", nullptr);
+        trim(col3(1), 67.f, SynTHBloKMatrix8::DL_FDBK_PARAM, "FDBK", nullptr);
+        trim(col3(2), 67.f, SynTHBloKMatrix8::DL_TONE_PARAM, "TONE", nullptr);
+        trim(col3(0), 81.f, SynTHBloKMatrix8::DL_MIX_PARAM, "ECHO", nullptr);
+        trim(col3(1), 81.f, SynTHBloKMatrix8::FX_SEND_PARAM, "SEND", nullptr);
+        trim(col3(2), 81.f, SynTHBloKMatrix8::FX_RET_PARAM, "RETURN", nullptr);
 
         // External FX loop jacks, level with the right panel's jack row.
         // Jacks in pairs (L, R): the external loop's send outputs, then its return inputs.
