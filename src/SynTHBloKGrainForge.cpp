@@ -24,6 +24,7 @@ struct SynTHBloKGrainForge : Module {
         DL_ON_PARAM, DL_TIME_PARAM, DL_FDBK_PARAM, DL_WARP_PARAM, DL_ROUTE_PARAM, DL_TONE_PARAM, DL_MIX_PARAM,
         ENUMS(DL_STEP_PARAM, 8),
         IN_GAIN_PARAM, DRYWET_PARAM, OUT_GAIN_PARAM,
+        ENUMS(DL_STEP2_PARAM, 8),     // throw steps 9-16 (added last so saved patches keep their ids)
         NUM_PARAMS
     };
     enum InputIds { IN_L_INPUT, IN_R_INPUT, CLOCK_INPUT, RESET_INPUT, FREEZE_INPUT, GLITCH_INPUT, NUM_INPUTS };
@@ -36,7 +37,8 @@ struct SynTHBloKGrainForge : Module {
     WarpDelay delay;
     dsp::SchmittTrigger clkTrig, rstTrig, glitchTrig;
 
-    int step = -1;                    // 0..7, for the throw buttons
+    static const int kThrowSteps = 16;
+    int step = -1;                    // 0..15, for the throw buttons
     float sinceClock = 1e9f, clockPeriod = 0.f, internalTimer = 0.f;
     float meterL = 0.f, meterR = 0.f;
     std::string glitchEvent = "-";    // shown on the GLITCH display
@@ -83,8 +85,8 @@ struct SynTHBloKGrainForge : Module {
         configParam(DL_ROUTE_PARAM, 0.f, 1.f, 0.3f, "Route repeats through STRETCH + ROBOT", "%", 0.f, 100.f);
         configParam(DL_TONE_PARAM, 0.f, 1.f, 0.6f, "Repeat tone (dark -> bright)", "%", 0.f, 100.f);
         configParam(DL_MIX_PARAM, 0.f, 1.f, 0.6f, "Echo level", "%", 0.f, 100.f);
-        for (int i = 0; i < 8; i++)
-            configSwitch(DL_STEP_PARAM + i, 0.f, 1.f, 1.f, "Throw step " + std::to_string(i + 1) + " into the delay", {"Dry", "Throw"});
+        for (int i = 0; i < kThrowSteps; i++)
+            configSwitch(throwParam(i), 0.f, 1.f, 1.f, "Throw step " + std::to_string(i + 1) + " into the delay", {"Dry", "Throw"});
         configParam(IN_GAIN_PARAM, 0.f, 2.f, 1.f, "Input gain", "%", 0.f, 100.f);
         configParam(DRYWET_PARAM, 0.f, 1.f, 0.45f, "Dry / wet", "%", 0.f, 100.f);
         configParam(OUT_GAIN_PARAM, 0.f, 1.5f, 1.f, "Output level", "%", 0.f, 100.f);
@@ -100,6 +102,7 @@ struct SynTHBloKGrainForge : Module {
 
     bool on(int id) { return params[id].getValue() > 0.5f; }
     int slot(int id) { return (int)std::round(params[id].getValue()); }
+    static int throwParam(int i) { return i < 8 ? DL_STEP_PARAM + i : DL_STEP2_PARAM + (i - 8); }
 
     void onReset() override { step = -1; }
 
@@ -121,7 +124,7 @@ struct SynTHBloKGrainForge : Module {
         }
         float stepSec = (inputs[CLOCK_INPUT].isConnected() && clockPeriod > 0.f && sinceClock < 2.f) ? clockPeriod : 0.125f;
         if (rstTrig.process(inputs[RESET_INPUT].getVoltage())) { step = -1; internalTimer = 0.f; }
-        if (edge) step = (step + 1) % 8;
+        if (edge) step = (step + 1) % kThrowSteps;
         bool force = glitchTrig.process(inputs[GLITCH_INPUT].getVoltage());
 
         // ---- smoothing: every knob and stage switch glides (~15 ms), so moves never click or zip ----
@@ -171,7 +174,7 @@ struct SynTHBloKGrainForge : Module {
         float cL = bL + (pL - bL) * m, cR = bR + (pR - bR) * m;
 
         // ---- WARP DELAY write: lit steps throw this signal in; un-routed feedback goes straight back ----
-        bool throwOn = step < 0 || on(DL_STEP_PARAM + step);
+        bool throwOn = step < 0 || on(throwParam(step));
         delay.write(cL, cR, sr, throwOn);
         delay.writeRaw((1.f - route) * fbL, (1.f - route) * fbR);
         m = sm[DL_MIX_PARAM] * dlOn;
@@ -337,7 +340,7 @@ struct GFStatus : TransparentWidget {
         if (module && module->inputs[SynTHBloKGrainForge::CLOCK_INPUT].isConnected()) {
             if (module->clockPeriod > 0.f && module->sinceClock < 2.f) snprintf(bpm, sizeof bpm, "%.1f BPM", 60.f / (module->clockPeriod * 4.f));
             else snprintf(bpm, sizeof bpm, "--- BPM");
-            snprintf(sub, sizeof sub, "STEP %d/8", module->step + 1);
+            snprintf(sub, sizeof sub, "STEP %d/%d", module->step + 1, SynTHBloKGrainForge::kThrowSteps);
         }
         nvgFontFaceId(args.vg, font->handle);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
@@ -437,11 +440,11 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
         });
         knob(c - 13.f, 29.f, G::DL_TIME_PARAM, "TIME");  knob(c, 29.f, G::DL_FDBK_PARAM, "FDBK");   knob(c + 13.f, 29.f, G::DL_WARP_PARAM, "WARP");
         knob(c - 13.f, 44.f, G::DL_ROUTE_PARAM, "ROUTE"); knob(c, 44.f, G::DL_TONE_PARAM, "TONE");  knob(c + 13.f, 44.f, G::DL_MIX_PARAM, "ECHO");
-        label(c, 57.f, "THROW STEPS");
+        label(c, 56.f, "THROW STEPS");
         float bx0 = c - 17.4f;
-        for (int i = 0; i < 8; i++) {
-            GFButton* b = createParam<GFButton>(mm2px(Vec(bx0 + i * 4.4f, 60.f)), module, G::DL_STEP_PARAM + i);
-            b->box.size = mm2px(Vec(4.f, 6.f)); b->playIdx = i; b->gf = module;
+        for (int i = 0; i < G::kThrowSteps; i++) {   // two rows: 1-8, 9-16
+            GFButton* b = createParam<GFButton>(mm2px(Vec(bx0 + (i % 8) * 4.4f, 58.5f + (i / 8) * 6.5f)), module, G::throwParam(i));
+            b->box.size = mm2px(Vec(4.f, 5.5f)); b->playIdx = i; b->gf = module;
             addParam(b);
         }
 
