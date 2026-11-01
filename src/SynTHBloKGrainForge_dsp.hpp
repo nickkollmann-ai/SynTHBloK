@@ -203,7 +203,7 @@ struct Svf {
 };
 
 // Master filter: CUT 0..1 sweeps 20 Hz .. 20 kHz, MODE 0..2 = LP / BP / HP. RES 0..1 goes from a
-// gentle bump (Q 0.8) to a capped peak (Q 5); the level drops a little as it rises, so it sings but
+// gentle bump (Q 0.8) to a capped peak (Q 14); the level drops a little as it rises, so it sings but
 // never screams. STAGES 0..2: 1, 2 or 3 SVFs in series = 12 / 24 / 36 dB per octave; the first stage
 // carries the resonance, the extra ones are plain. LP fully open and HP fully down fade to true
 // bypass. Every mode and stage always runs and MODE / STAGES arrive smoothed, so switching crossfades.
@@ -213,7 +213,7 @@ struct DjFilter {
         cut = clampf(cut, 0.f, 1.f);
         float fc = 20.f * std::pow(1000.f, cut);
         float g = std::tan(float(M_PI) * clampf(fc, 20.f, sr * 0.45f) / sr);
-        float kr = 1.2f * std::pow(0.2f / 1.2f, clampf(res, 0.f, 1.f));
+        float kr = 1.2f * std::pow(0.07f / 1.2f, clampf(res, 0.f, 1.f));
         float comp = std::pow(kr / 1.2f, 0.3f);
         float wetM[3] = {clampf((0.99f - cut) / 0.06f, 0.f, 1.f), 1.f, clampf((cut - 0.01f) / 0.06f, 0.f, 1.f)};
         stages = clampf(stages, 0.f, 2.f); mode = clampf(mode, 0.f, 2.f);
@@ -235,6 +235,8 @@ struct DjFilter {
                     tap[s] = y;
                 }
                 float yf = (tap[s0] + (tap[s0 + 1] - tap[s0]) * sf) * comp;
+                float ay = std::fabs(yf);   // clean below 1; resonant peaks above it round off toward 1.75
+                if (ay > 1.f) { float o = ay - 1.f; yf = std::copysign(1.f + 0.75f * o / (0.75f + o), yf); }
                 out[m] = x + (yf - x) * wetM[m];
             }
             *io[c] = out[m0] + (out[m0 + 1] - out[m0]) * mf;

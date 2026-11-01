@@ -924,6 +924,36 @@ struct GFPresetBar : TransparentWidget {
     }
 };
 
+// Four tiny LEDs under A D S R: the envelope's current stage lights, as bright as the envelope.
+struct GFAdsrLeds : TransparentWidget {
+    SynTHBloKGrainForge* module = NULL;
+    float pitch = 0.f;   // px between LEDs
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        int lit = -1; float v = 0.f;
+        if (module) {
+            const Adsr& e = module->fltEnv;
+            float sus = module->params[SynTHBloKGrainForge::FLT_SUS_PARAM].getValue();
+            v = clamp(e.v, 0.f, 1.f);
+            lit = e.st == Adsr::ATK ? 0 : e.st == Adsr::DEC ? (std::fabs(e.v - sus) < 0.02f ? 2 : 1) : e.st == Adsr::REL ? 3 : -1;
+        }
+        float r = box.size.y * 0.5f;
+        for (int i = 0; i < 4; i++) {
+            float b = i == lit ? 0.35f + 0.65f * std::max(v, 0.3f) : 0.f;
+            nvgBeginPath(args.vg);
+            nvgCircle(args.vg, r + i * pitch, r, r);
+            nvgFillColor(args.vg, b > 0.f ? nvgRGBA(255, 112, 15, (int)(255 * b)) : nvgRGBA(60, 35, 10, 255));
+            nvgFill(args.vg);
+            if (b > 0.f) {   // soft glow
+                nvgBeginPath(args.vg);
+                nvgCircle(args.vg, r + i * pitch, r, r * 2.2f);
+                nvgFillColor(args.vg, nvgRGBA(255, 112, 15, (int)(60 * b)));
+                nvgFill(args.vg);
+            }
+        }
+    }
+};
+
 // Filter SEQ screen: left, the TRIG source (click = next, right-click = menu); right, 16 bars.
 // Click a bar to switch its step on/off; drag up/down across bars to paint heights (notes).
 struct GFSeqScreen : TransparentWidget {
@@ -1167,6 +1197,9 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
             addParam(createParamCentered<Trimpot>(mm2px(Vec(x, 98.5f)), module, adsr[i]));
             label(x - 4.6f, 98.5f, an[i]);
         }
+        GFAdsrLeds* leds = createWidget<GFAdsrLeds>(mm2px(Vec(120.f - 0.6f, 102.6f)));   // under the trimpots
+        leds->box.size = mm2px(Vec(31.2f, 1.2f)); leds->pitch = mm2px(10.f); leds->module = module;
+        addChild(leds);
         addParam(createParamCentered<Trimpot>(mm2px(Vec(161.f, 98.5f)), module, G::FLT_AMP_PARAM));   // env -> level
         label(156.2f, 98.5f, "V");
         midKnob(174.f, 86.5f, G::DRYWET_PARAM, "DRY / WET");
