@@ -94,8 +94,14 @@ const int LA_MAX = 128;
 const int NTRACK = 512;     // limiter tracker history (power of two), one frame per 10 ms
 const int NVIEW = 400;      // frames on screen = 4 s
 
-// one block of the limiter tracker history (dB)
-struct TrackFrame { float inDb = -90.f, outDb = -90.f, limGr = 0.f, compGr = 0.f; };
+// one block of the dynamics tracker history (dB / LUFS)
+struct TrackFrame {
+    float inDb = -90.f, outDb = -90.f, limGr = 0.f;          // limiter in / out peak, GR
+    float cInDb = -90.f, cOutDb = -90.f, compGr = 0.f;       // compressor detector / output peak, GR
+    float mbLo = 0.f, mbMid = 0.f, mbHi = 0.f;               // leveler band gains (signed)
+    float lufsM = -70.f, lufsS = -70.f;
+};
+enum TrackView { VIEW_LIM, VIEW_COMP, VIEW_MULTI, VIEW_LOUD, NUM_VIEWS };
 
 } // namespace
 
@@ -115,6 +121,7 @@ struct BlokMaster : Module {
         LOWCUT_PARAM, COMP_KNEE_PARAM, COMP_SCHPF_PARAM,
         DRIVE_PARAM, SATMIX_PARAM, MB_PARAM, MID_PARAM, SIDE_PARAM,
         BYPASS_PARAM, AUTO_PARAM, MONO_PARAM, SIDESOLO_PARAM,
+        VIEW_LIM_PARAM, VIEW_COMP_PARAM, VIEW_MULTI_PARAM, VIEW_LOUD_PARAM,
         NUM_PARAMS
     };
     enum InputIds { IN_L_INPUT, IN_R_INPUT, SIDECHAIN_INPUT, THR_CV_INPUT, DRIVE_CV_INPUT, WIDTH_CV_INPUT, NUM_INPUTS };
@@ -122,6 +129,7 @@ struct BlokMaster : Module {
     enum LightIds {
         COMP_GR_LIGHT, LIMIT_GR_LIGHT, CORRELATION_LIGHT,
         BYPASS_LIGHT, AUTO_LIGHT, MONO_LIGHT, SIDESOLO_LIGHT,
+        VIEW_LIM_LIGHT, VIEW_COMP_LIGHT, VIEW_MULTI_LIGHT, VIEW_LOUD_LIGHT,
         NUM_LIGHTS
     };
 
@@ -142,7 +150,10 @@ struct BlokMaster : Module {
     TrackFrame track[NTRACK];
     std::atomic<uint32_t> trackPos{0};      // frames written so far (frame i lives at i % NTRACK)
     int trkCount = 0, trkLen = 480;
-    float trkIn = 0.f, trkOut = 0.f, trkLimG = 1.f, trkCompG = 0.f;
+    float trkIn = 0.f, trkOut = 0.f, trkLimG = 1.f, trkCompG = 0.f, trkCIn = 0.f, trkCOut = 0.f;
+    float compThrDb = -12.f;                 // effective threshold incl. CV, for the COMP view
+    int view = VIEW_LIM;                     // tracker view, saved with the patch
+    dsp::BooleanTrigger viewTrig[NUM_VIEWS];
 
     // ---- DSP state ----
     float sr = 48000.f;
@@ -229,6 +240,10 @@ struct BlokMaster : Module {
         configSwitch(AUTO_PARAM, 0.f, 1.f, 0.f, "Compressor auto makeup gain", {"Off", "On"});
         configSwitch(MONO_PARAM, 0.f, 1.f, 0.f, "Mono check", {"Off", "On"});
         configSwitch(SIDESOLO_PARAM, 0.f, 1.f, 0.f, "Side solo (hear only the stereo difference)", {"Off", "On"});
+        configButton(VIEW_LIM_PARAM, "Tracker view: limiter");
+        configButton(VIEW_COMP_PARAM, "Tracker view: compressor");
+        configButton(VIEW_MULTI_PARAM, "Tracker view: multiband leveler");
+        configButton(VIEW_LOUD_PARAM, "Tracker view: loudness");
 
         configInput(IN_L_INPUT, "Left in");
         configInput(IN_R_INPUT, "Right in (normalled to left)");
@@ -301,7 +316,11 @@ struct BlokMaster : Module {
     // main audio callback
     // ------------------------------------------------------------------
     void process(const ProcessArgs& args) override {
-        if (++ctrlCount >= 32) { ctrlCount = 0; updateControlRate(); }
+        if (++ctrlCount >= 32) {
+            ctrlCount = 0; updateControlRate();
+            for (int i = 0; i < NUM_VIEWS; i++)
+                if (viewTrig[i].process(params[VIEW_LIM_PARAM + i].getValue() > 0.5f)) view = i;
+        }
 
         // ---------------- inputs ----------------
         float inL = inputs[IN_L_INPUT].getVoltage();
@@ -353,6 +372,9 @@ struct BlokMaster : Module {
         float mix = params[COMP_MIX_PARAM].getValue();
         l = l * (1.f - mix) + l * cg * mix;
         r = r * (1.f - mix) + r * cg * mix;
+        compThrDb = thr;
+        trkCIn = std::max(trkCIn, det);
+        trkCOut = std::max(trkCOut, std::max(std::fabs(l), std::fabs(r)));
 
         // ---------------- 3-band leveler (MULTI) ----------------
         float mbAmt = params[MB_PARAM].getValue();
@@ -467,8 +489,11 @@ struct BlokMaster : Module {
             TrackFrame& f = track[p % NTRACK];
             f.inDb = lin2db(trkIn / FS_V); f.outDb = lin2db(trkOut / FS_V);
             f.limGr = -lin2db(trkLimG); f.compGr = trkCompG;
+            f.cInDb = lin2db(trkCIn / FS_V); f.cOutDb = lin2db(trkCOut / FS_V);
+            f.mbLo = mbGain[0] * mbMixSm; f.mbMid = mbGain[1] * mbMixSm; f.mbHi = mbGain[2] * mbMixSm;
+            f.lufsM = disp.lufsM; f.lufsS = disp.lufsS;
             trackPos.store(p + 1, std::memory_order_release);
-            trkCount = 0; trkIn = trkOut = 0.f; trkLimG = 1.f; trkCompG = 0.f;
+            trkCount = 0; trkIn = trkOut = trkCIn = trkCOut = 0.f; trkLimG = 1.f; trkCompG = 0.f;
         }
 
         // ---------------- output gain + monitoring ----------------
@@ -541,9 +566,20 @@ struct BlokMaster : Module {
         lights[AUTO_LIGHT].setBrightness(params[AUTO_PARAM].getValue());
         lights[MONO_LIGHT].setBrightness(params[MONO_PARAM].getValue());
         lights[SIDESOLO_LIGHT].setBrightness(params[SIDESOLO_PARAM].getValue());
+        for (int i = 0; i < NUM_VIEWS; i++) lights[VIEW_LIM_LIGHT + i].setBrightness(view == i ? 1.f : 0.f);
     }
 
     void resetIntegrated() { intSum = 0.0; intCount = 0.0; disp.lufsI = -70.f; }
+
+    json_t* dataToJson() override {
+        json_t* root = json_object();
+        json_object_set_new(root, "view", json_integer(view));
+        return root;
+    }
+    void dataFromJson(json_t* root) override {
+        json_t* v = json_object_get(root, "view");
+        if (v) view = clamp((int) json_integer_value(v), 0, NUM_VIEWS - 1);
+    }
 };
 
 // ============================================================================
@@ -711,124 +747,217 @@ struct MeterDisplay : MasterDisplayBase {
     }
 };
 
-// ---- LIMITER: scrolling level history with the GR curve over it -------------
-struct LimiterTracker : MasterDisplayBase {
+// ---- DYNAMICS: scrolling history - limiter / compressor / leveler / loudness ----
+struct DynamicsTracker : MasterDisplayBase {
+    typedef float TrackFrame::*Field;
     TrackFrame buf[NVIEW];
+    int n = 0;
+    float sx = 4.f, sy = 4.f, sw = 0.f, sh = 0.f;   // plot area
+    float top = 3.f, bot = -45.f;                   // value range of the plot
 
-    void hline(const DrawArgs& a, float x0, float x1, float y, NVGcolor c, bool dashed) {
-        nvgStrokeWidth(a.vg, 0.8f);
-        nvgStrokeColor(a.vg, c);
-        nvgBeginPath(a.vg);
-        if (!dashed) { nvgMoveTo(a.vg, x0, y); nvgLineTo(a.vg, x1, y); }
-        else for (float x = x0; x < x1; x += 5.f) { nvgMoveTo(a.vg, x, y); nvgLineTo(a.vg, std::min(x + 2.5f, x1), y); }
-        nvgStroke(a.vg);
-    }
-    void drawLayer(const DrawArgs& a, int layer) override {
-        if (layer != 1) return;
-        float W = box.size.x, H = box.size.y;
-        float sx = 4.f, sy = 4.f, sw = W - 8.f, sh = H - 30.f;
-        const float DB_TOP = 3.f, DB_BOT = -45.f;
-        float pxDb = sh / (DB_TOP - DB_BOT);
-        auto yOf = [&](float db) { return sy + (DB_TOP - fclamp(db, DB_BOT, DB_TOP)) * pxDb; };
+    float yOf(float v) { return sy + (top - fclamp(v, bot, top)) / (top - bot) * sh; }
+    float xOf(int k) { return sx + sw - (n - 1 - k) * sw / (NVIEW - 1); }     // newest frame at the right edge
+    float pxPer() { return sh / (top - bot); }
 
-        // ---- copy the newest frames out of the ring ----
-        int n = 0;
+    // copy the newest frames out of the ring (or make up a preview for the module browser)
+    void fetch() {
         if (module) {
             uint32_t pos = module->trackPos.load(std::memory_order_acquire);
             n = (int) std::min<uint32_t>(pos, NVIEW);
             for (int k = 0; k < n; k++) buf[k] = module->track[(pos - n + k) % NTRACK];
-        } else {
-            n = NVIEW;                                  // module browser preview
-            for (int k = 0; k < n; k++) {
-                float in = -10.f + 5.f * std::sin(k * 0.05f) + 4.f * std::sin(k * 0.37f) * std::sin(k * 0.011f);
-                float gr = std::max(0.f, in + 1.f);
-                buf[k].inDb = in; buf[k].outDb = in - gr + 0.9f; buf[k].limGr = gr; buf[k].compGr = 2.f + std::sin(k * 0.02f);
-            }
+            return;
         }
-        float thrDb = module ? module->params[BlokMaster::LIMIT_THRESH_PARAM].getValue() : -1.f;
-        float ceilDb = module ? module->params[BlokMaster::LIMIT_CEILING_PARAM].getValue() : -0.1f;
-        float step = sw / (NVIEW - 1);
-        auto xOf = [&](int k) { return sx + sw - (n - 1 - k) * step; };    // newest frame at the right edge
+        n = NVIEW;
+        for (int k = 0; k < n; k++) {
+            TrackFrame& f = buf[k];
+            float in = -10.f + 5.f * std::sin(k * 0.05f) + 4.f * std::sin(k * 0.37f) * std::sin(k * 0.011f);
+            f.limGr = std::max(0.f, in + 1.f);
+            f.inDb = in; f.outDb = in - f.limGr + 0.9f;
+            f.cInDb = in - 4.f; f.compGr = std::max(0.f, (f.cInDb + 12.f) * 0.5f); f.cOutDb = f.cInDb - f.compGr;
+            f.mbLo = 3.f * std::sin(k * 0.03f); f.mbMid = -2.f + std::sin(k * 0.05f); f.mbHi = 2.f * std::sin(k * 0.021f + 1.f);
+            f.lufsS = -14.f + 2.f * std::sin(k * 0.02f); f.lufsM = f.lufsS + 2.5f * std::sin(k * 0.13f);
+        }
+    }
 
-        // ---- grid + dB scale ----
+    void hline(const DrawArgs& a, float y, NVGcolor c, bool dashed) {
+        nvgStrokeWidth(a.vg, 0.8f);
+        nvgStrokeColor(a.vg, c);
+        nvgBeginPath(a.vg);
+        if (!dashed) { nvgMoveTo(a.vg, sx, y); nvgLineTo(a.vg, sx + sw, y); }
+        else for (float x = sx; x < sx + sw; x += 5.f) { nvgMoveTo(a.vg, x, y); nvgLineTo(a.vg, std::min(x + 2.5f, sx + sw), y); }
+        nvgStroke(a.vg);
+    }
+    // filled area from the bottom edge up to a level curve
+    void area(const DrawArgs& a, Field m, NVGpaint p) {
+        if (n < 2) return;
+        nvgBeginPath(a.vg);
+        nvgMoveTo(a.vg, xOf(0), sy + sh);
+        for (int k = 0; k < n; k++) nvgLineTo(a.vg, xOf(k), yOf(buf[k].*m));
+        nvgLineTo(a.vg, xOf(n - 1), sy + sh);
+        nvgClosePath(a.vg);
+        nvgFillPaint(a.vg, p);
+        nvgFill(a.vg);
+    }
+    NVGpaint solid(const DrawArgs& a, NVGcolor c) { return nvgLinearGradient(a.vg, 0, 0, 0, 1, c, c); }
+    NVGpaint glow(const DrawArgs& a) { return nvgLinearGradient(a.vg, 0, sy, 0, sy + sh, nvgRGBA(255, 220, 120, 210), nvgRGBA(255, 100, 0, 110)); }
+    // a curve; GR curves (fromTop) hang from the top edge on the plot's dB scale
+    void curve(const DrawArgs& a, Field m, bool fromTop, NVGcolor c, float w) {
+        if (n < 2) return;
+        nvgBeginPath(a.vg);
+        for (int k = 0; k < n; k++) {
+            float y = fromTop ? sy + buf[k].*m * pxPer() : yOf(buf[k].*m);
+            if (k == 0) nvgMoveTo(a.vg, xOf(k), y); else nvgLineTo(a.vg, xOf(k), y);
+        }
+        nvgStrokeWidth(a.vg, w);
+        nvgStrokeColor(a.vg, c);
+        nvgStroke(a.vg);
+    }
+    void grFill(const DrawArgs& a, Field m, NVGcolor c) {
+        if (n < 2) return;
+        nvgBeginPath(a.vg);
+        nvgMoveTo(a.vg, xOf(0), sy);
+        for (int k = 0; k < n; k++) nvgLineTo(a.vg, xOf(k), sy + buf[k].*m * pxPer());
+        nvgLineTo(a.vg, xOf(n - 1), sy);
+        nvgClosePath(a.vg);
+        nvgFillColor(a.vg, c);
+        nvgFill(a.vg);
+    }
+    void grid(const DrawArgs& a, float from, float step, int labelEvery, bool plus) {
+        char b[16];
         nvgStrokeWidth(a.vg, 0.5f);
         nvgStrokeColor(a.vg, nvgRGBA(255, 180, 90, 28));
-        for (float db = 0.f; db >= DB_BOT; db -= 6.f) { nvgBeginPath(a.vg); nvgMoveTo(a.vg, sx, yOf(db)); nvgLineTo(a.vg, sx + sw, yOf(db)); nvgStroke(a.vg); }
+        int i = 0;
+        for (float v = from; v >= bot; v -= step, i++) {
+            nvgBeginPath(a.vg); nvgMoveTo(a.vg, sx, yOf(v)); nvgLineTo(a.vg, sx + sw, yOf(v)); nvgStroke(a.vg);
+            if (i % labelEvery || v < bot + 1.f) continue;
+            snprintf(b, sizeof b, plus && v > 0.f ? "+%d" : "%d", (int) v);
+            text(a, sx + 1.f, yOf(v) + 1.f, b, 6.f, nvgRGBA(255, 180, 90, 110), NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+        }
+    }
+    void tag(const DrawArgs& a, float x, float y, const char* s, NVGcolor c, int align) {
+        text(a, x, y, s, 6.f, c, align);
+    }
+    float maxOf(Field m) { float v = -90.f; for (int k = 0; k < n; k++) v = std::max(v, buf[k].*m); return v; }
+    float last(Field m, float dflt) { return n ? buf[n - 1].*m : dflt; }
 
+    // four-column readout under the plot, same look as the analyzer's loudness row
+    void readout(const DrawArgs& a, const char* const nm[4], const float val[4], const bool hot[4], const char* const unit[4]) {
+        float W = box.size.x, H = box.size.y, y0 = H - 17.f, colW = (W - 8.f) / 4.f;
+        char b[32];
+        nvgSave(a.vg);
+        nvgResetScissor(a.vg);          // the readout sits below the clipped plot area
+        for (int k = 0; k < 4; k++) {
+            float x = 4.f + colW * (k + 0.5f), v = std::fabs(val[k]) < 0.05f ? 0.f : val[k];     // no "-0.0"
+            text(a, x, y0, nm[k], 6.f, nvgRGBA(255, 180, 90, 120), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+            if (v < -69.f) snprintf(b, sizeof b, "--");
+            else snprintf(b, sizeof b, "%.1f%s", v, unit[k]);
+            text(a, x, y0 + 6.5f, b, 8.5f, hot[k] ? nvgRGBA(255, 70, 50, 255) : AMB(), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+        }
+        nvgRestore(a.vg);
+    }
+    float param(int id, float dflt) { return module ? module->params[id].getValue() : dflt; }
+
+    void drawLimiter(const DrawArgs& a) {
+        top = 3.f; bot = -45.f;
+        float thrDb = param(BlokMaster::LIMIT_THRESH_PARAM, -1.f), ceilDb = param(BlokMaster::LIMIT_CEILING_PARAM, -0.1f);
+        grid(a, 0.f, 6.f, 2, false);
+        area(a, &TrackFrame::inDb, solid(a, AMB(45)));
+        area(a, &TrackFrame::outDb, glow(a));
+        hline(a, yOf(thrDb), AMB(150), true);
+        hline(a, yOf(ceilDb), nvgRGBA(255, 70, 50, 200), false);
+        grFill(a, &TrackFrame::limGr, nvgRGBA(255, 70, 50, 45));
+        curve(a, &TrackFrame::limGr, true, nvgRGBA(255, 70, 50, 255), 1.2f);
+        tag(a, sx + sw - 1.f, yOf(ceilDb) - 1.f, "CEIL", nvgRGBA(255, 70, 50, 200), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        tag(a, sx + sw - 1.f, yOf(thrDb) + 1.f, "THR", AMB(150), NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+        tag(a, sx + sw - 1.f, sy + sh - 2.f, "IN", AMB(120), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        tag(a, sx + sw - 13.f, sy + sh - 2.f, "OUT", nvgRGBA(255, 200, 100, 230), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        const char* nm[4] = {"LIM GR", "MAX GR", "CEIL", "OUT PK"};
+        const char* un[4] = {"", "", "", ""};
+        float val[4] = {-last(&TrackFrame::limGr, 0.f), -maxOf(&TrackFrame::limGr), ceilDb, maxOf(&TrackFrame::outDb)};
+        bool hot[4] = {val[0] < -0.05f, val[1] < -0.05f, false, false};
+        readout(a, nm, val, hot, un);
+    }
+    void drawComp(const DrawArgs& a) {
+        top = 3.f; bot = -45.f;
+        float thrDb = module ? module->compThrDb : -12.f;
+        bool ext = module && module->inputs[BlokMaster::SIDECHAIN_INPUT].isConnected();
+        grid(a, 0.f, 6.f, 2, false);
+        area(a, &TrackFrame::cInDb, solid(a, AMB(45)));
+        area(a, &TrackFrame::cOutDb, glow(a));
+        hline(a, yOf(thrDb), AMB(150), true);
+        grFill(a, &TrackFrame::compGr, nvgRGBA(255, 140, 30, 45));
+        curve(a, &TrackFrame::compGr, true, nvgRGBA(255, 140, 30, 255), 1.2f);
+        tag(a, sx + sw - 1.f, yOf(thrDb) + 1.f, "THR", AMB(150), NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+        tag(a, sx + sw - 1.f, sy + sh - 2.f, ext ? "SC" : "DET", AMB(120), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        tag(a, sx + sw - 17.f, sy + sh - 2.f, "OUT", nvgRGBA(255, 200, 100, 230), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        const char* nm[4] = {"CMP GR", "MAX GR", "THR", "RATIO"};
+        const char* un[4] = {"", "", "", ":1"};
+        float val[4] = {-last(&TrackFrame::compGr, 0.f), -maxOf(&TrackFrame::compGr), thrDb, param(BlokMaster::COMP_RATIO_PARAM, 2.f)};
+        bool hot[4] = {val[0] < -0.05f, val[1] < -0.05f, false, false};
+        readout(a, nm, val, hot, un);
+    }
+    void drawMulti(const DrawArgs& a) {
+        top = 10.f; bot = -10.f;
+        grid(a, 10.f, 2.5f, 2, true);
+        hline(a, yOf(0.f), AMB(90), false);
+        NVGcolor cl = nvgRGBA(255, 122, 0, 255), cm = nvgRGBA(255, 190, 90, 255), ch = nvgRGBA(255, 240, 200, 255);
+        curve(a, &TrackFrame::mbLo, false, cl, 1.2f);
+        curve(a, &TrackFrame::mbMid, false, cm, 1.2f);
+        curve(a, &TrackFrame::mbHi, false, ch, 1.2f);
+        tag(a, sx + sw - 1.f, sy + sh - 2.f, "HI", ch, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        tag(a, sx + sw - 11.f, sy + sh - 2.f, "MID", cm, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        tag(a, sx + sw - 27.f, sy + sh - 2.f, "LOW", cl, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        float amt = param(BlokMaster::MB_PARAM, 0.5f);
+        if (amt < 0.001f) text(a, sx + sw * 0.5f, sy + sh * 0.3f, "LEVELER OFF", 7.f, AMB(110), NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        const char* nm[4] = {"LOW", "MID", "HIGH", "AMOUNT"};
+        const char* un[4] = {"", "", "", "%"};
+        float val[4] = {last(&TrackFrame::mbLo, 0.f), last(&TrackFrame::mbMid, 0.f), last(&TrackFrame::mbHi, 0.f), amt * 100.f};
+        bool hot[4] = {false, false, false, false};
+        readout(a, nm, val, hot, un);
+    }
+    void drawLoud(const DrawArgs& a) {
+        top = 0.f; bot = -42.f;
+        float integ = module ? module->disp.lufsI : -14.f;
+        grid(a, 0.f, 6.f, 2, false);
+        area(a, &TrackFrame::lufsS, glow(a));
+        curve(a, &TrackFrame::lufsM, false, nvgRGBA(255, 240, 200, 200), 1.f);
+        hline(a, yOf(-14.f), nvgRGBA(120, 220, 90, 150), true);
+        tag(a, sx + sw - 1.f, yOf(-14.f) - 1.f, "-14", nvgRGBA(120, 220, 90, 180), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        if (integ > -69.f) {
+            hline(a, yOf(integ), AMB(150), false);
+            tag(a, sx + sw - 1.f, yOf(integ) + 1.f, "INT", AMB(150), NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+        }
+        tag(a, sx + sw - 1.f, sy + sh - 2.f, "MOM", nvgRGBA(255, 240, 200, 200), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        tag(a, sx + sw - 17.f, sy + sh - 2.f, "SHORT", nvgRGBA(255, 200, 100, 230), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        const char* nm[4] = {"MOM", "SHORT", "INTEG", "MAX S"};
+        const char* un[4] = {"", "", "", ""};
+        float val[4] = {last(&TrackFrame::lufsM, -70.f), last(&TrackFrame::lufsS, -70.f), integ, n ? maxOf(&TrackFrame::lufsS) : -70.f};
+        bool hot[4] = {false, false, false, false};
+        readout(a, nm, val, hot, un);
+    }
+
+    void drawLayer(const DrawArgs& a, int layer) override {
+        if (layer != 1) return;
+        sw = box.size.x - 8.f; sh = box.size.y - 30.f;
+        fetch();
+        int v = module ? module->view : VIEW_LIM;
+        static const char* title[NUM_VIEWS] = {"LIMITER", "COMPRESSOR", "LEVELER", "LOUDNESS"};
         nvgSave(a.vg);
         nvgScissor(a.vg, sx, sy, sw, sh);
-        if (n >= 2) {
-            // input level (dim) and output level (bright) as filled areas from the bottom
-            nvgBeginPath(a.vg);
-            nvgMoveTo(a.vg, xOf(0), sy + sh);
-            for (int k = 0; k < n; k++) nvgLineTo(a.vg, xOf(k), yOf(buf[k].inDb));
-            nvgLineTo(a.vg, xOf(n - 1), sy + sh);
-            nvgClosePath(a.vg);
-            nvgFillColor(a.vg, AMB(45));
-            nvgFill(a.vg);
-
-            nvgBeginPath(a.vg);
-            nvgMoveTo(a.vg, xOf(0), sy + sh);
-            for (int k = 0; k < n; k++) nvgLineTo(a.vg, xOf(k), yOf(buf[k].outDb));
-            nvgLineTo(a.vg, xOf(n - 1), sy + sh);
-            nvgClosePath(a.vg);
-            nvgFillPaint(a.vg, nvgLinearGradient(a.vg, 0, sy, 0, sy + sh, nvgRGBA(255, 220, 120, 210), nvgRGBA(255, 100, 0, 110)));
-            nvgFill(a.vg);
-        }
-        // threshold (dashed) and ceiling (solid)
-        hline(a, sx, sx + sw, yOf(thrDb), AMB(150), true);
-        hline(a, sx, sx + sw, yOf(ceilDb), nvgRGBA(255, 70, 50, 200), false);
-        if (n >= 2) {
-            // GR curves hang from the top edge on the same dB scale
-            nvgBeginPath(a.vg);
-            nvgMoveTo(a.vg, xOf(0), sy);
-            for (int k = 0; k < n; k++) nvgLineTo(a.vg, xOf(k), sy + buf[k].limGr * pxDb);
-            nvgLineTo(a.vg, xOf(n - 1), sy);
-            nvgClosePath(a.vg);
-            nvgFillColor(a.vg, nvgRGBA(255, 70, 50, 45));
-            nvgFill(a.vg);
-
-            nvgStrokeWidth(a.vg, 1.f);
-            nvgBeginPath(a.vg);
-            for (int k = 0; k < n; k++) { float y = sy + buf[k].compGr * pxDb; if (k == 0) nvgMoveTo(a.vg, xOf(k), y); else nvgLineTo(a.vg, xOf(k), y); }
-            nvgStrokeColor(a.vg, nvgRGBA(255, 140, 30, 150));
-            nvgStroke(a.vg);
-
-            nvgStrokeWidth(a.vg, 1.2f);
-            nvgBeginPath(a.vg);
-            for (int k = 0; k < n; k++) { float y = sy + buf[k].limGr * pxDb; if (k == 0) nvgMoveTo(a.vg, xOf(k), y); else nvgLineTo(a.vg, xOf(k), y); }
-            nvgStrokeColor(a.vg, nvgRGBA(255, 70, 50, 255));
-            nvgStroke(a.vg);
-        }
+        if (v == VIEW_COMP) drawComp(a);
+        else if (v == VIEW_MULTI) drawMulti(a);
+        else if (v == VIEW_LOUD) drawLoud(a);
+        else drawLimiter(a);
+        text(a, sx + sw * 0.5f, sy + 1.f, title[v], 6.f, AMB(90), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
         nvgResetScissor(a.vg);
         nvgRestore(a.vg);
-
-        // scale labels + legend
-        char b[48];
-        for (float db = 0.f; db >= DB_BOT + 1.f; db -= 12.f) {
-            snprintf(b, sizeof b, "%d", (int) db);
-            text(a, sx + 1.f, yOf(db) + 1.f, b, 6.f, nvgRGBA(255, 180, 90, 110), NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-        }
-        text(a, sx + sw - 1.f, yOf(ceilDb) - 1.f, "CEIL", 6.f, nvgRGBA(255, 70, 50, 200), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
-        text(a, sx + sw - 1.f, yOf(thrDb) + 1.f, "THR", 6.f, AMB(150), NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
-        text(a, sx + sw - 1.f, sy + sh - 2.f, "IN", 6.f, AMB(120), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
-        text(a, sx + sw - 13.f, sy + sh - 2.f, "OUT", 6.f, nvgRGBA(255, 200, 100, 230), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
-
-        // ---- readout: GR now / max GR over the view / comp GR / out peak over the view ----
-        float limNow = n ? buf[n - 1].limGr : 0.f, cmpNow = n ? buf[n - 1].compGr : 0.f, grMax = 0.f, outMax = -90.f;
-        for (int k = 0; k < n; k++) { grMax = std::max(grMax, buf[k].limGr); outMax = std::max(outMax, buf[k].outDb); }
-        float y0 = H - 17.f, colW = (W - 8.f) / 4.f;
-        const char* nm[4] = {"LIM GR", "MAX GR", "CMP GR", "OUT PK"};
-        float val[4] = {-limNow, -grMax, -cmpNow, outMax};
-        for (int k = 0; k < 4; k++) {
-            float x = 4.f + colW * (k + 0.5f);
-            text(a, x, y0, nm[k], 6.f, nvgRGBA(255, 180, 90, 120), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
-            if (val[k] < -69.f) snprintf(b, sizeof b, "--");
-            else snprintf(b, sizeof b, "%.1f", val[k]);
-            NVGcolor c = (k < 2 && val[k] < -0.05f) ? nvgRGBA(255, 70, 50, 255) : AMB();
-            text(a, x, y0 + 6.5f, b, 8.5f, c, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
-        }
         frame(a);
+    }
+    void onButton(const event::Button& e) override {
+        if (module && e.action == GLFW_PRESS && e.button == GLFW_MOUSE_BUTTON_LEFT) {
+            module->view = (module->view + 1) % NUM_VIEWS;      // click the display to step through the views
+            e.consume(this);
+        }
     }
 };
 } // namespace
@@ -908,11 +1037,18 @@ struct BlokMasterWidget : ModuleWidget {
         md->box.size = mm2px(Vec(BML::D2[2], BML::D2[3]));
         addChild(md);
 
-        auto* lt = new LimiterTracker();
-        lt->module = module;
-        lt->box.pos = mm2px(Vec(BML::D3[0], BML::D3[1]));
-        lt->box.size = mm2px(Vec(BML::D3[2], BML::D3[3]));
-        addChild(lt);
+        auto* dt = new DynamicsTracker();
+        dt->module = module;
+        dt->box.pos = mm2px(Vec(BML::D3[0], BML::D3[1]));
+        dt->box.size = mm2px(Vec(BML::D3[2], BML::D3[3]));
+        addChild(dt);
+
+        // tracker view buttons (light under the cap shows the active view)
+        for (int i = 0; i < NUM_VIEWS; i++) {
+            Vec p = mm2px(Vec(BML::VIEW_X[i], BML::VIEW_Y));
+            addChild(createLightCentered<SmallLight<YellowLight>>(p, module, BlokMaster::VIEW_LIM_LIGHT + i));
+            addParam(createParamCentered<TL1105>(p, module, BlokMaster::VIEW_LIM_PARAM + i));
+        }
     }
 
     void appendContextMenu(Menu* menu) override {
