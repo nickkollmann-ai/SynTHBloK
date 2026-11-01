@@ -7,13 +7,15 @@
 //     -> width + mono bass -> look-ahead brick-wall limiter -> output gain
 //     -> mono check / side solo -> OUT
 //  Meters: spectrum, loudness (LUFS M / S / I), vectorscope, correlation,
-//          input / output peaks, GR for comp, leveler and limiter.
+//          input / output peaks, GR for comp, leveler and limiter,
+//          scrolling limiter tracker (level history + GR curve).
 // ============================================================================
 
 #include "plugin.hpp"
 #include "BloKMaster_layout.hpp"
 #include <cmath>
 #include <algorithm>
+#include <atomic>
 
 namespace {
 
@@ -89,6 +91,11 @@ struct LR4 {
 const int NSPEC = 24;
 const int NSCOPE = 256;
 const int LA_MAX = 128;
+const int NTRACK = 512;     // limiter tracker history (power of two), one frame per 10 ms
+const int NVIEW = 400;      // frames on screen = 4 s
+
+// one block of the limiter tracker history (dB)
+struct TrackFrame { float inDb = -90.f, outDb = -90.f, limGr = 0.f, compGr = 0.f; };
 
 } // namespace
 
@@ -130,6 +137,12 @@ struct BlokMaster : Module {
         int scopeIdx = 0;
     } disp;
     float specFreq[NSPEC];
+
+    // ---- limiter tracker: lock-free ring, written by process(), read by the display ----
+    TrackFrame track[NTRACK];
+    std::atomic<uint32_t> trackPos{0};      // frames written so far (frame i lives at i % NTRACK)
+    int trkCount = 0, trkLen = 480;
+    float trkIn = 0.f, trkOut = 0.f, trkLimG = 1.f, trkCompG = 0.f;
 
     // ---- DSP state ----
     float sr = 48000.f;
@@ -265,6 +278,7 @@ struct BlokMaster : Module {
         std::fill(limGreq, limGreq + 2 * LA_MAX, 1.f);
         std::fill(limGmin, limGmin + LA_MAX, 1.f);
         limRel = 1.f;
+        trkLen = std::max(1, (int) std::round(0.01f * sr));
     }
 
     // ------------------------------------------------------------------
@@ -419,6 +433,7 @@ struct BlokMaster : Module {
         float push = db2lin(pushDb), ceilLin = FS_V * db2lin(ceilDb);
         float limRelStep = onePole(params[LIMIT_RELEASE_PARAM].getValue(), sr);
         float limOut[2];
+        float limInPk = std::max(std::fabs(l), std::fabs(r));
         {
             float pk = std::max(std::fabs(l), std::fabs(r)) * push;
             float greq = pk > ceilLin ? ceilLin / pk : 1.f;
@@ -441,6 +456,20 @@ struct BlokMaster : Module {
             limOut[1] = fclamp(limOut[1], -ceilLin, ceilLin);
         }
         l = limOut[0]; r = limOut[1];
+
+        // limiter tracker: per-block peaks and worst-case GR, published once per block
+        trkIn = std::max(trkIn, limInPk);
+        trkOut = std::max(trkOut, std::max(std::fabs(l), std::fabs(r)));
+        trkLimG = std::min(trkLimG, limRel);
+        trkCompG = std::max(trkCompG, compG);
+        if (++trkCount >= trkLen) {
+            uint32_t p = trackPos.load(std::memory_order_relaxed);
+            TrackFrame& f = track[p % NTRACK];
+            f.inDb = lin2db(trkIn / FS_V); f.outDb = lin2db(trkOut / FS_V);
+            f.limGr = -lin2db(trkLimG); f.compGr = trkCompG;
+            trackPos.store(p + 1, std::memory_order_release);
+            trkCount = 0; trkIn = trkOut = 0.f; trkLimG = 1.f; trkCompG = 0.f;
+        }
 
         // ---------------- output gain + monitoring ----------------
         float oT = db2lin(params[OUT_GAIN_PARAM].getValue());
@@ -681,6 +710,127 @@ struct MeterDisplay : MasterDisplayBase {
         frame(a);
     }
 };
+
+// ---- LIMITER: scrolling level history with the GR curve over it -------------
+struct LimiterTracker : MasterDisplayBase {
+    TrackFrame buf[NVIEW];
+
+    void hline(const DrawArgs& a, float x0, float x1, float y, NVGcolor c, bool dashed) {
+        nvgStrokeWidth(a.vg, 0.8f);
+        nvgStrokeColor(a.vg, c);
+        nvgBeginPath(a.vg);
+        if (!dashed) { nvgMoveTo(a.vg, x0, y); nvgLineTo(a.vg, x1, y); }
+        else for (float x = x0; x < x1; x += 5.f) { nvgMoveTo(a.vg, x, y); nvgLineTo(a.vg, std::min(x + 2.5f, x1), y); }
+        nvgStroke(a.vg);
+    }
+    void drawLayer(const DrawArgs& a, int layer) override {
+        if (layer != 1) return;
+        float W = box.size.x, H = box.size.y;
+        float sx = 4.f, sy = 4.f, sw = W - 8.f, sh = H - 30.f;
+        const float DB_TOP = 3.f, DB_BOT = -45.f;
+        float pxDb = sh / (DB_TOP - DB_BOT);
+        auto yOf = [&](float db) { return sy + (DB_TOP - fclamp(db, DB_BOT, DB_TOP)) * pxDb; };
+
+        // ---- copy the newest frames out of the ring ----
+        int n = 0;
+        if (module) {
+            uint32_t pos = module->trackPos.load(std::memory_order_acquire);
+            n = (int) std::min<uint32_t>(pos, NVIEW);
+            for (int k = 0; k < n; k++) buf[k] = module->track[(pos - n + k) % NTRACK];
+        } else {
+            n = NVIEW;                                  // module browser preview
+            for (int k = 0; k < n; k++) {
+                float in = -10.f + 5.f * std::sin(k * 0.05f) + 4.f * std::sin(k * 0.37f) * std::sin(k * 0.011f);
+                float gr = std::max(0.f, in + 1.f);
+                buf[k].inDb = in; buf[k].outDb = in - gr + 0.9f; buf[k].limGr = gr; buf[k].compGr = 2.f + std::sin(k * 0.02f);
+            }
+        }
+        float thrDb = module ? module->params[BlokMaster::LIMIT_THRESH_PARAM].getValue() : -1.f;
+        float ceilDb = module ? module->params[BlokMaster::LIMIT_CEILING_PARAM].getValue() : -0.1f;
+        float step = sw / (NVIEW - 1);
+        auto xOf = [&](int k) { return sx + sw - (n - 1 - k) * step; };    // newest frame at the right edge
+
+        // ---- grid + dB scale ----
+        nvgStrokeWidth(a.vg, 0.5f);
+        nvgStrokeColor(a.vg, nvgRGBA(255, 180, 90, 28));
+        for (float db = 0.f; db >= DB_BOT; db -= 6.f) { nvgBeginPath(a.vg); nvgMoveTo(a.vg, sx, yOf(db)); nvgLineTo(a.vg, sx + sw, yOf(db)); nvgStroke(a.vg); }
+
+        nvgSave(a.vg);
+        nvgScissor(a.vg, sx, sy, sw, sh);
+        if (n >= 2) {
+            // input level (dim) and output level (bright) as filled areas from the bottom
+            nvgBeginPath(a.vg);
+            nvgMoveTo(a.vg, xOf(0), sy + sh);
+            for (int k = 0; k < n; k++) nvgLineTo(a.vg, xOf(k), yOf(buf[k].inDb));
+            nvgLineTo(a.vg, xOf(n - 1), sy + sh);
+            nvgClosePath(a.vg);
+            nvgFillColor(a.vg, AMB(45));
+            nvgFill(a.vg);
+
+            nvgBeginPath(a.vg);
+            nvgMoveTo(a.vg, xOf(0), sy + sh);
+            for (int k = 0; k < n; k++) nvgLineTo(a.vg, xOf(k), yOf(buf[k].outDb));
+            nvgLineTo(a.vg, xOf(n - 1), sy + sh);
+            nvgClosePath(a.vg);
+            nvgFillPaint(a.vg, nvgLinearGradient(a.vg, 0, sy, 0, sy + sh, nvgRGBA(255, 220, 120, 210), nvgRGBA(255, 100, 0, 110)));
+            nvgFill(a.vg);
+        }
+        // threshold (dashed) and ceiling (solid)
+        hline(a, sx, sx + sw, yOf(thrDb), AMB(150), true);
+        hline(a, sx, sx + sw, yOf(ceilDb), nvgRGBA(255, 70, 50, 200), false);
+        if (n >= 2) {
+            // GR curves hang from the top edge on the same dB scale
+            nvgBeginPath(a.vg);
+            nvgMoveTo(a.vg, xOf(0), sy);
+            for (int k = 0; k < n; k++) nvgLineTo(a.vg, xOf(k), sy + buf[k].limGr * pxDb);
+            nvgLineTo(a.vg, xOf(n - 1), sy);
+            nvgClosePath(a.vg);
+            nvgFillColor(a.vg, nvgRGBA(255, 70, 50, 45));
+            nvgFill(a.vg);
+
+            nvgStrokeWidth(a.vg, 1.f);
+            nvgBeginPath(a.vg);
+            for (int k = 0; k < n; k++) { float y = sy + buf[k].compGr * pxDb; if (k == 0) nvgMoveTo(a.vg, xOf(k), y); else nvgLineTo(a.vg, xOf(k), y); }
+            nvgStrokeColor(a.vg, nvgRGBA(255, 140, 30, 150));
+            nvgStroke(a.vg);
+
+            nvgStrokeWidth(a.vg, 1.2f);
+            nvgBeginPath(a.vg);
+            for (int k = 0; k < n; k++) { float y = sy + buf[k].limGr * pxDb; if (k == 0) nvgMoveTo(a.vg, xOf(k), y); else nvgLineTo(a.vg, xOf(k), y); }
+            nvgStrokeColor(a.vg, nvgRGBA(255, 70, 50, 255));
+            nvgStroke(a.vg);
+        }
+        nvgResetScissor(a.vg);
+        nvgRestore(a.vg);
+
+        // scale labels + legend
+        char b[48];
+        for (float db = 0.f; db >= DB_BOT + 1.f; db -= 12.f) {
+            snprintf(b, sizeof b, "%d", (int) db);
+            text(a, sx + 1.f, yOf(db) + 1.f, b, 6.f, nvgRGBA(255, 180, 90, 110), NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+        }
+        text(a, sx + sw - 1.f, yOf(ceilDb) - 1.f, "CEIL", 6.f, nvgRGBA(255, 70, 50, 200), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        text(a, sx + sw - 1.f, yOf(thrDb) + 1.f, "THR", 6.f, AMB(150), NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+        text(a, sx + sw - 1.f, sy + sh - 2.f, "IN", 6.f, AMB(120), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        text(a, sx + sw - 13.f, sy + sh - 2.f, "OUT", 6.f, nvgRGBA(255, 200, 100, 230), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+
+        // ---- readout: GR now / max GR over the view / comp GR / out peak over the view ----
+        float limNow = n ? buf[n - 1].limGr : 0.f, cmpNow = n ? buf[n - 1].compGr : 0.f, grMax = 0.f, outMax = -90.f;
+        for (int k = 0; k < n; k++) { grMax = std::max(grMax, buf[k].limGr); outMax = std::max(outMax, buf[k].outDb); }
+        float y0 = H - 17.f, colW = (W - 8.f) / 4.f;
+        const char* nm[4] = {"LIM GR", "MAX GR", "CMP GR", "OUT PK"};
+        float val[4] = {-limNow, -grMax, -cmpNow, outMax};
+        for (int k = 0; k < 4; k++) {
+            float x = 4.f + colW * (k + 0.5f);
+            text(a, x, y0, nm[k], 6.f, nvgRGBA(255, 180, 90, 120), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+            if (val[k] < -69.f) snprintf(b, sizeof b, "--");
+            else snprintf(b, sizeof b, "%.1f", val[k]);
+            NVGcolor c = (k < 2 && val[k] < -0.05f) ? nvgRGBA(255, 70, 50, 255) : AMB();
+            text(a, x, y0 + 6.5f, b, 8.5f, c, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+        }
+        frame(a);
+    }
+};
 } // namespace
 
 // ============================================================================
@@ -757,6 +907,12 @@ struct BlokMasterWidget : ModuleWidget {
         md->box.pos = mm2px(Vec(BML::D2[0], BML::D2[1]));
         md->box.size = mm2px(Vec(BML::D2[2], BML::D2[3]));
         addChild(md);
+
+        auto* lt = new LimiterTracker();
+        lt->module = module;
+        lt->box.pos = mm2px(Vec(BML::D3[0], BML::D3[1]));
+        lt->box.size = mm2px(Vec(BML::D3[2], BML::D3[3]));
+        addChild(lt);
     }
 
     void appendContextMenu(Menu* menu) override {
