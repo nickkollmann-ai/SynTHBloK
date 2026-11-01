@@ -202,6 +202,31 @@ struct Svf {
     }
 };
 
+// Master DJ filter: amt -1..0 sweeps a low-pass down from 20 kHz to 80 Hz, 0..+1 a high-pass up from
+// 20 Hz to 8 kHz. One stereo SVF serves both, so passing through the centre never clicks; a small dead
+// zone there is true bypass. Fixed gentle resonance (a little bump, never a scream).
+struct DjFilter {
+    float ic1[2] = {}, ic2[2] = {};
+    void process(float& l, float& r, float amt, float sr) {
+        float a = std::fabs(amt);
+        float fc = amt < 0.f ? 20000.f * std::pow(80.f / 20000.f, a) : 20.f * std::pow(8000.f / 20.f, a);
+        float g = std::tan(float(M_PI) * clampf(fc, 20.f, sr * 0.45f) / sr);
+        const float k = 1.2f;
+        float a1 = 1.f / (1.f + g * (g + k)), a2 = g * a1, a3 = g * a2;
+        float wet = clampf((a - 0.02f) / 0.08f, 0.f, 1.f);
+        float* io[2] = {&l, &r};
+        for (int c = 0; c < 2; c++) {
+            float x = *io[c];
+            float v3 = x - ic2[c];
+            float v1 = a1 * ic1[c] + a2 * v3;
+            float v2 = ic2[c] + a2 * ic1[c] + a3 * v3;
+            ic1[c] = 2.f * v1 - ic1[c]; ic2[c] = 2.f * v2 - ic2[c];
+            float y = amt < 0.f ? v2 : x - k * v1 - v2;
+            *io[c] = x + (y - x) * wet;
+        }
+    }
+};
+
 static const char* kChordName[8] = {"HARM", "FIFTH", "MAJ", "MIN", "SUS4", "MAJ7", "MIN7", "CLUSTER"};
 static const float kChord[8][4] = {
     {1.f, 2.f, 3.f, 4.f}, {1.f, 1.5f, 2.f, 3.f}, {1.f, 1.26f, 1.5f, 2.f}, {1.f, 1.189f, 1.5f, 2.f},

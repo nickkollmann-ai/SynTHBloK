@@ -7,6 +7,7 @@
 // ============================================================================
 #include "plugin.hpp"
 #include "SynTHBloKGrainForge_dsp.hpp"
+#include <atomic>
 #include <functional>
 #include <string>
 
@@ -15,6 +16,43 @@ namespace {
 using namespace gforge;
 
 static const char* kNote[12] = {"A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"};
+static const int kRndDivCount = 6, kRndGlideCount = 5;
+static const char* kRndDivName[kRndDivCount] = {"1 BEAT", "2 BEATS", "1 BAR", "2 BARS", "4 BARS", "8 BARS"};
+static const int kRndDivSteps[kRndDivCount] = {4, 8, 16, 32, 64, 128};
+static const char* kRndGlideName[kRndGlideCount] = {"SNAP", "FAST", "BEAT", "BAR", "DRIFT"};
+
+// Presets: every stage's settings, in param order. Switch values are slot indexes (see the name tables).
+// Levels and throw steps are left alone. The last menu entry, SMART RANDOM, builds one with the randomizer.
+struct GFPreset {
+    const char* name;
+    float sh[7];   // ON PATTERN AMOUNT REV OCTAVE LENGTH MIX
+    float gl[7];   // ON CHANCE ROLL REV STOP CRUSH MIX
+    float rb[7];   // ON ROOT CHORD VOWEL RING RES MIX
+    float pu[8];   // ON CUTOFF RES PATTERN DEPTH MIX MODE, DECAY
+    float dl[7];   // ON TIME FDBK WARP ROUTE TONE ECHO
+    float dw;      // DRY / WET
+};
+static const GFPreset kPreset[] = {
+    {"INIT",         {1, 0, .35f, .15f, 0, 2, 1}, {1, .2f, 3, .2f, .1f, 0, 1},   {1, 12, 3, .5f, .05f, .55f, .25f},
+                     {1, .55f, .35f, 0, .5f, .6f, 0, .35f}, {1, 8, .4f, 0, .3f, .6f, .6f}, .45f},
+    {"DUB ECHO",     {0, 0, .2f, 0, 0, 2, 1},     {1, .1f, 1, .1f, .25f, 0, .6f}, {0, 12, 1, .5f, 0, .5f, .2f},
+                     {1, .45f, .3f, 2, .4f, .5f, 0, .4f},   {1, 8, .6f, 0, .2f, .35f, .75f}, .5f},
+    {"DAFT VOCODER", {0, 0, .2f, 0, 0, 2, 1},     {1, .15f, 3, 0, 0, 0, .5f},     {1, 15, 5, .4f, .05f, .6f, .85f},
+                     {1, .6f, .3f, 1, .35f, .4f, 0, .4f},   {1, 6, .3f, 0, .5f, .6f, .35f}, .7f},
+    {"TRANCE GATE",  {0, 0, .2f, 0, 0, 2, 1},     {0, .1f, 3, 0, 0, 0, .5f},      {0, 12, 3, .5f, 0, .5f, .2f},
+                     {1, .7f, .45f, 3, .75f, 1, 0, .25f},   {1, 8, .45f, 0, .3f, .6f, .4f}, .8f},
+    {"STUTTER ROLL", {1, 6, .5f, .25f, 0, 0, 1},  {1, .45f, 3, .3f, .2f, 0, 1},   {0, 12, 3, .5f, 0, .5f, .2f},
+                     {0, .55f, .35f, 0, .5f, .6f, 0, .35f}, {1, 3, .3f, 0, 0, .6f, .3f}, .6f},
+    {"HALF TIME",    {1, 3, .6f, 0, 0, 2, 1},     {1, .1f, 0, 0, .2f, 0, .6f},    {0, 12, 3, .5f, 0, .5f, .2f},
+                     {0, .55f, .35f, 0, .5f, .6f, 0, .35f}, {1, 9, .35f, 0, .2f, .5f, .4f}, .9f},
+    {"LO-FI TAPE",   {1, 1, .4f, .35f, .15f, 1, 1}, {1, .3f, 1, .2f, .3f, .3f, 1}, {0, 12, 3, .5f, 0, .5f, .2f},
+                     {1, .4f, .2f, 0, .3f, .6f, 0, .5f},    {1, 9, .35f, -12, .2f, .35f, .4f}, .6f},
+    {"SHIMMER",      {0, 0, .2f, 0, 0, 2, 1},     {0, .1f, 3, 0, 0, 0, .5f},      {1, 12, 4, .7f, 0, .4f, .3f},
+                     {0, .55f, .35f, 0, .5f, .6f, 0, .35f}, {1, 10, .6f, 12, .3f, .75f, .6f}, .5f},
+    {"ROBO DUB",     {0, 0, .2f, 0, 0, 2, 1},     {0, .1f, 3, 0, 0, 0, .5f},      {1, 7, 3, .3f, .1f, .6f, .4f},
+                     {1, .5f, .5f, 4, .5f, .6f, 1, .4f},    {1, 8, .55f, 7, .5f, .5f, .6f}, .6f},
+};
+static const int kPresetCount = sizeof(kPreset) / sizeof(kPreset[0]);   // index kPresetCount = SMART RANDOM
 
 struct SynTHBloKGrainForge : Module {
     enum ParamIds {
@@ -28,6 +66,10 @@ struct SynTHBloKGrainForge : Module {
         ENUMS(DL_STEP2_PARAM, 8),     // throw steps 9-16 (added last so saved patches keep their ids)
         PU_DECAY_PARAM,
         SH_ON_PARAM, SH_PATTERN_PARAM, SH_AMOUNT_PARAM, SH_REV_PARAM, SH_PITCH_PARAM, SH_LEN_PARAM, SH_MIX_PARAM,
+        ENUMS(RND_PARAM, 5),          // per-stage randomizer, in panel order: SHUFFLE GLITCH ROBOT PULSE DELAY
+        RND_DIV_PARAM, RND_GLIDE_PARAM, RND_FREEZE_PARAM,
+        PRESET_PARAM,                 // turning it (or clicking the PRESET screen) loads that preset
+        FILTER_PARAM,                 // master DJ filter on the final mix
         NUM_PARAMS
     };
     enum InputIds { IN_L_INPUT, IN_R_INPUT, CLOCK_INPUT, RESET_INPUT, OPEN_INPUT, GLITCH_INPUT, NUM_INPUTS };
@@ -39,6 +81,7 @@ struct SynTHBloKGrainForge : Module {
     Robot robot;
     Pulse pulse;
     WarpDelay delay;
+    DjFilter master;
     dsp::SchmittTrigger clkTrig, rstTrig, glitchTrig;
 
     static const int kThrowSteps = 16;
@@ -48,6 +91,112 @@ struct SynTHBloKGrainForge : Module {
     std::string glitchEvent = "-";    // shown on the GLITCH display
     float sm[NUM_PARAMS] = {};         // smoothed knob values
     bool smInit = false;
+
+    // ---- smart randomizer: each lit RND stage picks new settings on every bar line, from musical
+    // choices only (straight/dotted grid, in-key chord moves, safe ranges). Mix levels stay yours.
+    // Switch-type settings jump on the downbeat; knobs glide there over about a beat.
+    enum { R_SH, R_GL, R_RB, R_PU, R_DL };
+    struct RndKnob { int id, stage; };
+    static constexpr int kRndKnobs = 18;
+    const RndKnob rndKnob[kRndKnobs] = {
+        {SH_AMOUNT_PARAM, R_SH}, {SH_REV_PARAM, R_SH}, {SH_PITCH_PARAM, R_SH},
+        {GL_CHANCE_PARAM, R_GL}, {GL_REV_PARAM, R_GL}, {GL_STOP_PARAM, R_GL}, {GL_CRUSH_PARAM, R_GL},
+        {RB_VOWEL_PARAM, R_RB}, {RB_RING_PARAM, R_RB}, {RB_Q_PARAM, R_RB},
+        {PU_CUTOFF_PARAM, R_PU}, {PU_RES_PARAM, R_PU}, {PU_DEPTH_PARAM, R_PU}, {PU_DECAY_PARAM, R_PU},
+        {DL_FDBK_PARAM, R_DL}, {DL_WARP_PARAM, R_DL}, {DL_ROUTE_PARAM, R_DL}, {DL_TONE_PARAM, R_DL}};
+    long clk = -1;                     // steps since reset, so cycles always start on the grid
+    float rndTgt[NUM_PARAMS] = {};
+    bool rndGlide[NUM_PARAMS] = {};
+    bool rndWasOn[5] = {};
+    int bar = 0;
+    int homeRoot = 12, homeChord = 3;  // ROBOT's key, taken when its RND is switched on
+    Rng rng{0x5eedu};
+    float rnd(float lo, float hi) { return lo + (hi - lo) * rng.next(); }
+    int pick(const int* v, int n) { return v[std::min((int)(rng.next() * n), n - 1)]; }
+    void aim(int id, float lo, float hi) { rndTgt[id] = rnd(lo, hi); rndGlide[id] = true; }
+    void jump(int id, int v) { params[id].setValue((float)v); rndGlide[id] = false; }
+
+    std::atomic<int> presetRequest{-1};   // UI asks to (re)load a preset, e.g. SMART RANDOM again
+    int lastPreset = -1;               // PRESET knob position last seen by process()
+
+    void applyPreset(int idx) {
+        for (int i = 0; i < NUM_PARAMS; i++) rndGlide[i] = false;
+        if (idx >= kPresetCount) {   // SMART RANDOM: a random key, then one randomizer pass over every stage, snapped
+            static const int chords[4] = {2, 3, 5, 6};
+            homeRoot = 3 + (int)(rng.next() * 13) % 13;   // C2..C3
+            homeChord = pick(chords, 4);
+            bar = 0;
+            randomizeBar(31, true);
+            for (const RndKnob& k : rndKnob) if (rndGlide[k.id]) { params[k.id].setValue(rndTgt[k.id]); rndGlide[k.id] = false; }
+            return;
+        }
+        const GFPreset& p = kPreset[idx];
+        for (int i = 0; i < 7; i++) {
+            params[SH_ON_PARAM + i].setValue(p.sh[i]);
+            params[GL_ON_PARAM + i].setValue(p.gl[i]);
+            params[RB_ON_PARAM + i].setValue(p.rb[i]);
+            params[PU_ON_PARAM + i].setValue(p.pu[i]);
+            params[DL_ON_PARAM + i].setValue(p.dl[i]);
+        }
+        params[PU_DECAY_PARAM].setValue(p.pu[7]);
+        params[DRYWET_PARAM].setValue(p.dw);
+        homeRoot = (int)p.rb[1]; homeChord = (int)p.rb[2];   // RND on ROBOT stays in the preset's key
+        bar = 0;
+    }
+
+    // mask: which stages to pick for (bit = R_SH..R_DL). all = SMART RANDOM preset: delay time changes too.
+    void randomizeBar(int mask, bool all = false) {
+        auto want = [&](int s) { return (mask >> s) & 1; };
+        // one shared feel per bar, so PULSE and the delay land on the same grid
+        bool dotted = rng.next() < 0.3f;
+        if (want(R_SH)) {
+            jump(SH_PATTERN_PARAM, (int)(rng.next() * kShufCount) % kShufCount);
+            static const int len[4] = {0, 1, 2, 2};
+            jump(SH_LEN_PARAM, pick(len, 4));
+            aim(SH_AMOUNT_PARAM, 0.15f, 0.6f); aim(SH_REV_PARAM, 0.f, 0.35f); aim(SH_PITCH_PARAM, 0.f, 0.25f);
+        }
+        if (want(R_GL)) {
+            static const int roll[5] = {0, 1, 1, 3, 5};   // 1/4 1/8 1/16 1/32: straight only, no triplets
+            jump(GL_ROLL_PARAM, pick(roll, 5));
+            aim(GL_CHANCE_PARAM, 0.1f, 0.45f); aim(GL_REV_PARAM, 0.f, 0.4f);
+            aim(GL_STOP_PARAM, 0.f, 0.3f);     aim(GL_CRUSH_PARAM, 0.f, 0.3f);
+        }
+        if (want(R_RB)) {
+            // move inside the key of the root/chord you set: I IV V vi ii (major), i iv v III VI VII (minor)
+            struct Deg { int off, c1, c2; };
+            static const Deg maj[6] = {{0, 2, 5}, {5, 2, 5}, {7, 2, 4}, {9, 3, 6}, {2, 3, 6}, {0, 2, 2}};
+            static const Deg min[6] = {{0, 3, 6}, {5, 3, 6}, {7, 3, 4}, {3, 2, 5}, {8, 2, 5}, {10, 2, 2}};
+            static const Deg neu[4] = {{0, 1, 0}, {5, 1, 4}, {7, 1, 4}, {0, 4, 1}};
+            const Deg* d; int n;
+            if (homeChord == 2 || homeChord == 5) { d = maj; n = 6; }
+            else if (homeChord == 3 || homeChord == 6) { d = min; n = 6; }
+            else { d = neu; n = 4; }
+            Deg g = (bar % 4 == 0) ? d[0] : d[std::min((int)(rng.next() * n), n - 1)];   // home chord every 4 bars
+            int r = homeRoot + g.off;
+            if (r > 24) r -= 12;
+            jump(RB_ROOT_PARAM, r);
+            jump(RB_CHORD_PARAM, rng.next() < 0.5f ? g.c1 : g.c2);
+            aim(RB_VOWEL_PARAM, 0.1f, 0.9f); aim(RB_RING_PARAM, 0.f, 0.15f); aim(RB_Q_PARAM, 0.3f, 0.7f);
+        }
+        if (want(R_PU)) {
+            static const int straight[6] = {0, 1, 2, 3, 6, 7}, dot[2] = {4, 5};
+            jump(PU_PATTERN_PARAM, dotted ? pick(dot, 2) : pick(straight, 6));
+            static const int mode[4] = {0, 0, 1, 2};
+            jump(PU_MODE_PARAM, pick(mode, 4));
+            aim(PU_CUTOFF_PARAM, 0.35f, 0.8f); aim(PU_RES_PARAM, 0.15f, 0.55f);
+            aim(PU_DEPTH_PARAM, 0.3f, 0.75f);  aim(PU_DECAY_PARAM, 0.15f, 0.6f);
+        }
+        if (want(R_DL)) {
+            if (all || (bar % 2 == 0 && step == 0)) {   // time and warp: only on a bar line, every other cycle, so tails ring out
+                static const int straight[4] = {3, 6, 9, 11}, dot[3] = {5, 8, 10};   // 1/16 1/8 1/4 1/2 | 1/16D 1/8D 1/4D
+                jump(DL_TIME_PARAM, dotted ? pick(dot, 3) : pick(straight, 4));
+                static const float warp[8] = {0.f, 0.f, 0.f, 12.f, -12.f, 7.f, -5.f, 5.f};   // octaves, fifths, fourths
+                rndTgt[DL_WARP_PARAM] = warp[std::min((int)(rng.next() * 8), 7)];
+                rndGlide[DL_WARP_PARAM] = true;
+            }
+            aim(DL_FDBK_PARAM, 0.2f, 0.6f); aim(DL_ROUTE_PARAM, 0.f, 0.5f); aim(DL_TONE_PARAM, 0.3f, 0.75f);
+        }
+    }
 
     // Clean up to 0.8, then a soft knee that never passes 1.0.
     static float softLimit(float x) {
@@ -103,6 +252,20 @@ struct SynTHBloKGrainForge : Module {
         configParam(DL_MIX_PARAM, 0.f, 1.f, 0.6f, "Echo level", "%", 0.f, 100.f);
         for (int i = 0; i < kThrowSteps; i++)
             configSwitch(throwParam(i), 0.f, 1.f, 1.f, "Throw step " + std::to_string(i + 1) + " into the delay", {"Dry", "Throw"});
+        static const char* rndName[5] = {"SHUFFLE", "GLITCH", "ROBOT", "PULSE", "WARP DELAY"};
+        for (int i = 0; i < 5; i++)
+            configSwitch(RND_PARAM + i, 0.f, 1.f, 0.f, std::string(rndName[i]) + " smart random (new musical settings every bar)", offOn);
+        configSwitch(RND_DIV_PARAM, 0.f, kRndDivCount - 1, 2.f, "Random cycle (new picks every)",
+                     std::vector<std::string>(kRndDivName, kRndDivName + kRndDivCount));
+        configSwitch(RND_GLIDE_PARAM, 0.f, kRndGlideCount - 1, 2.f, "Random glide (how fast knobs travel)",
+                     std::vector<std::string>(kRndGlideName, kRndGlideName + kRndGlideCount));
+        configSwitch(RND_FREEZE_PARAM, 0.f, 1.f, 0.f, "Random freeze (hold the current picks)", offOn);
+        std::vector<std::string> presetNames;
+        for (int i = 0; i < kPresetCount; i++) presetNames.push_back(kPreset[i].name);
+        presetNames.push_back("SMART RANDOM");
+        configSwitch(PRESET_PARAM, 0.f, (float)kPresetCount, 0.f, "Preset", presetNames);
+        paramQuantities[PRESET_PARAM]->randomizeEnabled = false;
+        configParam(FILTER_PARAM, -1.f, 1.f, 0.f, "Filter (left: low-pass, right: high-pass, centre: off)", "%", 0.f, 100.f);
         configParam(IN_GAIN_PARAM, 0.f, 2.f, 1.f, "Input gain", "%", 0.f, 100.f);
         configParam(DRYWET_PARAM, 0.f, 1.f, 0.45f, "Dry / wet", "%", 0.f, 100.f);
         configParam(OUT_GAIN_PARAM, 0.f, 1.5f, 1.f, "Output level", "%", 0.f, 100.f);
@@ -120,7 +283,7 @@ struct SynTHBloKGrainForge : Module {
     int slot(int id) { return (int)std::round(params[id].getValue()); }
     static int throwParam(int i) { return i < 8 ? DL_STEP_PARAM + i : DL_STEP2_PARAM + (i - 8); }
 
-    void onReset() override { step = -1; }
+    void onReset() override { step = -1; clk = -1; bar = 0; }
 
     // Older patches stored older layouts.
     //   v1 (no data block): TIME as an index into 7 slots, ROLL as a 0..1 knob split into 5 zones.
@@ -130,11 +293,19 @@ struct SynTHBloKGrainForge : Module {
     json_t* dataToJson() override {
         json_t* root = json_object();
         json_object_set_new(root, "v4", json_true());
+        json_object_set_new(root, "rbHomeRoot", json_integer(homeRoot));
+        json_object_set_new(root, "rbHomeChord", json_integer(homeChord));
         return root;
     }
     void fromJson(json_t* rootJ) override {   // old patches have no "data" block, so dataFromJson never runs for them
         Module::fromJson(rootJ);
         json_t* d = json_object_get(rootJ, "data");
+        if (json_t* hr = d ? json_object_get(d, "rbHomeRoot") : NULL) {   // keep ROBOT's key across reloads
+            homeRoot = clamp((int)json_integer_value(hr), 0, 24);
+            homeChord = clamp((int)json_integer_value(json_object_get(d, "rbHomeChord")), 0, 7);
+            rndWasOn[R_RB] = on(RND_PARAM + R_RB);
+        }
+        lastPreset = slot(PRESET_PARAM);   // loading a patch must not re-apply its preset over its own settings
         int ver = !d ? 1 : json_object_get(d, "v4") ? 4 : json_object_get(d, "v3") ? 3 : json_object_get(d, "v2") ? 2 : 1;
         if (ver >= 4) return;
         // STRETCH's settings were saved in PULSE's slots: start PULSE from its defaults instead
@@ -174,9 +345,39 @@ struct SynTHBloKGrainForge : Module {
             if (internalTimer >= 0.125f) { internalTimer -= 0.125f; edge = true; }
         }
         float stepSec = (inputs[CLOCK_INPUT].isConnected() && clockPeriod > 0.f && sinceClock < 2.f) ? clockPeriod : 0.125f;
-        if (rstTrig.process(inputs[RESET_INPUT].getVoltage())) { step = -1; internalTimer = 0.f; }
-        if (edge) step = (step + 1) % kThrowSteps;
+        if (rstTrig.process(inputs[RESET_INPUT].getVoltage())) { step = -1; clk = -1; internalTimer = 0.f; }
+        if (edge) { step = (step + 1) % kThrowSteps; clk++; }
         bool force = glitchTrig.process(inputs[GLITCH_INPUT].getVoltage());
+
+        // ---- smart randomizer: new picks on each downbeat, knobs glide there over ~a beat ----
+        for (int i = 0; i < 5; i++) {
+            bool o = on(RND_PARAM + i);
+            if (o && !rndWasOn[i] && i == R_RB) { homeRoot = slot(RB_ROOT_PARAM); homeChord = clamp(slot(RB_CHORD_PARAM), 0, 7); }
+            rndWasOn[i] = o;
+        }
+        // FREEZE holds everything where it is: no new picks, knobs stop mid-glide
+        bool frozen = on(RND_FREEZE_PARAM);
+        int div = kRndDivSteps[clamp(slot(RND_DIV_PARAM), 0, kRndDivCount - 1)];
+        // presets load here, not on the UI thread, so they never race the audio
+        int pk = clamp(slot(PRESET_PARAM), 0, kPresetCount);
+        int presetReq = presetRequest.exchange(-1);
+        if (lastPreset < 0) lastPreset = pk;   // first run: just take the knob's position
+        else if (pk != lastPreset) { lastPreset = pk; presetReq = pk; }
+        if (presetReq >= 0) applyPreset(presetReq);
+        if (edge && !frozen && clk % div == 0) {
+            int mask = 0;
+            for (int i = 0; i < 5; i++) if (on(RND_PARAM + i)) mask |= 1 << i;
+            if (mask) { randomizeBar(mask); bar++; }
+        }
+        static const float glideSteps[kRndGlideCount] = {0.f, 0.5f, 2.f, 6.f, -1.f};   // time constant in steps; -1 = most of a cycle
+        int gi = clamp(slot(RND_GLIDE_PARAM), 0, kRndGlideCount - 1);
+        float tau = glideSteps[gi] < 0.f ? 0.4f * div : glideSteps[gi];
+        float cg = tau <= 0.f ? 1.f : 1.f - std::exp(-1.f / (tau * stepSec * sr));
+        for (const RndKnob& k : rndKnob) {
+            if (frozen || !rndGlide[k.id] || !on(RND_PARAM + k.stage)) continue;
+            float v = params[k.id].getValue();
+            params[k.id].setValue(v + (rndTgt[k.id] - v) * cg);
+        }
 
         // ---- smoothing: every knob and stage switch glides (~15 ms), so moves never click or zip ----
         float c = 1.f - std::exp(-1.f / (0.015f * sr));
@@ -240,8 +441,10 @@ struct SynTHBloKGrainForge : Module {
 
         // ---- out: smooth limiter (clean up to 80%, then a soft knee to full scale) ----
         float dw = sm[DRYWET_PARAM], og = sm[OUT_GAIN_PARAM];
-        float oL = softLimit((inL + (wetL - inL) * dw) * og);
-        float oR = softLimit((inR + (wetR - inR) * dw) * og);
+        float mL = inL + (wetL - inL) * dw, mR = inR + (wetR - inR) * dw;
+        master.process(mL, mR, sm[FILTER_PARAM], sr);   // DJ filter on the whole mix, before the limiter
+        float oL = softLimit(mL * og);
+        float oR = softLimit(mR * og);
         outputs[OUT_L_OUTPUT].setVoltage(5.f * oL);
         outputs[OUT_R_OUTPUT].setVoltage(5.f * oR);
         float fall = std::exp(-args.sampleTime * 6.f);
@@ -431,24 +634,28 @@ struct GFStatus : TransparentWidget {
         nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, 80));
         nvgStroke(args.vg);
         auto font = uiFont(); if (!font) return;
-        char bpm[32] = "120.0 BPM", sub[48] = "INTERNAL CLOCK";
+        nvgFontFaceId(args.vg, font->handle);
+        if (part == 1) { meters(args, W, H); return; }
+        char bpm[32] = "120.0 BPM", sub[48] = "INTERNAL";
         if (module && module->inputs[SynTHBloKGrainForge::CLOCK_INPUT].isConnected()) {
             if (module->clockPeriod > 0.f && module->sinceClock < 2.f) snprintf(bpm, sizeof bpm, "%.1f BPM", 60.f / (module->clockPeriod * 4.f));
             else snprintf(bpm, sizeof bpm, "--- BPM");
             snprintf(sub, sizeof sub, "STEP %d/%d", module->step + 1, SynTHBloKGrainForge::kThrowSteps);
         }
-        nvgFontFaceId(args.vg, font->handle);
-        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgFontSize(args.vg, 12.f);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFontSize(args.vg, 9.f);
         nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 255));
-        nvgText(args.vg, 6.f, H * 0.32f, bpm, NULL);
-        nvgFontSize(args.vg, 8.f);
+        nvgText(args.vg, W * 0.5f, H * 0.34f, bpm, NULL);
+        nvgFontSize(args.vg, 7.5f);
         nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 130));
-        nvgText(args.vg, 6.f, H * 0.72f, sub, NULL);
-        // OUT L / OUT R: the same segmented dBFS bars as the MIX-24 levels display (full scale = 0 dB)
+        nvgText(args.vg, W * 0.5f, H * 0.7f, sub, NULL);
+    }
+
+    // OUT L / OUT R: the same segmented dBFS bars as the MIX-24 levels display (full scale = 0 dB)
+    void meters(const DrawArgs& args, float W, float H) {
         float lv[2] = {module ? module->meterL : 0.6f, module ? module->meterR : 0.5f};
         static const char* nm[2] = {"L", "R"};
-        float lx = W * 0.40f, bx = W * 0.45f, bw = W * 0.38f, vx = W - 4.f, bh = H * 0.24f;
+        float lx = 4.f, bx = 12.f, bw = W - 40.f, vx = W - 3.f, bh = H * 0.24f;
         char buf[16];
         nvgFontSize(args.vg, 8.f);
         for (int i = 0; i < 2; i++) {
@@ -465,6 +672,7 @@ struct GFStatus : TransparentWidget {
         }
     }
 
+    int part = 0;                     // 0 = BPM / step, 1 = output meters
     float peak[2] = {};
     static float toDb(float v) { return v > 1e-5f ? 20.f * std::log10(v) : -120.f; }
     // 24 segments, -48..+6 dB: light amber, amber above -9, red above -1; a peak-hold segment falls back slowly.
@@ -497,6 +705,111 @@ struct GFStatus : TransparentWidget {
     }
 };
 
+// RANDOM OLED: three segments, CYCLE | GLIDE | FREEZE. Click (or scroll) CYCLE/GLIDE to step through,
+// right-click steps back; click FREEZE to hold the current picks.
+struct GFRndPanel : TransparentWidget {
+    SynTHBloKGrainForge* module = NULL;
+    typedef SynTHBloKGrainForge G;
+    static int segAt(float x, float W) { return clamp((int)(x / (W / 3.f)), 0, 2); }
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        float W = box.size.x, H = box.size.y, w = W / 3.f;
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, W, H, 2.f);
+        nvgFillColor(args.vg, nvgRGBA(14, 9, 3, 255));
+        nvgFill(args.vg);
+        nvgStrokeWidth(args.vg, 0.8f);
+        nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, 80));
+        nvgStroke(args.vg);
+        int dv = module ? clamp(module->slot(G::RND_DIV_PARAM), 0, kRndDivCount - 1) : 2;
+        int gl = module ? clamp(module->slot(G::RND_GLIDE_PARAM), 0, kRndGlideCount - 1) : 2;
+        bool fz = module && module->on(G::RND_FREEZE_PARAM);
+        // freeze segment lights up like the buttons
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 2.f * w + 2.f, 3.f, w - 4.f, H - 6.f, 1.5f);
+        nvgFillColor(args.vg, fz ? nvgRGBA(255, 112, 15, 235) : nvgRGBA(40, 25, 8, 255));
+        nvgFill(args.vg);
+        nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, fz ? 255 : 120));
+        nvgStroke(args.vg);
+        for (int i = 1; i < 3; i++) {   // dividers
+            nvgBeginPath(args.vg);
+            nvgMoveTo(args.vg, i * w, 4.f); nvgLineTo(args.vg, i * w, H - 4.f);
+            nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, 50));
+            nvgStroke(args.vg);
+        }
+        auto font = uiFont(); if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        const char* top[2] = {"CYCLE", "GLIDE"};
+        const char* val[2] = {kRndDivName[dv], kRndGlideName[gl]};
+        for (int i = 0; i < 2; i++) {
+            nvgFontSize(args.vg, 7.f);
+            nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 130));
+            nvgText(args.vg, i * w + w * 0.5f, H * 0.3f, top[i], NULL);
+            nvgFontSize(args.vg, 9.f);
+            nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 255));
+            nvgText(args.vg, i * w + w * 0.5f, H * 0.68f, val[i], NULL);
+        }
+        nvgFontSize(args.vg, 8.f);
+        nvgFillColor(args.vg, fz ? nvgRGBA(20, 10, 2, 255) : nvgRGBA(255, 190, 90, 255));
+        nvgText(args.vg, 2.5f * w, H * 0.5f, "FREEZE", NULL);
+    }
+    void stepParam(int seg, int d) {
+        if (!module || seg > 1) return;
+        int id = seg == 0 ? G::RND_DIV_PARAM : G::RND_GLIDE_PARAM;
+        int n = seg == 0 ? kRndDivCount : kRndGlideCount;
+        module->params[id].setValue((float)((module->slot(id) + d + n) % n));
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.action != GLFW_PRESS || (e.button != GLFW_MOUSE_BUTTON_LEFT && e.button != GLFW_MOUSE_BUTTON_RIGHT)) return;
+        int seg = segAt(e.pos.x, box.size.x);
+        if (seg == 2) {
+            if (module && e.button == GLFW_MOUSE_BUTTON_LEFT)
+                module->params[G::RND_FREEZE_PARAM].setValue(module->on(G::RND_FREEZE_PARAM) ? 0.f : 1.f);
+        } else stepParam(seg, e.button == GLFW_MOUSE_BUTTON_LEFT ? 1 : -1);
+        e.consume(this);
+    }
+    void onHoverScroll(const HoverScrollEvent& e) override {
+        int seg = segAt(e.pos.x, box.size.x);
+        if (seg > 1 || e.scrollDelta.y == 0.f) return;
+        stepParam(seg, e.scrollDelta.y > 0.f ? 1 : -1);
+        e.consume(this);
+    }
+};
+
+// PRESET screen: shows the preset picked by the tiny knob below; clicking SMART RND rolls a new one.
+struct GFPresetBar : TransparentWidget {
+    SynTHBloKGrainForge* module = NULL;
+    typedef SynTHBloKGrainForge G;
+    static const char* nameOf(int i) { return i >= kPresetCount ? "SMART RND" : kPreset[i].name; }
+    int cur() { return module ? clamp(module->slot(G::PRESET_PARAM), 0, kPresetCount) : 0; }
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        float W = box.size.x, H = box.size.y;
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, W, H, 2.f);
+        nvgFillColor(args.vg, nvgRGBA(14, 9, 3, 255));
+        nvgFill(args.vg);
+        nvgStrokeWidth(args.vg, 0.8f);
+        nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, 80));
+        nvgStroke(args.vg);
+        auto font = uiFont(); if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFontSize(args.vg, 7.f);
+        nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 130));
+        nvgText(args.vg, W * 0.5f, H * 0.3f, "PRESET", NULL);
+        nvgFontSize(args.vg, 8.5f);
+        nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 255));
+        nvgText(args.vg, W * 0.5f, H * 0.68f, nameOf(cur()), NULL);
+    }
+    void onButton(const ButtonEvent& e) override {   // the knob picks; a click on SMART RND rolls a new one
+        if (e.action != GLFW_PRESS || e.button != GLFW_MOUSE_BUTTON_LEFT) return;
+        e.consume(this);
+        if (module && cur() == kPresetCount) module->presetRequest.store(kPresetCount);
+    }
+};
+
 struct SynTHBloKGrainForgeWidget : ModuleWidget {
     SynTHBloKGrainForgeWidget(SynTHBloKGrainForge* module) {
         setModule(module);
@@ -522,14 +835,17 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
             label(x, y + 7.f, name);
         };
         SynTHBloKGrainForge* m = module;
+        typedef SynTHBloKGrainForge G;
         auto stage = [&](int i, int onParam, const char* name, std::function<std::string()> status) {
             float x0 = 2.f + i * 39.75f;
             GFStageDisplay* d = createWidget<GFStageDisplay>(mm2px(Vec(x0 + 1.5f, 10.5f)));
-            d->box.size = mm2px(Vec(35.8f, 10.f)); d->module = module; d->onParam = onParam; d->title = name; d->status = status;
+            d->box.size = mm2px(Vec(29.3f, 10.f)); d->module = module; d->onParam = onParam; d->title = name; d->status = status;
             addChild(d);
+            GFButton* r = createParam<GFButton>(mm2px(Vec(x0 + 31.4f, 10.5f)), module, G::RND_PARAM + i);
+            r->box.size = mm2px(Vec(5.9f, 10.f)); r->label = "RND";
+            addParam(r);
             return x0 + 19.4f;   // section centre
         };
-        typedef SynTHBloKGrainForge G;
 
         // ---- five stages, left to right in signal order ----
         float c = stage(0, G::SH_ON_PARAM, "SHUFFLE", [m]() -> std::string {
@@ -586,15 +902,26 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
 
         // ---- bottom: status + meter, gains, jacks ----
         GFStatus* st = createWidget<GFStatus>(mm2px(Vec(5.f, 79.5f)));
-        st->box.size = mm2px(Vec(72.f, 14.f)); st->module = module;
+        st->box.size = mm2px(Vec(20.f, 14.f)); st->module = module;
         addChild(st);
-        knob(105.f, 86.5f, G::IN_GAIN_PARAM, "INPUT");
-        GFRing* big = createWidgetCentered<GFRing>(mm2px(Vec(140.f, 86.5f)));
-        big->box.size = mm2px(Vec(18.f, 18.f)); big->box.pos = mm2px(Vec(131.f, 77.5f)); big->module = module; big->param = G::DRYWET_PARAM;
+        GFStatus* mt = createWidget<GFStatus>(mm2px(Vec(27.f, 79.5f)));
+        mt->box.size = mm2px(Vec(30.f, 14.f)); mt->module = module; mt->part = 1;
+        addChild(mt);
+        GFRndPanel* rp = createWidget<GFRndPanel>(mm2px(Vec(59.f, 79.5f)));
+        rp->box.size = mm2px(Vec(36.f, 14.f)); rp->module = module;
+        addChild(rp);
+        GFPresetBar* pb = createWidget<GFPresetBar>(mm2px(Vec(97.f, 79.5f)));   // next to FREEZE, tiny knob below
+        pb->box.size = mm2px(Vec(30.f, 14.f)); pb->module = module;
+        addChild(pb);
+        addParam(createParamCentered<Trimpot>(mm2px(Vec(112.f, 99.f)), module, G::PRESET_PARAM));
+        knob(136.f, 86.5f, G::IN_GAIN_PARAM, "INPUT");
+        knob(151.f, 86.5f, G::FILTER_PARAM, "FILTER");
+        GFRing* big = createWidgetCentered<GFRing>(mm2px(Vec(168.f, 86.5f)));
+        big->box.size = mm2px(Vec(18.f, 18.f)); big->box.pos = mm2px(Vec(159.f, 77.5f)); big->module = module; big->param = G::DRYWET_PARAM;
         addChild(big);
-        addParam(createParamCentered<RoundLargeBlackKnob>(mm2px(Vec(140.f, 86.5f)), module, G::DRYWET_PARAM));
-        label(140.f, 97.f, "DRY / WET");
-        knob(175.f, 86.5f, G::OUT_GAIN_PARAM, "OUTPUT");
+        addParam(createParamCentered<RoundLargeBlackKnob>(mm2px(Vec(168.f, 86.5f)), module, G::DRYWET_PARAM));
+        label(168.f, 97.f, "DRY / WET");
+        knob(191.f, 86.5f, G::OUT_GAIN_PARAM, "OUTPUT");
 
         const char* jn[8] = {"IN L", "IN R", "CLOCK", "RESET", "OPEN", "GLITCH", "OUT L", "OUT R"};
         for (int i = 0; i < 8; i++) {
