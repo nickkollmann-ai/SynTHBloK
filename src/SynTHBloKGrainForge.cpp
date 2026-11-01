@@ -40,15 +40,24 @@ struct SynTHBloKGrainForge : Module {
     float sinceClock = 1e9f, clockPeriod = 0.f, internalTimer = 0.f;
     float meterL = 0.f, meterR = 0.f;
     std::string glitchEvent = "-";    // shown on the GLITCH display
+    float sm[NUM_PARAMS] = {};         // smoothed knob values
+    bool smInit = false;
+
+    // Clean up to 0.8, then a soft knee that never passes 1.0.
+    static float softLimit(float x) {
+        float a = std::fabs(x);
+        if (a <= 0.8f) return x;
+        return (x < 0.f ? -1.f : 1.f) * (0.8f + 0.2f * std::tanh((a - 0.8f) / 0.2f));
+    }
 
     SynTHBloKGrainForge() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
         const std::vector<std::string> offOn = {"Off", "On"};
         configSwitch(GL_ON_PARAM, 0.f, 1.f, 1.f, "GLITCH", offOn);
-        configParam(GL_CHANCE_PARAM, 0.f, 1.f, 0.35f, "Glitch chance per step", "%", 0.f, 100.f);
+        configParam(GL_CHANCE_PARAM, 0.f, 1.f, 0.2f, "Glitch chance per step", "%", 0.f, 100.f);
         configParam(GL_ROLL_PARAM, 0.f, 1.f, 0.4f, "Roll size (1/1, 1/2, 1/4, 1/8 step, random)");
-        configParam(GL_REV_PARAM, 0.f, 1.f, 0.3f, "Reverse amount", "%", 0.f, 100.f);
-        configParam(GL_STOP_PARAM, 0.f, 1.f, 0.2f, "Tape-stop amount", "%", 0.f, 100.f);
+        configParam(GL_REV_PARAM, 0.f, 1.f, 0.2f, "Reverse amount", "%", 0.f, 100.f);
+        configParam(GL_STOP_PARAM, 0.f, 1.f, 0.1f, "Tape-stop amount", "%", 0.f, 100.f);
         configParam(GL_CRUSH_PARAM, 0.f, 1.f, 0.f, "Crush (bits + sample rate)", "%", 0.f, 100.f);
         configParam(GL_MIX_PARAM, 0.f, 1.f, 1.f, "Glitch mix", "%", 0.f, 100.f);
         configSwitch(ST_ON_PARAM, 0.f, 1.f, 1.f, "STRETCH", offOn);
@@ -56,7 +65,7 @@ struct SynTHBloKGrainForge : Module {
         configParam(ST_SIZE_PARAM, 0.f, 1.f, 0.45f, "Grain size", " ms", 13.3f, 30.f);
         configSwitch(ST_PITCH_PARAM, 0.f, 7.f, 3.f, "Grain pitch", {"-12", "-7", "-5", "0", "+5", "+7", "+12", "Reverse"});
         configParam(ST_SPRAY_PARAM, 0.f, 1.f, 0.2f, "Spray", "%", 0.f, 100.f);
-        configParam(ST_MIX_PARAM, 0.f, 1.f, 0.5f, "Stretch mix", "%", 0.f, 100.f);
+        configParam(ST_MIX_PARAM, 0.f, 1.f, 0.4f, "Stretch mix", "%", 0.f, 100.f);
         configSwitch(ST_FREEZE_PARAM, 0.f, 1.f, 0.f, "Freeze (the FREEZE gate also freezes)", {"Off", "Frozen"});
         configSwitch(RB_ON_PARAM, 0.f, 1.f, 1.f, "ROBOT", offOn);
         configSwitch(RB_ROOT_PARAM, 0.f, 24.f, 12.f, "Robot root",
@@ -64,20 +73,20 @@ struct SynTHBloKGrainForge : Module {
                       "A2", "A#2", "B2", "C3", "C#3", "D3", "D#3", "E3", "F3", "F#3", "G3", "G#3", "A3"});
         configSwitch(RB_CHORD_PARAM, 0.f, 7.f, 3.f, "Robot chord", {"Harmonics", "Fifth", "Major", "Minor", "Sus4", "Major 7", "Minor 7", "Cluster"});
         configParam(RB_VOWEL_PARAM, 0.f, 1.f, 0.5f, "Vowel (A - E - I - O - U)");
-        configParam(RB_RING_PARAM, 0.f, 1.f, 0.1f, "Ring-mod", "%", 0.f, 100.f);
-        configParam(RB_Q_PARAM, 0.f, 1.f, 0.7f, "Resonance", "%", 0.f, 100.f);
-        configParam(RB_MIX_PARAM, 0.f, 1.f, 0.35f, "Robot mix", "%", 0.f, 100.f);
+        configParam(RB_RING_PARAM, 0.f, 1.f, 0.05f, "Ring-mod", "%", 0.f, 100.f);
+        configParam(RB_Q_PARAM, 0.f, 1.f, 0.55f, "Resonance", "%", 0.f, 100.f);
+        configParam(RB_MIX_PARAM, 0.f, 1.f, 0.25f, "Robot mix", "%", 0.f, 100.f);
         configSwitch(DL_ON_PARAM, 0.f, 1.f, 1.f, "WARP DELAY", offOn);
         configSwitch(DL_TIME_PARAM, 0.f, 6.f, 2.f, "Delay time", {"1/16", "1/8", "3/16", "1/4", "3/8", "1/2", "1 bar"});
-        configParam(DL_FDBK_PARAM, 0.f, 1.f, 0.5f, "Feedback", "%", 0.f, 100.f);
+        configParam(DL_FDBK_PARAM, 0.f, 1.f, 0.4f, "Feedback", "%", 0.f, 100.f);
         configParam(DL_WARP_PARAM, -12.f, 12.f, 0.f, "Warp (pitch shift per repeat)", " st");
-        configParam(DL_ROUTE_PARAM, 0.f, 1.f, 0.4f, "Route repeats through STRETCH + ROBOT", "%", 0.f, 100.f);
+        configParam(DL_ROUTE_PARAM, 0.f, 1.f, 0.3f, "Route repeats through STRETCH + ROBOT", "%", 0.f, 100.f);
         configParam(DL_TONE_PARAM, 0.f, 1.f, 0.6f, "Repeat tone (dark -> bright)", "%", 0.f, 100.f);
         configParam(DL_MIX_PARAM, 0.f, 1.f, 0.6f, "Echo level", "%", 0.f, 100.f);
         for (int i = 0; i < 8; i++)
             configSwitch(DL_STEP_PARAM + i, 0.f, 1.f, 1.f, "Throw step " + std::to_string(i + 1) + " into the delay", {"Dry", "Throw"});
         configParam(IN_GAIN_PARAM, 0.f, 2.f, 1.f, "Input gain", "%", 0.f, 100.f);
-        configParam(DRYWET_PARAM, 0.f, 1.f, 0.6f, "Dry / wet", "%", 0.f, 100.f);
+        configParam(DRYWET_PARAM, 0.f, 1.f, 0.45f, "Dry / wet", "%", 0.f, 100.f);
         configParam(OUT_GAIN_PARAM, 0.f, 1.5f, 1.f, "Output level", "%", 0.f, 100.f);
         configInput(IN_L_INPUT, "Left");
         configInput(IN_R_INPUT, "Right (left is copied here when unpatched)");
@@ -115,71 +124,63 @@ struct SynTHBloKGrainForge : Module {
         if (edge) step = (step + 1) % 8;
         bool force = glitchTrig.process(inputs[GLITCH_INPUT].getVoltage());
 
+        // ---- smoothing: every knob and stage switch glides (~15 ms), so moves never click or zip ----
+        float c = 1.f - std::exp(-1.f / (0.015f * sr));
+        for (int i = 0; i < NUM_PARAMS; i++) {
+            float t = params[i].getValue();
+            sm[i] = smInit ? sm[i] + (t - sm[i]) * c : t;
+        }
+        smInit = true;
+
         // ---- input ----
-        float g = params[IN_GAIN_PARAM].getValue() * 0.2f;   // +-5 V -> +-1
+        float g = sm[IN_GAIN_PARAM] * 0.2f;   // +-5 V -> +-1
         float inL = inputs[IN_L_INPUT].getVoltage() * g;
         float inR = inputs[IN_R_INPUT].isConnected() ? inputs[IN_R_INPUT].getVoltage() * g : inL;
 
+        // Every stage keeps running so switching it on is seamless; ON crossfades it in.
         // ---- GLITCH ----
-        float aL = inL, aR = inR;
-        if (on(GL_ON_PARAM)) {
-            if (edge || force) {
-                glitch.trigger(stepSec * sr, params[GL_CHANCE_PARAM].getValue(), params[GL_ROLL_PARAM].getValue(),
-                               params[GL_REV_PARAM].getValue(), params[GL_STOP_PARAM].getValue(), force);
-                static const char* names[4] = {"-", "ROLL", "REVERSE", "TAPE STOP"};
-                glitchEvent = glitch.ev == Glitch::ROLL ? "ROLL 1/" + std::to_string(glitch.rollDiv) : names[glitch.ev];
-            }
-            float pL, pR;
-            glitch.process(inL, inR, sr, params[GL_CRUSH_PARAM].getValue(), pL, pR);
-            float m = params[GL_MIX_PARAM].getValue();
-            aL = inL + (pL - inL) * m; aR = inR + (pR - inR) * m;
+        if (edge || force) {
+            glitch.trigger(stepSec * sr, params[GL_CHANCE_PARAM].getValue(), params[GL_ROLL_PARAM].getValue(),
+                           params[GL_REV_PARAM].getValue(), params[GL_STOP_PARAM].getValue(), force);
+            static const char* names[4] = {"-", "ROLL", "REVERSE", "TAPE STOP"};
+            glitchEvent = glitch.ev == Glitch::ROLL ? "ROLL 1/" + std::to_string(glitch.rollDiv) : names[glitch.ev];
         }
+        float pL, pR;
+        glitch.process(inL, inR, sr, sm[GL_CRUSH_PARAM], pL, pR);
+        float m = sm[GL_MIX_PARAM] * sm[GL_ON_PARAM];
+        float aL = inL + (pL - inL) * m, aR = inR + (pR - inR) * m;
 
         // ---- WARP DELAY read (its feedback may loop through STRETCH and ROBOT) ----
-        bool dlOn = on(DL_ON_PARAM);
         float fbL = 0.f, fbR = 0.f;
-        float route = params[DL_ROUTE_PARAM].getValue();
-        if (dlOn)
-            delay.read(sr, kDelaySteps[clamp(slot(DL_TIME_PARAM), 0, 6)] * stepSec, params[DL_FDBK_PARAM].getValue(),
-                       params[DL_WARP_PARAM].getValue(), params[DL_TONE_PARAM].getValue(), fbL, fbR);
+        float route = sm[DL_ROUTE_PARAM], dlOn = sm[DL_ON_PARAM];
+        delay.read(sr, kDelaySteps[clamp(slot(DL_TIME_PARAM), 0, 6)] * stepSec, sm[DL_FDBK_PARAM] * dlOn,
+                   sm[DL_WARP_PARAM], sm[DL_TONE_PARAM], fbL, fbR);
 
         // ---- STRETCH ----
         float bInL = aL + route * fbL, bInR = aR + route * fbR;
-        float bL = bInL, bR = bInR;
-        if (on(ST_ON_PARAM)) {
-            bool frz = on(ST_FREEZE_PARAM) || inputs[FREEZE_INPUT].getVoltage() > 1.f;
-            float pL, pR;
-            stretch.process(bInL, bInR, sr, std::pow(16.f, params[ST_STRETCH_PARAM].getValue()),
-                            params[ST_SIZE_PARAM].getValue(), clamp(slot(ST_PITCH_PARAM), 0, 7),
-                            params[ST_SPRAY_PARAM].getValue(), frz, pL, pR);
-            float m = params[ST_MIX_PARAM].getValue();
-            bL = bInL + (pL - bInL) * m; bR = bInR + (pR - bInR) * m;
-        }
+        bool frz = on(ST_FREEZE_PARAM) || inputs[FREEZE_INPUT].getVoltage() > 1.f;
+        stretch.process(bInL, bInR, sr, std::pow(16.f, sm[ST_STRETCH_PARAM]), sm[ST_SIZE_PARAM],
+                        clamp(slot(ST_PITCH_PARAM), 0, 7), sm[ST_SPRAY_PARAM], frz, pL, pR);
+        m = sm[ST_MIX_PARAM] * sm[ST_ON_PARAM];
+        float bL = bInL + (pL - bInL) * m, bR = bInR + (pR - bInR) * m;
 
-        // ---- ROBOT ----
-        float cL = bL, cR = bR;
-        if (on(RB_ON_PARAM)) {
-            float pL, pR;
-            robot.process(bL, bR, sr, (float)slot(RB_ROOT_PARAM), clamp(slot(RB_CHORD_PARAM), 0, 7),
-                          params[RB_VOWEL_PARAM].getValue(), params[RB_RING_PARAM].getValue(), params[RB_Q_PARAM].getValue(), pL, pR);
-            float m = params[RB_MIX_PARAM].getValue();
-            cL = bL + (pL - bL) * m; cR = bR + (pR - bR) * m;
-        }
+        // ---- ROBOT (root glides between notes) ----
+        robot.process(bL, bR, sr, sm[RB_ROOT_PARAM], clamp(slot(RB_CHORD_PARAM), 0, 7),
+                      sm[RB_VOWEL_PARAM], sm[RB_RING_PARAM], sm[RB_Q_PARAM], pL, pR);
+        m = sm[RB_MIX_PARAM] * sm[RB_ON_PARAM];
+        float cL = bL + (pL - bL) * m, cR = bR + (pR - bR) * m;
 
         // ---- WARP DELAY write: lit steps throw this signal in; un-routed feedback goes straight back ----
-        float wetL = cL, wetR = cR;
-        if (dlOn) {
-            bool throwOn = step < 0 || on(DL_STEP_PARAM + step);
-            delay.write(cL, cR, sr, throwOn);
-            delay.writeRaw((1.f - route) * fbL, (1.f - route) * fbR);
-            float m = params[DL_MIX_PARAM].getValue();
-            wetL += delay.wetL * m; wetR += delay.wetR * m;
-        }
+        bool throwOn = step < 0 || on(DL_STEP_PARAM + step);
+        delay.write(cL, cR, sr, throwOn);
+        delay.writeRaw((1.f - route) * fbL, (1.f - route) * fbR);
+        m = sm[DL_MIX_PARAM] * dlOn;
+        float wetL = cL + delay.wetL * m, wetR = cR + delay.wetR * m;
 
-        // ---- out ----
-        float dw = params[DRYWET_PARAM].getValue(), og = params[OUT_GAIN_PARAM].getValue();
-        float oL = std::tanh((inL + (wetL - inL) * dw) * og);
-        float oR = std::tanh((inR + (wetR - inR) * dw) * og);
+        // ---- out: smooth limiter (clean up to 80%, then a soft knee to full scale) ----
+        float dw = sm[DRYWET_PARAM], og = sm[OUT_GAIN_PARAM];
+        float oL = softLimit((inL + (wetL - inL) * dw) * og);
+        float oR = softLimit((inR + (wetR - inR) * dw) * og);
         outputs[OUT_L_OUTPUT].setVoltage(5.f * oL);
         outputs[OUT_R_OUTPUT].setVoltage(5.f * oR);
         float fall = std::exp(-args.sampleTime * 6.f);

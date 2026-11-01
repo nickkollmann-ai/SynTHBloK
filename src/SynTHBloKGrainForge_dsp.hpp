@@ -72,12 +72,14 @@ struct Glitch {
         buf.write(inL, inR);
         float eL = inL, eR = inR;
         if (ev != NONE) {
-            float fade = 0.002f * sr;
+            float fade = 0.006f * sr;                                        // 6 ms in and out of an event
             float blend = std::min(1.f, std::min(age / fade, (evLen - age) / fade));
+            blend = blend * blend * (3.f - 2.f * blend);                     // S-curve: no corners
             float pL, pR;
             if (ev == ROLL) {
                 float ph = (float)(age % sliceLen);
-                float edge = std::min(1.f, std::min(ph, sliceLen - ph) / fade);
+                float sliceFade = std::min(0.004f * sr, sliceLen * 0.25f);   // soft edges on each repeat
+                float edge = std::min(1.f, std::min(ph, sliceLen - ph) / sliceFade);
                 pL = buf.rd(buf.l, start + ph) * edge;
                 pR = buf.rd(buf.r, start + ph) * edge;
             } else if (ev == REVERSE) {
@@ -144,7 +146,7 @@ struct Stretch {
 
         spawn -= 1.f;
         if (spawn <= 0.f) {
-            spawn += len / 4.f;                                    // 4 overlapping grains
+            spawn += len / 6.f;                                    // 6 overlapping grains: smoother
             for (G& gr : g) if (!gr.on) {
                 gr.on = true; gr.age = 0; gr.len = len;
                 gr.inc = rev ? -ratio : ratio;
@@ -161,7 +163,7 @@ struct Stretch {
             gr.pos += gr.inc;
             if (++gr.age >= gr.len) gr.on = false;
         }
-        oL = l * 0.75f; oR = r * 0.75f;                            // 4 Hann windows overlap to 2; +3.5 dB make-up
+        oL = l * 0.5f; oR = r * 0.5f;                              // 6 Hann windows overlap to 3; +3.5 dB make-up
     }
 };
 
@@ -198,14 +200,14 @@ struct Robot {
     void process(float inL, float inR, float sr, float rootSemis, int chord, float vowel, float ring, float q,
                  float& oL, float& oR) {
         float root = 55.f * std::pow(2.f, rootSemis / 12.f);
-        if ((count++ & 31) == 0) {                                 // retune every 32 samples
-            float kr = 2.f - 1.97f * q;
+        if ((count++ & 31) == 0) {                                 // retune every 32 samples (inputs are smoothed)
+            float kr = 2.f - 1.85f * q;                            // gentler peak at full RES
             for (int i = 0; i < 4; i++) { resL[i].set(root * kChord[chord][i], sr, kr); resR[i].set(root * kChord[chord][i] * 1.003f, sr, kr); }
             float v = clampf(vowel, 0.f, 1.f) * 4.f;
             int a = std::min(3, (int)v); float f = v - a;
             for (int i = 0; i < 3; i++) {
                 float fc = kVowel[a][i] + (kVowel[a + 1][i] - kVowel[a][i]) * f;
-                fL[i].set(fc, sr, 0.35f); fR[i].set(fc * 1.01f, sr, 0.35f);
+                fL[i].set(fc, sr, 0.5f); fR[i].set(fc * 1.01f, sr, 0.5f);   // wider, softer formants
             }
         }
         float rl = 0.f, rr = 0.f;
@@ -252,22 +254,31 @@ static const char* kDelayName[7] = {"1/16", "1/8", "3/16", "1/4", "3/8", "1/2", 
 struct WarpDelay {
     StereoBuf buf;
     PitchShift psL, psR;
-    float time = 0.375f, gate = 0.f, lpL = 0.f, lpR = 0.f;
+    float time = 0.375f, gate = 0.f, lpL = 0.f, lpR = 0.f, hpL = 0.f, hpR = 0.f;
+    float fbEnv = 0.f;              // level of the feedback signal, for the loop limiter
     float wetL = 0.f, wetR = 0.f;   // last read, for this sample
-    // Read the delay (call first each sample), and build the feedback signal.
+    // Read the delay (call first each sample), and build the feedback signal. The loop can't run
+    // away: feedback tops out at 85%, a low cut stops bass building up, and a level limiter rides
+    // the feedback down whenever the repeats get loud (e.g. when looped through STRETCH/ROBOT).
     void read(float sr, float targetTime, float fdbk, float warpSemis, float tone, float& fbL, float& fbR) {
         if (buf.n == 0) buf.init((int)(sr * 4.1f));
-        time += (clampf(targetTime, 0.01f, 4.f) - time) * 0.0005f;
+        time += (clampf(targetTime, 0.01f, 4.f) - time) * 0.0002f;   // slow glide: no pitchy zips on time changes
         double p = buf.w - (double)time * sr;
         wetL = buf.rd(buf.l, p); wetR = buf.rd(buf.r, p);
         float ratio = std::pow(2.f, warpSemis / 12.f);
         float sl = std::fabs(warpSemis) > 0.05f ? psL.process(wetL, ratio, sr) : wetL;
         float sr2 = std::fabs(warpSemis) > 0.05f ? psR.process(wetR, ratio, sr) : wetR;
-        float k = 1.f - std::exp(-2.f * float(M_PI) * 300.f * std::pow(40.f, tone) / sr);
+        float k = 1.f - std::exp(-2.f * float(M_PI) * 300.f * std::pow(30.f, tone) / sr);   // 300 Hz .. 9 kHz
         lpL += (sl - lpL) * k; lpR += (sr2 - lpR) * k;
-        float fb = fdbk * 0.95f;
-        fbL = std::tanh(fb * (0.75f * lpL + 0.25f * lpR));   // a little cross-feed, soft-limited
-        fbR = std::tanh(fb * (0.75f * lpR + 0.25f * lpL));
+        float kh = 1.f - std::exp(-2.f * float(M_PI) * 80.f / sr);                        // low cut at 80 Hz
+        hpL += (lpL - hpL) * kh; hpR += (lpR - hpR) * kh;
+        float xL = lpL - hpL, xR = lpR - hpR;
+        float lvl = std::max(std::fabs(xL), std::fabs(xR));
+        fbEnv += (lvl - fbEnv) * (lvl > fbEnv ? 0.01f : 0.0005f);
+        float ride = fbEnv > 0.3f ? 0.3f / fbEnv : 1.f;
+        float fb = fdbk * 0.85f * ride;
+        fbL = fb * (0.75f * xL + 0.25f * xR);   // a little cross-feed for width
+        fbR = fb * (0.75f * xR + 0.25f * xL);
     }
     // Write this sample's input (already gated / routed by the caller).
     void write(float inL, float inR, float sr, bool throwOn) {
