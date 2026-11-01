@@ -84,19 +84,59 @@ struct M8Osc {
     }
 };
 
+// TPT state-variable filter: low-, band- and high-pass from one pass.
+struct M8Svf {
+    float ic1 = 0.f, ic2 = 0.f;
+    void process(float x, float fc, float res, float sr, float& lp, float& bp, float& hp) {
+        float g = std::tan(float(M_PI) * std::min(fc, sr * 0.45f) / sr);
+        float k = 2.f - 1.9f * res;
+        float a1 = 1.f / (1.f + g * (g + k)), a2 = g * a1, a3 = g * a2;
+        float v3 = x - ic2;
+        float v1 = a1 * ic1 + a2 * v3;
+        float v2 = ic2 + a2 * ic1 + a3 * v3;
+        ic1 = 2.f * v1 - ic1;
+        ic2 = 2.f * v2 - ic2;
+        lp = v2; bp = v1; hp = x - k * v1 - v2;
+    }
+};
+
+// Shared "filter 2 + envelope" section (SynTHBloK style), the same for all 8 voices.
+struct M8Global {
+    float cutoff = 1.f, res = 0.f, envAmt = 0.f, mode = 0.f;   // 0..1 each
+    float a = 0.f, d = 0.5f, s = 1.f, r = 0.6f;                // 0..1 each
+    float gate = 0.125f;                                       // note length in seconds (one clock step)
+};
+
 // One voice: two detuned morphing oscillators plus a sine sub an octave down, a slow random
-// "analog" drift on pitch and cutoff, resonant low-pass (TPT state-variable) swept by the
-// envelope, exponential decay, drive.
+// "analog" drift on pitch and cutoff, resonant low-pass swept by its decay (the strips), then
+// the shared filter 2 (LP -> BP -> HP morph) swept by the shared ADSR, drive, and the ADSR on
+// the level as well.
 struct M8Voice {
     M8Osc oscA, oscB;
+    M8Svf f1, f2;
     float subPhase = 0.f, env = 0.f, cut = 0.5f;
-    float ic1 = 0.f, ic2 = 0.f;
+    float adsr = 0.f, gateLeft = 0.f;
+    int stage = 0;   // 0 idle, 1 attack, 2 decay/sustain, 3 release
     float drift = 0.f, driftTarget = 0.f, driftTimer = 0.f;
     uint32_t rng = 1;
     explicit M8Voice(uint32_t seed = 1) : rng(seed * 2654435761u + 1u) { oscB.phase = 0.37f; }
     float rand01() { rng = rng * 1664525u + 1013904223u; return (rng >> 8) * (1.f / 16777216.f); }
-    void trigger() { env = 1.f; }
-    float process(float sr, const float* p) {
+    void trigger(float gate) { env = 1.f; stage = 1; gateLeft = gate; }
+    float process(float sr, const float* p, const M8Global& g) {
+        // ADSR: attack 1 ms..2 s, decay 5 ms..2 s, release 5 ms..4 s (time constants)
+        auto coef = [&](float t) { return 1.f - std::exp(-1.f / (t * sr)); };
+        gateLeft -= 1.f / sr;
+        if (gateLeft <= 0.f && (stage == 1 || stage == 2)) stage = 3;
+        if (stage == 1) {
+            adsr += (1.2f - adsr) * coef(0.001f * std::pow(2000.f, g.a));
+            if (adsr >= 1.f) { adsr = 1.f; stage = 2; }
+        } else if (stage == 2) {
+            adsr += (g.s - adsr) * coef(0.005f * std::pow(400.f, g.d));
+        } else if (stage == 3) {
+            adsr += (0.f - adsr) * coef(0.005f * std::pow(800.f, g.r));
+            if (adsr < 1e-4f) { adsr = 0.f; stage = 0; }
+        }
+
         // drift: a new random target every ~0.3-1 s, glided to; +-1 = +-6 cents / +-0.03 cutoff
         driftTimer -= 1.f / sr;
         if (driftTimer <= 0.f) { driftTarget = rand01() * 2.f - 1.f; driftTimer = 0.3f + 0.7f * rand01(); }
@@ -118,18 +158,17 @@ struct M8Voice {
 
         // cutoff 40 Hz .. 16 kHz, +2.5 octaves of envelope sweep; smoothed against zipper noise
         cut += (p[VP_CUTOFF] + drift * 0.03f - cut) * 0.002f;
-        float fc = std::min(40.f * std::pow(400.f, cut) * std::pow(2.f, 2.5f * env), sr * 0.45f);
-        float g = std::tan(M_PI * fc / sr);
-        float k = 2.f - 1.9f * p[VP_RES];
-        float a1 = 1.f / (1.f + g * (g + k)), a2 = g * a1, a3 = g * a2;
-        float v3 = osc - ic2;
-        float v1 = a1 * ic1 + a2 * v3;
-        float v2 = ic2 + a2 * ic1 + a3 * v3;
-        ic1 = 2.f * v1 - ic1;
-        ic2 = 2.f * v2 - ic2;
+        float lp, bp, hp;
+        f1.process(osc, 40.f * std::pow(400.f, cut) * std::pow(2.f, 2.5f * env), p[VP_RES], sr, lp, bp, hp);
+
+        // filter 2: cutoff 20 Hz..20 kHz, envelope adds up to +6 octaves
+        float fc2 = 20.f * std::pow(1000.f, g.cutoff) * std::pow(2.f, 6.f * g.envAmt * adsr);
+        float lp2, bp2, hp2;
+        f2.process(lp, fc2, g.res, sr, lp2, bp2, hp2);
+        float y = g.mode < 0.5f ? lp2 + (bp2 - lp2) * (g.mode * 2.f) : bp2 + (hp2 - bp2) * ((g.mode - 0.5f) * 2.f);
 
         float drive = 1.f + 6.f * p[VP_DRIVE];
-        return std::tanh(v2 * drive) / std::tanh(drive) * env * p[VP_LEVEL];
+        return std::tanh(y * drive) / std::tanh(drive) * env * adsr * p[VP_LEVEL];
     }
 };
 
@@ -187,7 +226,9 @@ struct M8Reverb {
 struct SynTHBloKMatrix8 : Module {
     enum ParamIds { LEN_PARAM, PAT_PARAM, PAGE_PARAM, OFFC_PARAM, ONC_PARAM, HEADC_PARAM, HITC_PARAM, CLEAR_PARAM, LEARN_PARAM,
                     BANK_PARAM, RANGE_PARAM, BONC_PARAM, BOFFC_PARAM, RUN_PARAM, RESET_PARAM, KNOB_PARAM,
-                    DELAY_PARAM, SPACE_PARAM, NUM_PARAMS };
+                    DELAY_PARAM, SPACE_PARAM,
+                    F2_CUTOFF_PARAM, F2_RES_PARAM, F2_ENV_PARAM, F2_MODE_PARAM,
+                    ENV_A_PARAM, ENV_D_PARAM, ENV_S_PARAM, ENV_R_PARAM, NUM_PARAMS };
     enum InputIds { CLOCK_INPUT, RESET_INPUT, RUN_INPUT, NUM_INPUTS };
     enum OutputIds { TRIG_OUTPUT, STRIP_OUTPUT = TRIG_OUTPUT + 8, KNOB_OUTPUT = STRIP_OUTPUT + 8,
                      AUDIO_L_OUTPUT, AUDIO_R_OUTPUT, NUM_OUTPUTS };
@@ -255,6 +296,14 @@ struct SynTHBloKMatrix8 : Module {
         configParam(KNOB_PARAM, 0.f, 1.f, 0.8f, "Master volume (JAM knob on MST or CUE)", "%", 0.f, 100.f);
         configParam(DELAY_PARAM, 0.f, 1.f, 0.f, "Delay, ping-pong dotted 1/8 (JAM knob on GRP)", "%", 0.f, 100.f);
         configParam(SPACE_PARAM, 0.f, 1.f, 0.f, "Space / reverb (JAM knob on IN1)", "%", 0.f, 100.f);
+        configParam(F2_CUTOFF_PARAM, 0.f, 1.f, 1.f, "Filter 2 cutoff", " Hz", 1000.f, 20.f);
+        configParam(F2_RES_PARAM, 0.f, 1.f, 0.f, "Filter 2 resonance", "%", 0.f, 100.f);
+        configParam(F2_ENV_PARAM, 0.f, 1.f, 0.f, "Filter 2 envelope amount", "%", 0.f, 100.f);
+        configParam(F2_MODE_PARAM, 0.f, 1.f, 0.f, "Filter 2 mode (low-pass -> band-pass -> high-pass)", "%", 0.f, 100.f);
+        configParam(ENV_A_PARAM, 0.f, 1.f, 0.f, "Envelope attack", " ms", 2000.f, 1.f);
+        configParam(ENV_D_PARAM, 0.f, 1.f, 0.5f, "Envelope decay", " ms", 400.f, 5.f);
+        configParam(ENV_S_PARAM, 0.f, 1.f, 1.f, "Envelope sustain", "%", 0.f, 100.f);
+        configParam(ENV_R_PARAM, 0.f, 1.f, 0.6f, "Envelope release", " ms", 800.f, 5.f);
         for (int i = 0; i < CLEAR_PARAM; i++) paramQuantities[i]->snapEnabled = true;
         paramQuantities[BANK_PARAM]->snapEnabled = true;
         paramQuantities[BONC_PARAM]->snapEnabled = true;
@@ -451,7 +500,10 @@ struct SynTHBloKMatrix8 : Module {
             step = (pendingReset || step < 0) ? 0 : (step + 1) % len;
             pendingReset = false;
             for (int r = 0; r < 8; r++)
-                if (pat[curPat()][r][step] && trackOn(r)) { pulse[r].trigger(0.01f); voice[r].trigger(); }
+                if (pat[curPat()][r][step] && trackOn(r)) {
+                    pulse[r].trigger(0.01f);
+                    voice[r].trigger(clockPeriod > 0.f && clockPeriod < 2.f ? clockPeriod : 0.125f);   // held for one step
+                }
         }
         for (int r = 0; r < 8; r++) outputs[TRIG_OUTPUT + r].setVoltage(pulse[r].process(args.sampleTime) ? 10.f : 0.f);
 
@@ -468,10 +520,19 @@ struct SynTHBloKMatrix8 : Module {
         // Voices: strip bank b, strip r = parameter b of voice r.
         if (outputs[AUDIO_L_OUTPUT].isConnected() || outputs[AUDIO_R_OUTPUT].isConnected()) {
             float l = 0.f, r = 0.f;
+            M8Global gs;
+            gs.cutoff = params[F2_CUTOFF_PARAM].getValue();
+            gs.res = params[F2_RES_PARAM].getValue();
+            gs.envAmt = params[F2_ENV_PARAM].getValue();
+            gs.mode = params[F2_MODE_PARAM].getValue();
+            gs.a = params[ENV_A_PARAM].getValue();
+            gs.d = params[ENV_D_PARAM].getValue();
+            gs.s = params[ENV_S_PARAM].getValue();
+            gs.r = params[ENV_R_PARAM].getValue();
             for (int v = 0; v < 8; v++) {
                 float p[8];
                 for (int b = 0; b < 8; b++) p[b] = val[b][v];
-                float s = voice[v].process(args.sampleRate, p);
+                float s = voice[v].process(args.sampleRate, p, gs);
                 float pan = p[VP_PAN] * float(M_PI) * 0.5f;
                 l += s * std::cos(pan);
                 r += s * std::sin(pan);
@@ -1029,45 +1090,47 @@ struct SynTHBloKMatrix8Widget : ModuleWidget {
             addParam(b);
         }
 
-        // Knob synced with the JAM's knob (its CV output is in the jack row).
-        const float KY = 72.f;
+        // Sound section under the BPM display, on a 4-column grid:
+        //   FILTER 2: CUTOFF RES ENV MODE / ENVELOPE: ATK DEC SUS REL / DELAY MASTER SPACE.
+        auto col4 = [&](int i) { return RX + RW * (i + 0.5f) / 4.f; };
+        auto smallKnob = [&](float x, float y, int param, const char* name) {
+            JKnobRing* fr = createWidget<JKnobRing>(mm2px(Vec(x - 5.5f, y - 5.5f)));
+            fr->box.size = mm2px(Vec(11.f, 11.f));
+            fr->module = module; fr->param = param;
+            addChild(fr);
+            addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(x, y)), module, param));
+            label(x, y + 7.f, name);
+        };
+        const int F2[4] = {SynTHBloKMatrix8::F2_CUTOFF_PARAM, SynTHBloKMatrix8::F2_RES_PARAM,
+                           SynTHBloKMatrix8::F2_ENV_PARAM, SynTHBloKMatrix8::F2_MODE_PARAM};
+        const char* F2N[4] = {"CUTOFF", "RES", "ENV", "MODE"};
+        const int EV[4] = {SynTHBloKMatrix8::ENV_A_PARAM, SynTHBloKMatrix8::ENV_D_PARAM,
+                           SynTHBloKMatrix8::ENV_S_PARAM, SynTHBloKMatrix8::ENV_R_PARAM};
+        const char* EVN[4] = {"ATK", "DEC", "SUS", "REL"};
+        for (int i = 0; i < 4; i++) {
+            smallKnob(col4(i), 50.f, F2[i], F2N[i]);
+            smallKnob(col4(i), 65.f, EV[i], EVN[i]);
+        }
+        smallKnob(col4(0), 85.f, SynTHBloKMatrix8::DELAY_PARAM, "DELAY");    // JAM knob on GRP
+        smallKnob(col4(3), 85.f, SynTHBloKMatrix8::SPACE_PARAM, "SPACE");    // JAM knob on IN1
+
+        // Master volume, synced with the JAM's knob (MST/CUE); its CV output is in the jack row.
+        const float KY = 85.f;
         JKnobRing* ring = createWidgetCentered<JKnobRing>(mm2px(Vec(RC, KY)));
         ring->module = module;
         addChild(ring);
         addParam(createParamCentered<RoundLargeBlackKnob>(mm2px(Vec(RC, KY)), module, SynTHBloKMatrix8::KNOB_PARAM));
         label(RC, KY + 12.f, "MASTER");
-        // Stereo audio out either side of the knob.
-        addOutput(createOutputCentered<SmallJack>(mm2px(Vec(RX + 6.f, KY)), module, SynTHBloKMatrix8::AUDIO_L_OUTPUT));
-        label(RX + 6.f, KY + 5.5f, "OUT L");
-        addOutput(createOutputCentered<SmallJack>(mm2px(Vec(RX + RW - 6.f, KY)), module, SynTHBloKMatrix8::AUDIO_R_OUTPUT));
-        label(RX + RW - 6.f, KY + 5.5f, "OUT R");
-
-        // DELAY and SPACE between the BPM display and the master knob (JAM knob on GRP / IN1).
-        const float FY = 51.f;
-        const int FX_PARAM[2] = {SynTHBloKMatrix8::DELAY_PARAM, SynTHBloKMatrix8::SPACE_PARAM};
-        const char* FX_NAME[2] = {"DELAY", "SPACE"};
-        for (int i = 0; i < 2; i++) {
-            float x = i == 0 ? RX + 11.f : RX + RW - 11.f;
-            JKnobRing* fr = createWidgetCentered<JKnobRing>(mm2px(Vec(x, FY)));
-            fr->box.size = mm2px(Vec(12.f, 12.f));
-            fr->box.pos = mm2px(Vec(x - 6.f, FY - 6.f));
-            fr->module = module; fr->param = FX_PARAM[i];
-            addChild(fr);
-            addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(x, FY)), module, FX_PARAM[i]));
-            label(x, FY + 7.5f, FX_NAME[i]);
-        }
 
         // All right-panel jacks in one row just above the buttons, labels on top.
-        const char* JNAME[4] = {"RUN", "RESET", "CLOCK", "KNOB"};
-        for (int i = 0; i < 4; i++) {
-            float x = RX + RW * (i + 0.5f) / 4.f;
-            label(x, 105.5f, JNAME[i]);
-            if (i < 3) {
-                const int JIN[3] = {SynTHBloKMatrix8::RUN_INPUT, SynTHBloKMatrix8::RESET_INPUT, SynTHBloKMatrix8::CLOCK_INPUT};
-                addInput(createInputCentered<SmallJack>(mm2px(Vec(x, 110.5f)), module, JIN[i]));
-            } else {
-                addOutput(createOutputCentered<SmallJack>(mm2px(Vec(x, 110.5f)), module, SynTHBloKMatrix8::KNOB_OUTPUT));
-            }
+        const char* JNAME[6] = {"RUN", "RST", "CLK", "KNOB", "L", "R"};
+        const int JIN[3] = {SynTHBloKMatrix8::RUN_INPUT, SynTHBloKMatrix8::RESET_INPUT, SynTHBloKMatrix8::CLOCK_INPUT};
+        const int JOUT[3] = {SynTHBloKMatrix8::KNOB_OUTPUT, SynTHBloKMatrix8::AUDIO_L_OUTPUT, SynTHBloKMatrix8::AUDIO_R_OUTPUT};
+        for (int i = 0; i < 6; i++) {
+            float x = RX + RW * (i + 0.5f) / 6.f;
+            label(x, 102.f, JNAME[i]);
+            if (i < 3) addInput(createInputCentered<SmallJack>(mm2px(Vec(x, 107.f)), module, JIN[i]));
+            else addOutput(createOutputCentered<SmallJack>(mm2px(Vec(x, 107.f)), module, JOUT[i - 3]));
         }
     }
 
