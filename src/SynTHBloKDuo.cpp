@@ -1369,9 +1369,9 @@ struct SynTHBloKDuoWidget : ModuleWidget {
             }
         }
 
-        // ---------------- right: master section ----------------
+        // ---------------- far right: master section ----------------
         // same width as LEAD / BASS: one OLED (MIDI, info, KEY | SCALE, buttons), one knob row, one jack row
-        const float RX = 179.6f, RW = 50.f, OX = RX + 1.5f, OY = 10.5f, OW = RW - 3.f;
+        const float RX = 283.28f, RW = 50.f, OX = RX + 1.5f, OY = 10.5f, OW = RW - 3.f;
         DUMasterDisplay* md = createWidget<DUMasterDisplay>(mm2px(Vec(OX, OY)));
         md->box.size = mm2px(Vec(OW, kMoBtn + 2.f * kMoBtnH + kMoBtnGap + 1.f)); md->module = module;
         addChild(md);
@@ -1464,11 +1464,11 @@ struct SynTHBloKDuoWidget : ModuleWidget {
                                                            i == 3 ? DU::KNOB_OUTPUT : i == 4 ? DU::OUT_L_OUTPUT : DU::OUT_R_OUTPUT));
         }
 
-        // ---------------- far right: FORGE FX ----------------
+        // ---------------- right of BASS: FORGE FX ----------------
         // the OLED, then the stage knobs (a row per stage, in the OLED's order, MIX last) and, right of
         // them, the master filter, its ADSR and the levels
         FXG* fm = module ? &module->fx : NULL;
-        const float FX0 = 230.6f, FOX = FX0 + 1.5f, FOY = 10.5f;
+        const float FX0 = 179.6f, FOX = FX0 + 1.5f, FOY = 10.5f;
         FXDisplay* fd = createWidget<FXDisplay>(mm2px(Vec(FOX, FOY)));
         fd->box.size = mm2px(Vec(kFxW, kFxH)); fd->module = fm;
         addChild(fd);
