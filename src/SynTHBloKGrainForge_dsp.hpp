@@ -369,14 +369,15 @@ static const char* kModeName[3] = {"LP", "BP", "HP"};
 struct Pulse {
     float ic1[2] = {}, ic2[2] = {};
     float env = 0.f, open = 0.f;
-    bool attacking = false;
+    bool attacking = false, fired = false;   // fired: a pattern step hit this sample
     Rng rng{31};
 
     void process(float inL, float inR, float sr, float stepLen, bool edge, int stepIdx, int pattern,
                  float cutoff, float res, float depth, float decay, int mode, bool openGate, float& oL, float& oR) {
+        fired = false;
         if (edge && stepIdx >= 0) {
             int p = clampi(pattern, 0, kPulseCount - 1);
-            if (p == kPulseCount - 1 ? rng.next() < 0.6f : kPulsePat[p][stepIdx & 15] == 'x') attacking = true;
+            if (p == kPulseCount - 1 ? rng.next() < 0.6f : kPulsePat[p][stepIdx & 15] == 'x') attacking = fired = true;
         }
         if (attacking) {
             env += (1.05f - env) * (1.f - std::exp(-1.f / (0.002f * sr)));

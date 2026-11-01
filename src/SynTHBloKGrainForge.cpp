@@ -20,6 +20,8 @@ static const int kRndDivCount = 6, kRndGlideCount = 5;
 static const char* kRndDivName[kRndDivCount] = {"1 BEAT", "2 BEATS", "1 BAR", "2 BARS", "4 BARS", "8 BARS"};
 static const int kRndDivSteps[kRndDivCount] = {4, 8, 16, 32, 64, 128};
 static const char* kRndGlideName[kRndGlideCount] = {"SNAP", "FAST", "BEAT", "BAR", "DRIFT"};
+enum { TRIG_BEAT, TRIG_STEP, TRIG_PULSE, TRIG_GLITCH, TRIG_SEQ, TRIG_GATE, kTrigCount };
+static const char* kTrigName[kTrigCount] = {"BEAT", "STEP", "PULSE", "GLITCH", "SEQ", "GATE"};
 
 // Presets: every stage's settings, in param order. Switch values are slot indexes (see the name tables).
 // Levels and throw steps are left alone. The last menu entry, SMART RANDOM, builds one with the randomizer.
@@ -74,9 +76,11 @@ struct SynTHBloKGrainForge : Module {
         FLT_ENV_PARAM,                // ADSR depth on the cutoff, + up / - down; retriggers every beat
         FLT_STAGES_PARAM,             // 1 / 2 / 3 filter stages (12 / 24 / 36 dB)
         FLT_MODE_PARAM,               // LP / BP / HP
+        FLT_AMP_PARAM,                // how much the filter ADSR also shapes the level (0 = none, 1 = full pluck)
+        FLT_TRIG_PARAM,               // what fires the filter ADSR: BEAT STEP PULSE GLITCH SEQ GATE
         NUM_PARAMS
     };
-    enum InputIds { IN_L_INPUT, IN_R_INPUT, CLOCK_INPUT, RESET_INPUT, OPEN_INPUT, GLITCH_INPUT, NUM_INPUTS };
+    enum InputIds { IN_L_INPUT, IN_R_INPUT, CLOCK_INPUT, RESET_INPUT, OPEN_INPUT, GLITCH_INPUT, GATE_INPUT, NUM_INPUTS };
     enum OutputIds { OUT_L_OUTPUT, OUT_R_OUTPUT, NUM_OUTPUTS };
     enum LightIds { NUM_LIGHTS };
 
@@ -88,7 +92,39 @@ struct SynTHBloKGrainForge : Module {
     DjFilter master;
     Adsr fltEnv;
     float fltGate = 0.f;               // samples left before the envelope's release
-    dsp::SchmittTrigger clkTrig, rstTrig, glitchTrig;
+    float fltEnvOut = 0.f;             // for the SEQ screen
+    dsp::SchmittTrigger clkTrig, rstTrig, glitchTrig, gateTrig;
+
+    // ---- filter SEQ: 16 steps (on + height); height = a cutoff offset snapped to ROBOT's key, so with
+    // RES up the filter whistles an arpeggio. Edited on its screen (UI thread), read here; plain values.
+    static const int kSeqMax = 16;
+    bool seqOn[kSeqMax] = {};
+    float seqLvl[kSeqMax] = {};
+    int seqLen = 16;
+    int seqPos = -1;
+    float seqOff = 0.f, seqOffSm = 0.f;   // cutoff offset of the current step (0..~0.2), and slewed
+    void seqDefault() {
+        static const float lv[8] = {0.f, .5f, .3f, .7f, 0.f, .9f, .5f, .3f};
+        for (int i = 0; i < kSeqMax; i++) { seqOn[i] = i % 2 == 0 || i % 8 == 3; seqLvl[i] = lv[i % 8]; }
+        seqLen = 16;
+    }
+    void seqRandom() {   // musical: downbeat on, about 60% density, heights from a few levels
+        static const float lv[6] = {0.f, .25f, .45f, .55f, .75f, 1.f};
+        for (int i = 0; i < kSeqMax; i++) {
+            seqOn[i] = i == 0 || random::uniform() < (i % 2 == 0 ? 0.75f : 0.4f);
+            seqLvl[i] = lv[std::min((int)(random::uniform() * 6), 5)];
+        }
+    }
+    // height 0..1 -> 0..24 semitones, snapped to the scale of ROBOT's key, in cutoff-knob units
+    float seqNote(float h) {
+        static const int maj[7] = {0, 2, 4, 5, 7, 9, 11}, mnr[7] = {0, 2, 3, 5, 7, 8, 10}, pent[5] = {0, 3, 5, 7, 10};
+        const int* sc = pent; int n = 5;
+        if (homeChord == 2 || homeChord == 5) { sc = maj; n = 7; }
+        else if (homeChord == 3 || homeChord == 6) { sc = mnr; n = 7; }
+        int deg = (int)std::round(clamp(h, 0.f, 1.f) * (2 * n));   // two octaves of scale degrees
+        int semi = 12 * (deg / n) + sc[deg % n];
+        return semi / (12.f * std::log2(1000.f));
+    }
 
     static const int kThrowSteps = 16;
     int step = -1;                    // 0..15, for the throw buttons
@@ -213,6 +249,7 @@ struct SynTHBloKGrainForge : Module {
 
     SynTHBloKGrainForge() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
+        seqDefault();
         const std::vector<std::string> offOn = {"Off", "On"};
         configSwitch(GL_ON_PARAM, 0.f, 1.f, 1.f, "GLITCH", offOn);
         configParam(GL_CHANCE_PARAM, 0.f, 1.f, 0.2f, "Glitch chance per step", "%", 0.f, 100.f);
@@ -272,6 +309,9 @@ struct SynTHBloKGrainForge : Module {
         configSwitch(PRESET_PARAM, 0.f, (float)kPresetCount, 0.f, "Preset", presetNames);
         paramQuantities[PRESET_PARAM]->randomizeEnabled = false;
         configParam(FILTER_PARAM, 0.f, 1.f, 1.f, "Filter cutoff (LP fully open / HP fully down = off)", " Hz", 1000.f, 20.f);
+        configParam(FLT_AMP_PARAM, 0.f, 1.f, 0.f, "Filter env to level (pluck / gate)", "%", 0.f, 100.f);
+        configSwitch(FLT_TRIG_PARAM, 0.f, (float)kTrigCount - 1, 0.f, "Filter env trigger",
+                     {"Every beat", "Every step", "PULSE hits", "GLITCH events", "SEQ steps", "GATE input"});
         configSwitch(FLT_MODE_PARAM, 0.f, 2.f, 0.f, "Filter type", {"Low-pass", "Band-pass", "High-pass"});
         configParam(FLT_RES_PARAM, 0.f, 1.f, 0.f, "Filter resonance", "%", 0.f, 100.f);
         configParam(FLT_ATK_PARAM, 0.f, 1.f, 0.1f, "Filter env attack", " ms", 2000.f, 1.f);
@@ -289,6 +329,7 @@ struct SynTHBloKGrainForge : Module {
         configInput(RESET_INPUT, "Reset");
         configInput(OPEN_INPUT, "Open (gate): PULSE lets everything through while high");
         configInput(GLITCH_INPUT, "Glitch now (trigger)");
+        configInput(GATE_INPUT, "Filter env gate (fires the ADSR when TRIG is GATE; holds while high)");
         configOutput(OUT_L_OUTPUT, "Left");
         configOutput(OUT_R_OUTPUT, "Right");
     }
@@ -297,7 +338,7 @@ struct SynTHBloKGrainForge : Module {
     int slot(int id) { return (int)std::round(params[id].getValue()); }
     static int throwParam(int i) { return i < 8 ? DL_STEP_PARAM + i : DL_STEP2_PARAM + (i - 8); }
 
-    void onReset() override { step = -1; clk = -1; bar = 0; }
+    void onReset() override { step = -1; clk = -1; bar = 0; seqDefault(); }
 
     // Older patches stored older layouts.
     //   v1 (no data block): TIME as an index into 7 slots, ROLL as a 0..1 knob split into 5 zones.
@@ -310,6 +351,10 @@ struct SynTHBloKGrainForge : Module {
         json_object_set_new(root, "v5", json_true());
         json_object_set_new(root, "rbHomeRoot", json_integer(homeRoot));
         json_object_set_new(root, "rbHomeChord", json_integer(homeChord));
+        json_object_set_new(root, "seqLen", json_integer(seqLen));
+        json_t* sq = json_array();
+        for (int i = 0; i < kSeqMax; i++) json_array_append_new(sq, json_real(seqOn[i] ? seqLvl[i] : -1.f - seqLvl[i]));   // <0 = off
+        json_object_set_new(root, "seq", sq);
         return root;
     }
     void fromJson(json_t* rootJ) override {   // old patches have no "data" block, so dataFromJson never runs for them
@@ -320,6 +365,14 @@ struct SynTHBloKGrainForge : Module {
             homeChord = clamp((int)json_integer_value(json_object_get(d, "rbHomeChord")), 0, 7);
             rndWasOn[R_RB] = on(RND_PARAM + R_RB);
         }
+        json_t* sq = d ? json_object_get(d, "seq") : NULL;
+        if (sq && json_array_size(sq) == (size_t)kSeqMax) {
+            for (int i = 0; i < kSeqMax; i++) {
+                float v = (float)json_number_value(json_array_get(sq, i));
+                seqOn[i] = v >= 0.f; seqLvl[i] = clamp(v >= 0.f ? v : -1.f - v, 0.f, 1.f);
+            }
+            seqLen = clamp((int)json_integer_value(json_object_get(d, "seqLen")), 1, kSeqMax);
+        } else seqDefault();
         lastPreset = slot(PRESET_PARAM);   // loading a patch must not re-apply its preset over its own settings
         int ver = !d ? 1 : json_object_get(d, "v5") ? 5 : json_object_get(d, "v4") ? 4 : json_object_get(d, "v3") ? 3 : json_object_get(d, "v2") ? 2 : 1;
         if (ver >= 5) return;
@@ -469,13 +522,39 @@ struct SynTHBloKGrainForge : Module {
         // ---- out: smooth limiter (clean up to 80%, then a soft knee to full scale) ----
         float dw = sm[DRYWET_PARAM], og = sm[OUT_GAIN_PARAM];
         float mL = inL + (wetL - inL) * dw, mR = inR + (wetR - inR) * dw;
-        // filter ADSR: hits on every beat, held for half a beat, then releases
-        if (edge && clk % 4 == 0) { fltEnv.trigger(); fltGate = 2.f * stepLen; }
+        // ---- filter ADSR: TRIG picks what fires it; clocked sources hold it open for a while, GATE while high ----
+        int trig = clamp(slot(FLT_TRIG_PARAM), 0, kTrigCount - 1);
+        if (edge) {
+            seqPos = (int)(clk % std::max(seqLen, 1));
+            seqOff = seqOn[seqPos] ? seqNote(seqLvl[seqPos]) : seqOff;   // rests keep the last note
+        }
+        bool fire = false; float hold = 0.f;
+        switch (trig) {
+            case TRIG_BEAT:   fire = edge && clk % 4 == 0; hold = 2.f; break;
+            case TRIG_STEP:   fire = edge; hold = 0.5f; break;
+            case TRIG_PULSE:  fire = pulse.fired; hold = 0.5f; break;
+            case TRIG_GLITCH: fire = (edge || force) && glitch.ev != Glitch::NONE; hold = 1.f; break;
+            case TRIG_SEQ:    fire = edge && seqOn[seqPos]; hold = 0.5f; break;
+            default: break;
+        }
+        bool gateHigh = inputs[GATE_INPUT].getVoltage() > 1.f;
+        if (trig == TRIG_GATE) {
+            if (gateTrig.process(inputs[GATE_INPUT].getVoltage(), 0.1f, 1.f)) fltEnv.trigger();
+            else if (!gateHigh) fltEnv.release();
+            fltGate = 0.f;
+        } else if (fire) { fltEnv.trigger(); fltGate = hold * stepLen; }
         if (fltGate > 0.f && (fltGate -= 1.f) <= 0.f) fltEnv.release();
         float env = fltEnv.process(0.001f * std::pow(2000.f, sm[FLT_ATK_PARAM]), 0.005f * std::pow(800.f, sm[FLT_DEC_PARAM]),
                                    sm[FLT_SUS_PARAM], 0.005f * std::pow(800.f, sm[FLT_REL_PARAM]), sr);
-        float fcut = clamp(sm[FILTER_PARAM] + env * sm[FLT_ENV_PARAM], 0.f, 1.f);
-        master.process(mL, mR, fcut, sm[FLT_RES_PARAM], sr, sm[FLT_STAGES_PARAM], sm[FLT_MODE_PARAM]);   // DJ filter on the whole mix, before the limiter
+        fltEnvOut = env;
+        // SEQ: each step's note moves the cutoff (a quick 3 ms slew, so jumps never click)
+        seqOffSm += ((trig == TRIG_SEQ ? seqOff : 0.f) - seqOffSm) * (1.f - std::exp(-1.f / (0.003f * sr)));
+        float fcut = clamp(sm[FILTER_PARAM] + seqOffSm + env * sm[FLT_ENV_PARAM], 0.f, 1.f);
+        // hits bark: resonance climbs a little with the envelope (still capped)
+        float fres = sm[FLT_RES_PARAM] + 0.35f * env * std::fabs(sm[FLT_ENV_PARAM]);
+        master.process(mL, mR, fcut, fres, sr, sm[FLT_STAGES_PARAM], sm[FLT_MODE_PARAM]);
+        float duck = 1.f - sm[FLT_AMP_PARAM] * (1.f - std::min(env, 1.f));   // AMP: the envelope shapes the level too
+        mL *= duck; mR *= duck;   // DJ filter on the whole mix, before the limiter
         float oL = softLimit(mL * og);
         float oR = softLimit(mR * og);
         outputs[OUT_L_OUTPUT].setVoltage(5.f * oL);
@@ -845,6 +924,113 @@ struct GFPresetBar : TransparentWidget {
     }
 };
 
+// Filter SEQ screen: left, the TRIG source (click = next, right-click = menu); right, 16 bars.
+// Click a bar to switch its step on/off; drag up/down across bars to paint heights (notes).
+struct GFSeqScreen : TransparentWidget {
+    SynTHBloKGrainForge* module = NULL;
+    typedef SynTHBloKGrainForge G;
+    static constexpr float kTrigW = 0.17f;   // share of the width for the TRIG label
+    Vec drag, press; int pressStep = -1; bool moved = false;
+    float barX0() { return box.size.x * kTrigW; }
+    int stepAt(float x) { return clamp((int)((x - barX0()) / ((box.size.x - barX0()) / G::kSeqMax)), 0, G::kSeqMax - 1); }
+    void paint(Vec p) {
+        if (!module || p.x < barX0()) return;
+        int i = stepAt(p.x);
+        module->seqLvl[i] = clamp(1.f - (p.y - 1.5f) / (box.size.y - 3.f), 0.f, 1.f);
+        module->seqOn[i] = true;
+    }
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        float W = box.size.x, H = box.size.y, x0 = barX0();
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, W, H, 2.f);
+        nvgFillColor(args.vg, nvgRGBA(14, 9, 3, 255));
+        nvgFill(args.vg);
+        nvgStrokeWidth(args.vg, 0.8f);
+        nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, 80));
+        nvgStroke(args.vg);
+        int trig = module ? clamp(module->slot(G::FLT_TRIG_PARAM), 0, kTrigCount - 1) : TRIG_SEQ;
+        bool seqMode = trig == TRIG_SEQ;
+        // envelope level as a glow strip under the TRIG name
+        float ev = module ? clamp(module->fltEnvOut, 0.f, 1.f) : 0.f;
+        nvgBeginPath(args.vg);
+        nvgRect(args.vg, 2.f, H - 3.f, (x0 - 4.f) * ev, 1.5f);
+        nvgFillColor(args.vg, nvgRGBA(255, 112, 15, 220));
+        nvgFill(args.vg);
+        auto font = uiFont();
+        if (font) {
+            nvgFontFaceId(args.vg, font->handle);
+            nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+            nvgFontSize(args.vg, 6.f);
+            nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 130));
+            nvgText(args.vg, x0 * 0.5f, H * 0.28f, "TRIG", NULL);
+            nvgFontSize(args.vg, 7.5f);
+            nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 255));
+            nvgText(args.vg, x0 * 0.5f, H * 0.62f, kTrigName[trig], NULL);
+        }
+        float bw = (W - x0 - 2.f) / G::kSeqMax;
+        int len = module ? module->seqLen : 16, pos = module ? module->seqPos : -1;
+        for (int i = 0; i < G::kSeqMax; i++) {
+            bool on = module ? module->seqOn[i] : i % 2 == 0;
+            float lv = module ? module->seqLvl[i] : 0.5f;
+            float bx = x0 + i * bw + 0.6f, bh = 1.5f + lv * (H - 4.5f);
+            int a = i >= len ? 40 : seqMode ? 255 : 110;   // dim when SEQ isn't the trigger, dimmer past LENGTH
+            nvgBeginPath(args.vg);
+            nvgRect(args.vg, bx, H - 1.5f - bh, bw - 1.2f, bh);
+            if (on) nvgFillColor(args.vg, i == pos && seqMode ? nvgRGBA(255, 240, 200, a) : nvgRGBA(255, 112, 15, a * 9 / 10));
+            else nvgFillColor(args.vg, nvgRGBA(255, 180, 90, a / 5));
+            nvgFill(args.vg);
+            if (i % 4 == 0) {   // beat ticks
+                nvgBeginPath(args.vg);
+                nvgRect(args.vg, bx, H - 1.2f, bw - 1.2f, 0.6f);
+                nvgFillColor(args.vg, nvgRGBA(255, 180, 90, 90));
+                nvgFill(args.vg);
+            }
+        }
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (!module || e.action != GLFW_PRESS) return;
+        if (e.button == GLFW_MOUSE_BUTTON_RIGHT) {
+            e.consume(this);
+            SynTHBloKGrainForge* m = module;
+            ui::Menu* menu = createMenu();
+            menu->addChild(createMenuLabel("Filter env"));
+            for (int t = 0; t < kTrigCount; t++)
+                menu->addChild(createCheckMenuItem(std::string("Trigger: ") + kTrigName[t], "",
+                    [=]() { return clamp(m->slot(G::FLT_TRIG_PARAM), 0, kTrigCount - 1) == t; },
+                    [=]() { m->params[G::FLT_TRIG_PARAM].setValue((float)t); }));
+            menu->addChild(new MenuSeparator);
+            menu->addChild(createMenuLabel("SEQ"));
+            for (int L : {4, 8, 12, 16})
+                menu->addChild(createCheckMenuItem("Length " + std::to_string(L), "",
+                    [=]() { return m->seqLen == L; }, [=]() { m->seqLen = L; }));
+            menu->addChild(createMenuItem("Randomize pattern", "", [=]() { m->seqRandom(); }));
+            menu->addChild(createMenuItem("Default pattern", "", [=]() { m->seqDefault(); }));
+            menu->addChild(createMenuItem("Clear", "", [=]() { for (int i = 0; i < G::kSeqMax; i++) m->seqOn[i] = false; }));
+            return;
+        }
+        if (e.button != GLFW_MOUSE_BUTTON_LEFT) return;
+        e.consume(this);
+        if (e.pos.x < barX0()) {   // TRIG: next source
+            int t = clamp(module->slot(G::FLT_TRIG_PARAM), 0, kTrigCount - 1);
+            module->params[G::FLT_TRIG_PARAM].setValue((float)((t + 1) % kTrigCount));
+            pressStep = -1;
+            return;
+        }
+        drag = press = e.pos; pressStep = stepAt(e.pos.x); moved = false;
+    }
+    void onDragMove(const DragMoveEvent& e) override {
+        if (pressStep < 0 || e.button != GLFW_MOUSE_BUTTON_LEFT) return;
+        drag = drag.plus(e.mouseDelta.div(getAbsoluteZoom()));
+        if (!moved && drag.minus(press).norm() > 2.f) { moved = true; paint(press); }   // a little jitter is still a click
+        if (moved) paint(drag);
+    }
+    void onDragEnd(const DragEndEvent& e) override {
+        if (pressStep >= 0 && !moved && module) module->seqOn[pressStep] = !module->seqOn[pressStep];
+        pressStep = -1;
+    }
+};
+
 struct SynTHBloKGrainForgeWidget : ModuleWidget {
     SynTHBloKGrainForgeWidget(SynTHBloKGrainForge* module) {
         setModule(module);
@@ -949,6 +1135,9 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
         pb->box.size = mm2px(Vec(16.f, 6.f)); pb->module = module;
         addChild(pb);
         addParam(createParamCentered<Trimpot>(mm2px(Vec(25.f, 98.5f)), module, G::PRESET_PARAM));
+        GFSeqScreen* sq = createWidget<GFSeqScreen>(mm2px(Vec(29.5f, 95.5f)));   // filter env TRIG + SEQ
+        sq->box.size = mm2px(Vec(70.f, 8.f)); sq->module = module;
+        addChild(sq);
         knob(104.f, 86.5f, G::IN_GAIN_PARAM, "INPUT");
         // master filter: cutoff, res, env depth on top; ADSR trimpots below
         // FILTER and DRY/WET: one size up from the rest
@@ -978,16 +1167,18 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
             addParam(createParamCentered<Trimpot>(mm2px(Vec(x, 98.5f)), module, adsr[i]));
             label(x - 4.6f, 98.5f, an[i]);
         }
+        addParam(createParamCentered<Trimpot>(mm2px(Vec(161.f, 98.5f)), module, G::FLT_AMP_PARAM));   // env -> level
+        label(156.2f, 98.5f, "V");
         midKnob(174.f, 86.5f, G::DRYWET_PARAM, "DRY / WET");
         knob(191.f, 86.5f, G::OUT_GAIN_PARAM, "OUTPUT");
 
-        const char* jn[8] = {"IN L", "IN R", "CLOCK", "RESET", "OPEN", "GLITCH", "OUT L", "OUT R"};
-        for (int i = 0; i < 8; i++) {
-            float x = 14.f + i * 25.f;
+        const char* jn[9] = {"IN L", "IN R", "CLOCK", "RESET", "OPEN", "GLITCH", "GATE", "OUT L", "OUT R"};
+        for (int i = 0; i < 9; i++) {
+            float x = 12.f + i * 22.4f;
             label(x, 106.f, jn[i]);
             Vec p = mm2px(Vec(x, 113.f));
-            if (i < 6) addInput(createInputCentered<BlackJack>(p, module, i));
-            else addOutput(createOutputCentered<BlackJack>(p, module, i - 6));
+            if (i < 7) addInput(createInputCentered<BlackJack>(p, module, i));
+            else addOutput(createOutputCentered<BlackJack>(p, module, i - 7));
         }
     }
 };
