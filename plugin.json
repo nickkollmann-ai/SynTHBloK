@@ -183,6 +183,17 @@
         "Controller",
         "MIDI"
       ]
+    },
+    {
+      "slug": "SynTHBloKMatrix8",
+      "name": "SynTHBloK Matrix-8",
+      "description": "Maschine JAM groovebox: 8x8 step sequencer driving 8 built-in synth voices (morphing oscillator, resonant filter, envelopes, drive, pan), touch strips shape each voice, stereo out",
+      "tags": [
+        "Synth voice",
+        "Sequencer",
+        "Controller",
+        "MIDI"
+      ]
     }
   ],
   "authorEmail": "support@liquidnick.com",
