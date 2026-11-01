@@ -245,7 +245,7 @@ struct SynTHBloKMatrix8 : Module {
     float sm[8];
     int step = -1;
     bool pendingReset = false;
-    dsp::SchmittTrigger clkTrig, rstTrig, rstBtnTrig, clrTrig;
+    dsp::SchmittTrigger clkTrig, rstTrig, rstBtnTrig, runTrig, clrTrig;
     dsp::PulseGenerator pulse[8];
 
     // Shown on the panel: RUN/RESET light from their jacks when patched, clock tempo on the display.
@@ -298,8 +298,8 @@ struct SynTHBloKMatrix8 : Module {
         configSwitch(RANGE_PARAM, 0.f, 1.f, 0.f, "Strip output range", {"0..10 V", "-5..+5 V"});
         configParam(BONC_PARAM, 0.f, 127.f, 127.f, "LED colour: selected bank button");
         configParam(BOFFC_PARAM, 0.f, 127.f, 20.f, "LED colour: other bank buttons");
-        configSwitch(RUN_PARAM, 0.f, 1.f, 1.f, "Run (the RUN jack takes over when patched)", {"Stopped", "Running"});
-        configButton(RESET_PARAM, "Reset (the RESET jack takes over when patched)");
+        configSwitch(RUN_PARAM, 0.f, 1.f, 1.f, "Run (a trigger at the RUN jack toggles it)", {"Stopped", "Running"});
+        configButton(RESET_PARAM, "Reset (a trigger at the RESET jack also resets)");
         configParam(KNOB_PARAM, 0.f, 1.f, 0.8f, "Master volume (JAM knob on MST or CUE)", "%", 0.f, 100.f);
         configParam(DELAY_PARAM, 0.f, 1.f, 0.f, "Delay, ping-pong dotted 1/8 (JAM knob on GRP)", "%", 0.f, 100.f);
         configParam(SPACE_PARAM, 0.f, 1.f, 0.f, "Space / reverb (JAM knob on IN1)", "%", 0.f, 100.f);
@@ -331,8 +331,8 @@ struct SynTHBloKMatrix8 : Module {
         paramQuantities[BONC_PARAM]->snapEnabled = true;
         paramQuantities[BOFFC_PARAM]->snapEnabled = true;
         configInput(CLOCK_INPUT, "Clock");
-        configInput(RESET_INPUT, "Reset (overrides the RESET button)");
-        configInput(RUN_INPUT, "Run (gate; overrides the RUN button)");
+        configInput(RESET_INPUT, "Reset (trigger: same as pressing RESET)");
+        configInput(RUN_INPUT, "Run (trigger: toggles RUN, like pressing it)");
         for (int r = 0; r < 8; r++) configOutput(TRIG_OUTPUT + r, "Track " + std::to_string(r + 1) + " trigger");
         for (int i = 0; i < 8; i++) { configOutput(STRIP_OUTPUT + i, "Strip " + std::to_string(i + 1)); sm[i] = 0.f; }
         configOutput(KNOB_OUTPUT, "Knob (0..10 V)");
@@ -371,7 +371,7 @@ struct SynTHBloKMatrix8 : Module {
             case CC_DOWN: stepParam(LEN_PARAM, -1, 1, 8, false); break;
             case CC_LEFT: stepParam(BANK_PARAM, -1, 1, 8, false); break;
             case CC_RIGHT: stepParam(BANK_PARAM, 1, 1, 8, false); break;
-            case CC_PLAY: if (!inputs[RUN_INPUT].isConnected()) params[RUN_PARAM].setValue(params[RUN_PARAM].getValue() > 0.5f ? 0.f : 1.f); break;
+            case CC_PLAY: params[RUN_PARAM].setValue(params[RUN_PARAM].getValue() > 0.5f ? 0.f : 1.f); break;
             case CC_REC: params[LEARN_PARAM].setValue(params[LEARN_PARAM].getValue() > 0.5f ? 0.f : 1.f); break;
             case CC_PREV: stepParam(PAT_PARAM, -1, 1, 8, true); break;
             case CC_NEXT: stepParam(PAT_PARAM, 1, 1, 8, true); break;
@@ -507,9 +507,11 @@ struct SynTHBloKMatrix8 : Module {
         }
 
         // A patched jack overrides its button.
-        running = inputs[RUN_INPUT].isConnected() ? inputs[RUN_INPUT].getVoltage() > 1.f : params[RUN_PARAM].getValue() > 0.5f;
-        bool rst = inputs[RESET_INPUT].isConnected() ? rstTrig.process(inputs[RESET_INPUT].getVoltage())
-                                                     : rstBtnTrig.process(params[RESET_PARAM].getValue()) || jamReset;
+        // RUN and RESET jacks act like pressing their buttons: a trigger toggles RUN, or fires RESET.
+        if (runTrig.process(inputs[RUN_INPUT].getVoltage()))
+            params[RUN_PARAM].setValue(params[RUN_PARAM].getValue() > 0.5f ? 0.f : 1.f);
+        running = params[RUN_PARAM].getValue() > 0.5f;
+        bool rst = rstTrig.process(inputs[RESET_INPUT].getVoltage()) | rstBtnTrig.process(params[RESET_PARAM].getValue()) | jamReset;
         jamReset = false;
         if (rst) { step = -1; pendingReset = true; resetFlash = 0.15f; }
         resetFlash = std::max(0.f, resetFlash - args.sampleTime);
@@ -945,8 +947,8 @@ struct JLabel : TransparentWidget {
 
 // LEARN / CLEAR / RUN / RESET: shaped like the page and bank buttons, coloured like the
 // SynTHBloK MIDI + display (amber on dark brown, lit = orange, RUN lit = green).
-// When `jack` is patched it drives the button: clicks are ignored, the light shows the jack,
-// and a dot in the corner marks it.
+// A trigger at `jack` presses the button (RUN toggles, RESET fires); a dot in the corner
+// shows the jack is patched.
 struct JAmberBtn : app::ParamWidget {
     SynTHBloKMatrix8* jam = NULL;
     const char* label = "";
@@ -954,10 +956,9 @@ struct JAmberBtn : app::ParamWidget {
     int jack = -1;
     float fontSize = 8.f;
     JAmberBtn() { box.size = mm2px(Vec(10.25f, 6.f)); }
-    bool jackDriven() { return jam && jack >= 0 && jam->inputs[jack].isConnected(); }
+    bool jackPatched() { return jam && jack >= 0 && jam->inputs[jack].isConnected(); }
     bool lit() {
         if (!jam) return green;
-        if (jackDriven()) return jack == SynTHBloKMatrix8::RUN_INPUT ? jam->running : jam->resetFlash > 0.f;
         if (jack == SynTHBloKMatrix8::RESET_INPUT && jam->resetFlash > 0.f) return true;
         ParamQuantity* pq = getParamQuantity();
         return pq && pq->getValue() > 0.5f;
@@ -972,7 +973,7 @@ struct JAmberBtn : app::ParamWidget {
         nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, on ? 255 : 120));
         nvgStrokeWidth(args.vg, on ? 1.2f : 0.8f);
         nvgStroke(args.vg);
-        if (jackDriven()) {
+        if (jackPatched()) {
             nvgBeginPath(args.vg);
             nvgCircle(args.vg, box.size.x - 2.6f, 2.6f, 1.3f);
             nvgFillColor(args.vg, on ? nvgRGBA(20, 10, 2, 255) : nvgRGBA(255, 190, 90, 255));
@@ -988,8 +989,7 @@ struct JAmberBtn : app::ParamWidget {
     }
     void onButton(const ButtonEvent& e) override {
         if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
-            if (!jackDriven())
-                if (ParamQuantity* pq = getParamQuantity()) pq->setValue(latch ? (pq->getValue() > 0.5f ? 0.f : 1.f) : 1.f);
+            if (ParamQuantity* pq = getParamQuantity()) pq->setValue(latch ? (pq->getValue() > 0.5f ? 0.f : 1.f) : 1.f);
             e.consume(this);
             return;
         }
