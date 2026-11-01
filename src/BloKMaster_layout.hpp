@@ -14,7 +14,7 @@ static const float IO_Y = 108.00f;
 static const float D1[4] = {102.000f, 15.600f, 56.560f, 36.000f};
 static const float D2[4] = {102.000f, 60.800f, 56.560f, 34.000f};
 // third column (added by hand): dynamics tracker + its view buttons
-static const float D3[4] = {163.500f, 15.600f, 56.000f, 79.200f};
+static const float D3[4] = {163.500f, 60.800f, 56.000f, 34.000f};     // same row and height as D2 (METERS)
 static const float VIEW_X[4] = {170.500f, 184.500f, 198.500f, 212.500f};
 static const float VIEW_Y = 108.00f;
 }
