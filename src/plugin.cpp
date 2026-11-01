@@ -20,6 +20,7 @@ extern Model* modelSynTHBloKJamProbe;
 extern Model* modelSynTHBloKJam;
 extern Model* modelSynTHBloKMatrix8;
 extern Model* modelSynTHBloKGrainForge;
+extern Model* modelSynTHBloKDuo;
 void init(Plugin* p) {
     pluginInstance = p;
 
@@ -40,5 +41,6 @@ void init(Plugin* p) {
     p->addModel(modelSynTHBloKJam);
     p->addModel(modelSynTHBloKMatrix8);
     p->addModel(modelSynTHBloKGrainForge);
+    p->addModel(modelSynTHBloKDuo);
 }
 

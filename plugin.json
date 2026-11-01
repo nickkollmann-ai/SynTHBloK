@@ -207,6 +207,16 @@
         "Pitch shifter",
         "Clock modulator"
       ]
+    },
+    {
+      "slug": "SynTHBloKDuo",
+      "name": "SynTHBloK MATRIX-DUO",
+      "description": "LEAD and BASS dual-oscillator mono synths (wave morph, hard sync, FM, sub, 24 dB filter, ADSR, drive, glide) with their own 8-step note sequencer in a key and scale, 8 patterns, clock/reset/run in, audio, pitch and gate out",
+      "tags": [
+        "Synth voice",
+        "Oscillator",
+        "Sequencer"
+      ]
     }
   ],
   "authorEmail": "support@liquidnick.com",
