@@ -93,6 +93,7 @@ struct SynTHBloKGrainForge : Module {
     Adsr fltEnv;
     float fltGate = 0.f;               // samples left before the envelope's release
     float fltEnvOut = 0.f;             // for the SEQ screen
+    float envS1 = 0.f, envS2 = 0.f;    // envelope corner smoothing
     dsp::SchmittTrigger clkTrig, rstTrig, glitchTrig, gateTrig;
 
     // ---- filter SEQ: 16 steps (on + height); height = a cutoff offset snapped to ROBOT's key, so with
@@ -314,10 +315,10 @@ struct SynTHBloKGrainForge : Module {
                      {"Every beat", "Every step", "PULSE hits", "GLITCH events", "SEQ steps", "GATE input"});
         configSwitch(FLT_MODE_PARAM, 0.f, 2.f, 0.f, "Filter type", {"Low-pass", "Band-pass", "High-pass"});
         configParam(FLT_RES_PARAM, 0.f, 1.f, 0.f, "Filter resonance", "%", 0.f, 100.f);
-        configParam(FLT_ATK_PARAM, 0.f, 1.f, 0.1f, "Filter env attack", " ms", 2000.f, 1.f);
-        configParam(FLT_DEC_PARAM, 0.f, 1.f, 0.45f, "Filter env decay", " ms", 800.f, 5.f);
+        configParam(FLT_ATK_PARAM, 0.f, 1.f, 0.1f, "Filter env attack", " ms", 667.f, 3.f);
+        configParam(FLT_DEC_PARAM, 0.f, 1.f, 0.45f, "Filter env decay", " ms", 333.f, 12.f);
         configParam(FLT_SUS_PARAM, 0.f, 1.f, 0.3f, "Filter env sustain", "%", 0.f, 100.f);
-        configParam(FLT_REL_PARAM, 0.f, 1.f, 0.4f, "Filter env release", " ms", 800.f, 5.f);
+        configParam(FLT_REL_PARAM, 0.f, 1.f, 0.4f, "Filter env release", " ms", 333.f, 12.f);
         configParam(FLT_ENV_PARAM, -1.f, 1.f, 0.f, "Filter env depth (retriggers every beat; + sweeps cutoff up, - down)", "%", 0.f, 100.f);
         configSwitch(FLT_STAGES_PARAM, 0.f, 2.f, 0.f, "Filter stages", {"1 stage (12 dB)", "2 stages (24 dB)", "3 stages (36 dB)"});
         configParam(IN_GAIN_PARAM, 0.f, 2.f, 1.f, "Input gain", "%", 0.f, 100.f);
@@ -544,15 +545,25 @@ struct SynTHBloKGrainForge : Module {
             fltGate = 0.f;
         } else if (fire) { fltEnv.trigger(); fltGate = hold * stepLen; }
         if (fltGate > 0.f && (fltGate -= 1.f) <= 0.f) fltEnv.release();
-        float env = fltEnv.process(0.001f * std::pow(2000.f, sm[FLT_ATK_PARAM]), 0.005f * std::pow(800.f, sm[FLT_DEC_PARAM]),
-                                   sm[FLT_SUS_PARAM], 0.005f * std::pow(800.f, sm[FLT_REL_PARAM]), sr);
+        float envRaw = fltEnv.process(0.003f * std::pow(667.f, sm[FLT_ATK_PARAM]), 0.012f * std::pow(333.f, sm[FLT_DEC_PARAM]),
+                                      sm[FLT_SUS_PARAM], 0.012f * std::pow(333.f, sm[FLT_REL_PARAM]), sr);
+        // two gentle 1.5 ms poles round off the envelope's corners: still snappy, but no pop or crunch
+        float ec = 1.f - std::exp(-1.f / (0.0015f * sr));
+        envS1 += (envRaw - envS1) * ec; envS2 += (envS1 - envS2) * ec;
+        float env = envS2;
         fltEnvOut = env;
         // SEQ: each step's note moves the cutoff (a quick 3 ms slew, so jumps never click)
         seqOffSm += ((trig == TRIG_SEQ ? seqOff : 0.f) - seqOffSm) * (1.f - std::exp(-1.f / (0.003f * sr)));
-        float fcut = clamp(sm[FILTER_PARAM] + seqOffSm + env * sm[FLT_ENV_PARAM], 0.f, 1.f);
+        float fenv = sm[FLT_ENV_PARAM] * std::fabs(sm[FLT_ENV_PARAM]);   // squared: fine sweeps around the middle, full range at the ends
+        float fcut = clamp(sm[FILTER_PARAM] + seqOffSm + env * fenv, 0.f, 1.f);
         // hits bark: resonance climbs a little with the envelope (still capped)
-        float fres = sm[FLT_RES_PARAM] + 0.35f * env * std::fabs(sm[FLT_ENV_PARAM]);
+        float fres = sm[FLT_RES_PARAM] + 0.2f * env * std::fabs(fenv);
         master.process(mL, mR, fcut, fres, sr, sm[FLT_STAGES_PARAM], sm[FLT_MODE_PARAM]);
+        // big ENV sweeps run hot (the resonant peak rushes through the whole spectrum): pull the hit's peak
+        // down by up to ~5 dB at full ENV + RES, so it stays punchy instead of loud
+        float ea = std::min(env, 1.f) * std::fabs(fenv);
+        float tame = 1.f - ea * (0.25f + 0.2f * sm[FLT_RES_PARAM]);
+        mL *= tame; mR *= tame;
         float duck = 1.f - sm[FLT_AMP_PARAM] * (1.f - std::min(env, 1.f));   // AMP: the envelope shapes the level too
         mL *= duck; mR *= duck;   // DJ filter on the whole mix, before the limiter
         float oL = softLimit(mL * og);
@@ -894,12 +905,45 @@ struct GFRndPanel : TransparentWidget {
     }
 };
 
-// PRESET screen: shows the preset picked by the tiny knob below; clicking SMART RND rolls a new one.
+// PRESET screen: a tiny 2-row matrix on top, one gradient-coloured cell per preset (click one to load
+// it), and the name below (click = next, right-click = list).
 struct GFPresetBar : TransparentWidget {
     SynTHBloKGrainForge* module = NULL;
     typedef SynTHBloKGrainForge G;
+    static constexpr int kCells = kPresetCount + 1, kCols = (kCells + 1) / 2;
+    static constexpr float kMatH = 0.52f;   // share of the height for the matrix
     static const char* nameOf(int i) { return i >= kPresetCount ? "SMART RND" : kPreset[i].name; }
     int cur() { return module ? clamp(module->slot(G::PRESET_PARAM), 0, kPresetCount) : 0; }
+    static NVGcolor cellColor(int i, int alpha) {   // amber -> pink -> violet across the presets
+        float t = i / float(kCells - 1);
+        NVGcolor c = nvgHSL(0.08f - 0.30f * t, 1.f, 0.55f);   // nanovg wraps the hue
+        c.a = alpha / 255.f;
+        return c;
+    }
+    Rect cellRect(int i) {
+        float m = 1.5f, cw = (box.size.x - 2.f * m) / kCols, ch = (box.size.y * kMatH - m) / 2.f;
+        return Rect(Vec(m + (i % kCols) * cw, m + (i / kCols) * ch), Vec(cw, ch));
+    }
+    int cellAt(Vec p) {
+        if (p.y >= box.size.y * kMatH) return -1;
+        for (int i = 0; i < kCells; i++) if (cellRect(i).contains(p)) return i;
+        return -1;
+    }
+    void drawMatrix(NVGcontext* vg) {
+        int sel = cur();
+        for (int i = 0; i < kCells; i++) {
+            Rect r = cellRect(i);
+            nvgBeginPath(vg);
+            nvgRoundedRect(vg, r.pos.x + 0.5f, r.pos.y + 0.5f, r.size.x - 1.f, r.size.y - 1.f, 0.8f);
+            nvgFillColor(vg, cellColor(i, i == sel ? 255 : 95));
+            nvgFill(vg);
+            if (i == sel) {
+                nvgStrokeWidth(vg, 0.8f);
+                nvgStrokeColor(vg, nvgRGBA(255, 245, 225, 255));
+                nvgStroke(vg);
+            }
+        }
+    }
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
         float W = box.size.x, H = box.size.y;
@@ -910,17 +954,33 @@ struct GFPresetBar : TransparentWidget {
         nvgStrokeWidth(args.vg, 0.8f);
         nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, 80));
         nvgStroke(args.vg);
+        drawMatrix(args.vg);
         auto font = uiFont(); if (!font) return;
         nvgFontFaceId(args.vg, font->handle);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFontSize(args.vg, 6.5f);   // tiny screen: just the name
-        nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 255));
-        nvgText(args.vg, W * 0.5f, H * 0.55f, nameOf(cur()), NULL);
+        nvgFontSize(args.vg, 7.f);
+        nvgFillColor(args.vg, cellColor(cur(), 255));   // the name takes its cell's colour
+        nvgText(args.vg, W * 0.5f, H * (kMatH + 1.f) * 0.5f + 0.5f, nameOf(cur()), NULL);
     }
-    void onButton(const ButtonEvent& e) override {   // the knob picks; a click on SMART RND rolls a new one
-        if (e.action != GLFW_PRESS || e.button != GLFW_MOUSE_BUTTON_LEFT) return;
-        e.consume(this);
-        if (module && cur() == kPresetCount) module->presetRequest.store(kPresetCount);
+    // matrix cell = that preset (again = reload / re-roll SMART RND), name = next, right-click = list
+    void onButton(const ButtonEvent& e) override {
+        if (e.action != GLFW_PRESS || !module) return;
+        SynTHBloKGrainForge* m = module;
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT) {
+            e.consume(this);
+            int c = cellAt(e.pos);
+            if (c >= 0 && c == cur()) m->presetRequest.store(c);
+            else m->params[G::PRESET_PARAM].setValue((float)(c >= 0 ? c : (cur() + 1) % kCells));
+        } else if (e.button == GLFW_MOUSE_BUTTON_RIGHT) {
+            e.consume(this);
+            ui::Menu* menu = createMenu();
+            menu->addChild(createMenuLabel("Preset"));
+            for (int i = 0; i <= kPresetCount; i++)
+                menu->addChild(createCheckMenuItem(nameOf(i), "", [=]() { return cur() == i; }, [=]() {
+                    if (cur() == i) m->presetRequest.store(i);   // same one again: reload / re-roll
+                    else m->params[G::PRESET_PARAM].setValue((float)i);
+                }));
+        }
     }
 };
 
@@ -1161,10 +1221,9 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
         GFRndPanel* rp = createWidget<GFRndPanel>(mm2px(Vec(59.f, 79.5f)));
         rp->box.size = mm2px(Vec(36.f, 14.f)); rp->module = module;
         addChild(rp);
-        GFPresetBar* pb = createWidget<GFPresetBar>(mm2px(Vec(5.f, 95.5f)));   // small, under BPM, its knob beside it
-        pb->box.size = mm2px(Vec(16.f, 6.f)); pb->module = module;
+        GFPresetBar* pb = createWidget<GFPresetBar>(mm2px(Vec(5.f, 95.5f)));   // under BPM: click = next, right-click = list
+        pb->box.size = mm2px(Vec(22.5f, 8.f)); pb->module = module;
         addChild(pb);
-        addParam(createParamCentered<Trimpot>(mm2px(Vec(25.f, 98.5f)), module, G::PRESET_PARAM));
         GFSeqScreen* sq = createWidget<GFSeqScreen>(mm2px(Vec(29.5f, 95.5f)));   // filter env TRIG + SEQ
         sq->box.size = mm2px(Vec(70.f, 8.f)); sq->module = module;
         addChild(sq);

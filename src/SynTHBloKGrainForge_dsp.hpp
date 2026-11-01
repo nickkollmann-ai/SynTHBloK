@@ -214,7 +214,7 @@ struct DjFilter {
         float fc = 20.f * std::pow(1000.f, cut);
         float g = std::tan(float(M_PI) * clampf(fc, 20.f, sr * 0.45f) / sr);
         float kr = 1.2f * std::pow(0.07f / 1.2f, clampf(res, 0.f, 1.f));
-        float comp = std::pow(kr / 1.2f, 0.3f);
+        float comp = std::pow(kr / 1.2f, 0.4f);   // high RES: level comes down, so peaks ring instead of crunch
         float wetM[3] = {clampf((0.99f - cut) / 0.06f, 0.f, 1.f), 1.f, clampf((cut - 0.01f) / 0.06f, 0.f, 1.f)};
         stages = clampf(stages, 0.f, 2.f); mode = clampf(mode, 0.f, 2.f);
         int s0 = std::min((int)stages, 1), m0 = std::min((int)mode, 1);
