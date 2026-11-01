@@ -78,6 +78,7 @@ struct SynTHBloKGrainForge : Module {
         FLT_MODE_PARAM,               // LP / BP / HP
         FLT_AMP_PARAM,                // how much the filter ADSR also shapes the level (0 = none, 1 = full pluck)
         FLT_TRIG_PARAM,               // what fires the filter ADSR: BEAT STEP PULSE GLITCH SEQ GATE
+        FLT_BYPASS_PARAM,             // takes the ADSR + TRIG/SEQ off the filter (crossfaded); the filter stays
         NUM_PARAMS
     };
     enum InputIds { IN_L_INPUT, IN_R_INPUT, CLOCK_INPUT, RESET_INPUT, OPEN_INPUT, GLITCH_INPUT, GATE_INPUT, NUM_INPUTS };
@@ -313,6 +314,7 @@ struct SynTHBloKGrainForge : Module {
         configParam(FLT_AMP_PARAM, 0.f, 1.f, 0.f, "Filter env to level (pluck / gate)", "%", 0.f, 100.f);
         configSwitch(FLT_TRIG_PARAM, 0.f, (float)kTrigCount - 1, 0.f, "Filter env trigger",
                      {"Every beat", "Every step", "PULSE hits", "GLITCH events", "SEQ steps", "GATE input"});
+        configSwitch(FLT_BYPASS_PARAM, 0.f, 1.f, 0.f, "Filter env bypass (ADSR + TRIG/SEQ off the filter)", {"Env on", "Env bypassed"});
         configSwitch(FLT_MODE_PARAM, 0.f, 2.f, 0.f, "Filter type", {"Low-pass", "Band-pass", "High-pass"});
         configParam(FLT_RES_PARAM, 0.f, 1.f, 0.f, "Filter resonance", "%", 0.f, 100.f);
         configParam(FLT_ATK_PARAM, 0.f, 1.f, 0.1f, "Filter env attack", " ms", 667.f, 3.f);
@@ -550,10 +552,12 @@ struct SynTHBloKGrainForge : Module {
         // two gentle 1.5 ms poles round off the envelope's corners: still snappy, but no pop or crunch
         float ec = 1.f - std::exp(-1.f / (0.0015f * sr));
         envS1 += (envRaw - envS1) * ec; envS2 += (envS1 - envS2) * ec;
-        float env = envS2;
-        fltEnvOut = env;
+        fltEnvOut = envS2;
+        // BYP takes the envelope and SEQ off the filter (smoothed); the filter itself stays as set
+        float env = envS2 * (1.f - sm[FLT_BYPASS_PARAM]);
         // SEQ: each step's note moves the cutoff (a quick 3 ms slew, so jumps never click)
-        seqOffSm += ((trig == TRIG_SEQ ? seqOff : 0.f) - seqOffSm) * (1.f - std::exp(-1.f / (0.003f * sr)));
+        bool seqLive = trig == TRIG_SEQ && !on(FLT_BYPASS_PARAM);
+        seqOffSm += ((seqLive ? seqOff : 0.f) - seqOffSm) * (1.f - std::exp(-1.f / (0.003f * sr)));
         float fenv = sm[FLT_ENV_PARAM] * std::fabs(sm[FLT_ENV_PARAM]);   // squared: fine sweeps around the middle, full range at the ends
         float fcut = clamp(sm[FILTER_PARAM] + seqOffSm + env * fenv, 0.f, 1.f);
         // hits bark: resonance climbs a little with the envelope (still capped)
@@ -564,7 +568,7 @@ struct SynTHBloKGrainForge : Module {
         float ea = std::min(env, 1.f) * std::fabs(fenv);
         float tame = 1.f - ea * (0.25f + 0.2f * sm[FLT_RES_PARAM]);
         mL *= tame; mR *= tame;
-        float duck = 1.f - sm[FLT_AMP_PARAM] * (1.f - std::min(env, 1.f));   // AMP: the envelope shapes the level too
+        float duck = 1.f - sm[FLT_AMP_PARAM] * (1.f - sm[FLT_BYPASS_PARAM]) * (1.f - std::min(envS2, 1.f));   // AMP: the envelope shapes the level too
         mL *= duck; mR *= duck;   // DJ filter on the whole mix, before the limiter
         float oL = softLimit(mL * og);
         float oR = softLimit(mR * og);
@@ -1221,11 +1225,14 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
         GFRndPanel* rp = createWidget<GFRndPanel>(mm2px(Vec(59.f, 79.5f)));
         rp->box.size = mm2px(Vec(36.f, 14.f)); rp->module = module;
         addChild(rp);
-        GFPresetBar* pb = createWidget<GFPresetBar>(mm2px(Vec(5.f, 95.5f)));   // under BPM: click = next, right-click = list
-        pb->box.size = mm2px(Vec(22.5f, 8.f)); pb->module = module;
+        GFPresetBar* pb = createWidget<GFPresetBar>(mm2px(Vec(5.f, 95.5f)));   // under BPM, same width
+        pb->box.size = mm2px(Vec(20.f, 8.f)); pb->module = module;
         addChild(pb);
-        GFSeqScreen* sq = createWidget<GFSeqScreen>(mm2px(Vec(29.5f, 95.5f)));   // filter env TRIG + SEQ
-        sq->box.size = mm2px(Vec(70.f, 8.f)); sq->module = module;
+        GFSeqScreen* sq = createWidget<GFSeqScreen>(mm2px(Vec(27.f, 95.5f)));   // filter env TRIG + SEQ, under METER .. RANDOM
+        sq->box.size = mm2px(Vec(68.f, 8.f)); sq->module = module;
+        GFButton* byb = createParam<GFButton>(mm2px(Vec(97.f, 97.5f)), module, G::FLT_BYPASS_PARAM);   // lit = filter bypassed
+        byb->box.size = mm2px(Vec(5.f, 4.f)); byb->label = "BYP";
+        addParam(byb);
         addChild(sq);
         knob(104.f, 86.5f, G::IN_GAIN_PARAM, "INPUT");
         // master filter: cutoff, res, env depth on top; ADSR trimpots below
