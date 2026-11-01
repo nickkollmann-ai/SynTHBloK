@@ -795,23 +795,26 @@ struct SynTHBloKJamWidget : ModuleWidget {
             addParam(b);
         }
 
-        const float JX[3] = {RX + 7.f, RC, RX + RW - 7.f};
-        const int JIN[3] = {SynTHBloKJam::RUN_INPUT, SynTHBloKJam::RESET_INPUT, SynTHBloKJam::CLOCK_INPUT};
-        const char* JNAME[3] = {"RUN", "RESET", "CLOCK"};
-        for (int i = 0; i < 3; i++) {
-            addInput(createInputCentered<SmallJack>(mm2px(Vec(JX[i], 58.f)), module, JIN[i]));
-            label(JX[i], 63.5f, JNAME[i]);
-        }
-
-        // Knob synced with the JAM's knob, with its CV output.
-        const float KY = 88.f;
-        JKnobRing* ring = createWidgetCentered<JKnobRing>(mm2px(Vec(RX + 15.f, KY)));
+        // Knob synced with the JAM's knob (its CV output is in the jack row).
+        const float KY = 72.f;
+        JKnobRing* ring = createWidgetCentered<JKnobRing>(mm2px(Vec(RC, KY)));
         ring->module = module;
         addChild(ring);
-        addParam(createParamCentered<RoundLargeBlackKnob>(mm2px(Vec(RX + 15.f, KY)), module, SynTHBloKJam::KNOB_PARAM));
-        label(RX + 15.f, KY + 12.f, "KNOB");
-        addOutput(createOutputCentered<SmallJack>(mm2px(Vec(RX + RW - 9.f, KY)), module, SynTHBloKJam::KNOB_OUTPUT));
-        label(RX + RW - 9.f, KY + 5.5f, "OUT");
+        addParam(createParamCentered<RoundLargeBlackKnob>(mm2px(Vec(RC, KY)), module, SynTHBloKJam::KNOB_PARAM));
+        label(RC, KY + 12.f, "KNOB");
+
+        // All right-panel jacks in one row just above the buttons, labels on top.
+        const char* JNAME[4] = {"RUN", "RESET", "CLOCK", "KNOB"};
+        for (int i = 0; i < 4; i++) {
+            float x = RX + RW * (i + 0.5f) / 4.f;
+            label(x, 105.5f, JNAME[i]);
+            if (i < 3) {
+                const int JIN[3] = {SynTHBloKJam::RUN_INPUT, SynTHBloKJam::RESET_INPUT, SynTHBloKJam::CLOCK_INPUT};
+                addInput(createInputCentered<SmallJack>(mm2px(Vec(x, 110.5f)), module, JIN[i]));
+            } else {
+                addOutput(createOutputCentered<SmallJack>(mm2px(Vec(x, 110.5f)), module, SynTHBloKJam::KNOB_OUTPUT));
+            }
+        }
     }
 
     // Settings that used to be panel knobs live in the right-click menu.
