@@ -11,6 +11,7 @@
 //  are in the right-click menu. All JAM lights go dark when the module is removed or bypassed.
 // ============================================================================
 #include "plugin.hpp"
+#include "KnobTicks.hpp"
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -1094,6 +1095,7 @@ struct SynTHBloKMatrix8Widget : ModuleWidget {
         //   FILTER 2: CUTOFF RES ENV MODE / ENVELOPE: ATK DEC SUS REL / DELAY MASTER SPACE.
         auto col4 = [&](int i) { return RX + RW * (i + 0.5f) / 4.f; };
         auto smallKnob = [&](float x, float y, int param, const char* name) {
+            addChild(KnobTicks::create(Vec(x, y)));
             JKnobRing* fr = createWidget<JKnobRing>(mm2px(Vec(x - 5.5f, y - 5.5f)));
             fr->box.size = mm2px(Vec(11.f, 11.f));
             fr->module = module; fr->param = param;
@@ -1116,6 +1118,7 @@ struct SynTHBloKMatrix8Widget : ModuleWidget {
 
         // Master volume, synced with the JAM's knob (MST/CUE); its CV output is in the jack row.
         const float KY = 85.f;
+        addChild(KnobTicks::create(Vec(RC, KY), 19.f / 11.f));   // scaled with the ring
         JKnobRing* ring = createWidgetCentered<JKnobRing>(mm2px(Vec(RC, KY)));
         ring->module = module;
         addChild(ring);

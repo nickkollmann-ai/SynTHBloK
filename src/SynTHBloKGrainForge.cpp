@@ -7,6 +7,7 @@
 // ============================================================================
 #include "plugin.hpp"
 #include "SynTHBloKGrainForge_dsp.hpp"
+#include "KnobTicks.hpp"
 #include <atomic>
 #include <functional>
 #include <string>
@@ -1145,6 +1146,7 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
             addChild(l);
         };
         auto knob = [&](float x, float y, int param, const char* name) {
+            addChild(KnobTicks::create(Vec(x, y)));
             GFRing* r = createWidget<GFRing>(mm2px(Vec(x - 5.5f, y - 5.5f)));
             r->box.size = mm2px(Vec(11.f, 11.f)); r->module = module; r->param = param;
             addChild(r);
@@ -1240,6 +1242,7 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
         // master filter: cutoff, res, env depth on top; ADSR trimpots below
         // FILTER and DRY/WET: one size up from the rest
         auto midKnob = [&](float x, float y, int param, const char* name) {
+            addChild(KnobTicks::create(Vec(x, y), 13.5f / 11.f));   // scaled with the ring
             GFRing* r = createWidget<GFRing>(mm2px(Vec(x - 6.75f, y - 6.75f)));
             r->box.size = mm2px(Vec(13.5f, 13.5f)); r->module = module; r->param = param;
             addChild(r);
