@@ -71,8 +71,9 @@ struct SynTHBloKGrainForge : Module {
         PRESET_PARAM,                 // turning it (or clicking the PRESET screen) loads that preset
         FILTER_PARAM,                 // master DJ filter on the final mix
         FLT_RES_PARAM, FLT_ATK_PARAM, FLT_DEC_PARAM, FLT_SUS_PARAM, FLT_REL_PARAM,
-        FLT_ENV_PARAM,                // ADSR depth on the DJ filter, + opens / - closes; retriggers every beat
+        FLT_ENV_PARAM,                // ADSR depth on the cutoff, + up / - down; retriggers every beat
         FLT_STAGES_PARAM,             // 1 / 2 / 3 filter stages (12 / 24 / 36 dB)
+        FLT_MODE_PARAM,               // LP / BP / HP
         NUM_PARAMS
     };
     enum InputIds { IN_L_INPUT, IN_R_INPUT, CLOCK_INPUT, RESET_INPUT, OPEN_INPUT, GLITCH_INPUT, NUM_INPUTS };
@@ -270,13 +271,14 @@ struct SynTHBloKGrainForge : Module {
         presetNames.push_back("SMART RANDOM");
         configSwitch(PRESET_PARAM, 0.f, (float)kPresetCount, 0.f, "Preset", presetNames);
         paramQuantities[PRESET_PARAM]->randomizeEnabled = false;
-        configParam(FILTER_PARAM, -1.f, 1.f, 0.f, "Filter (left: low-pass, right: high-pass, centre: off)", "%", 0.f, 100.f);
+        configParam(FILTER_PARAM, 0.f, 1.f, 1.f, "Filter cutoff (LP fully open / HP fully down = off)", " Hz", 1000.f, 20.f);
+        configSwitch(FLT_MODE_PARAM, 0.f, 2.f, 0.f, "Filter type", {"Low-pass", "Band-pass", "High-pass"});
         configParam(FLT_RES_PARAM, 0.f, 1.f, 0.f, "Filter resonance", "%", 0.f, 100.f);
         configParam(FLT_ATK_PARAM, 0.f, 1.f, 0.1f, "Filter env attack", " ms", 2000.f, 1.f);
         configParam(FLT_DEC_PARAM, 0.f, 1.f, 0.45f, "Filter env decay", " ms", 800.f, 5.f);
         configParam(FLT_SUS_PARAM, 0.f, 1.f, 0.3f, "Filter env sustain", "%", 0.f, 100.f);
         configParam(FLT_REL_PARAM, 0.f, 1.f, 0.4f, "Filter env release", " ms", 800.f, 5.f);
-        configParam(FLT_ENV_PARAM, -1.f, 1.f, 0.f, "Filter env depth (retriggers every beat; + opens, - closes)", "%", 0.f, 100.f);
+        configParam(FLT_ENV_PARAM, -1.f, 1.f, 0.f, "Filter env depth (retriggers every beat; + sweeps cutoff up, - down)", "%", 0.f, 100.f);
         configSwitch(FLT_STAGES_PARAM, 0.f, 2.f, 0.f, "Filter stages", {"1 stage (12 dB)", "2 stages (24 dB)", "3 stages (36 dB)"});
         configParam(IN_GAIN_PARAM, 0.f, 2.f, 1.f, "Input gain", "%", 0.f, 100.f);
         configParam(DRYWET_PARAM, 0.f, 1.f, 0.45f, "Dry / wet", "%", 0.f, 100.f);
@@ -302,9 +304,10 @@ struct SynTHBloKGrainForge : Module {
     //   v2: ROLL as an index into 11 slots.
     //   v3: the current 13 TIME slots and 7 ROLL slots, with STRETCH where PULSE is now.
     //   v4: SHUFFLE and PULSE.
+    //   v5: FILTER is a 0..1 cutoff with LP / BP / HP buttons (it was bipolar: LP left, HP right).
     json_t* dataToJson() override {
         json_t* root = json_object();
-        json_object_set_new(root, "v4", json_true());
+        json_object_set_new(root, "v5", json_true());
         json_object_set_new(root, "rbHomeRoot", json_integer(homeRoot));
         json_object_set_new(root, "rbHomeChord", json_integer(homeChord));
         return root;
@@ -318,7 +321,19 @@ struct SynTHBloKGrainForge : Module {
             rndWasOn[R_RB] = on(RND_PARAM + R_RB);
         }
         lastPreset = slot(PRESET_PARAM);   // loading a patch must not re-apply its preset over its own settings
-        int ver = !d ? 1 : json_object_get(d, "v4") ? 4 : json_object_get(d, "v3") ? 3 : json_object_get(d, "v2") ? 2 : 1;
+        int ver = !d ? 1 : json_object_get(d, "v5") ? 5 : json_object_get(d, "v4") ? 4 : json_object_get(d, "v3") ? 3 : json_object_get(d, "v2") ? 2 : 1;
+        if (ver >= 5) return;
+        // the old bipolar FILTER was clamped into 0..1, so read it from the patch: same cutoff, LP or HP
+        json_t* ps0 = json_object_get(rootJ, "params");
+        for (size_t i = 0; ps0 && i < json_array_size(ps0); i++) {
+            json_t* p = json_array_get(ps0, i);
+            if (json_integer_value(json_object_get(p, "id")) != FILTER_PARAM) continue;
+            float amt = (float)json_number_value(json_object_get(p, "value")), a = std::fabs(amt);
+            float fc = amt < 0.f ? 20000.f * std::pow(80.f / 20000.f, a) : 20.f * std::pow(400.f, a);
+            bool off = a < 0.02f;
+            params[FILTER_PARAM].setValue(off ? 1.f : std::log(fc / 20.f) / std::log(1000.f));
+            params[FLT_MODE_PARAM].setValue(amt > 0.f && !off ? 2.f : 0.f);
+        }
         if (ver >= 4) return;
         // STRETCH's settings were saved in PULSE's slots: start PULSE from its defaults instead
         for (int id = PU_ON_PARAM; id <= PU_MODE_PARAM; id++) params[id].setValue(paramQuantities[id]->getDefaultValue());
@@ -459,8 +474,8 @@ struct SynTHBloKGrainForge : Module {
         if (fltGate > 0.f && (fltGate -= 1.f) <= 0.f) fltEnv.release();
         float env = fltEnv.process(0.001f * std::pow(2000.f, sm[FLT_ATK_PARAM]), 0.005f * std::pow(800.f, sm[FLT_DEC_PARAM]),
                                    sm[FLT_SUS_PARAM], 0.005f * std::pow(800.f, sm[FLT_REL_PARAM]), sr);
-        float famt = clamp(sm[FILTER_PARAM] + env * sm[FLT_ENV_PARAM], -1.f, 1.f);
-        master.process(mL, mR, famt, sm[FLT_RES_PARAM], sr, sm[FLT_STAGES_PARAM]);   // DJ filter on the whole mix, before the limiter
+        float fcut = clamp(sm[FILTER_PARAM] + env * sm[FLT_ENV_PARAM], 0.f, 1.f);
+        master.process(mL, mR, fcut, sm[FLT_RES_PARAM], sr, sm[FLT_STAGES_PARAM], sm[FLT_MODE_PARAM]);   // DJ filter on the whole mix, before the limiter
         float oL = softLimit(mL * og);
         float oR = softLimit(mR * og);
         outputs[OUT_L_OUTPUT].setVoltage(5.f * oL);
@@ -948,10 +963,14 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
         knob(132.f, 84.f, G::FLT_RES_PARAM, "RES");
         knob(145.f, 84.f, G::FLT_ENV_PARAM, "ENV");
         static const char* const stageNames[3] = {"1", "2", "3"};
-        GFModeButton* stg = createParam<GFModeButton>(mm2px(Vec(152.5f, 77.5f)), module, G::FLT_STAGES_PARAM);
-        stg->box.size = mm2px(Vec(6.f, 13.5f)); stg->names = stageNames; stg->vertical = true;
+        GFModeButton* stg = createParam<GFModeButton>(mm2px(Vec(151.5f, 77.5f)), module, G::FLT_STAGES_PARAM);
+        stg->box.size = mm2px(Vec(5.5f, 13.5f)); stg->names = stageNames; stg->vertical = true;
         addParam(stg);
-        label(155.5f, 93.f, "STAGE");
+        label(154.25f, 93.f, "STG");
+        GFModeButton* typ = createParam<GFModeButton>(mm2px(Vec(158.f, 77.5f)), module, G::FLT_MODE_PARAM);
+        typ->box.size = mm2px(Vec(7.f, 13.5f)); typ->vertical = true;   // LP / BP / HP
+        addParam(typ);
+        label(161.5f, 93.f, "TYPE");
         const int adsr[4] = {G::FLT_ATK_PARAM, G::FLT_DEC_PARAM, G::FLT_SUS_PARAM, G::FLT_REL_PARAM};
         const char* an[4] = {"A", "D", "S", "R"};
         for (int i = 0; i < 4; i++) {
@@ -959,7 +978,7 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
             addParam(createParamCentered<Trimpot>(mm2px(Vec(x, 98.5f)), module, adsr[i]));
             label(x - 4.6f, 98.5f, an[i]);
         }
-        midKnob(168.f, 86.5f, G::DRYWET_PARAM, "DRY / WET");
+        midKnob(174.f, 86.5f, G::DRYWET_PARAM, "DRY / WET");
         knob(191.f, 86.5f, G::OUT_GAIN_PARAM, "OUTPUT");
 
         const char* jn[8] = {"IN L", "IN R", "CLOCK", "RESET", "OPEN", "GLITCH", "OUT L", "OUT R"};
