@@ -1015,6 +1015,95 @@ struct JKnobRing : TransparentWidget {
     }
 };
 
+// LOOP column: the JAM cross pad's UP / DOWN (pattern length) on the panel.
+// Arrow buttons step the length; the display shows the looped steps and the playhead.
+struct JLoopArrow : OpaqueWidget {
+    SynTHBloKMatrix8* module = NULL;
+    int dir = 1;                  // +1 = UP (longer), -1 = DOWN (shorter)
+    float flash = 0.f;
+    void draw(const DrawArgs& args) override {
+        float W = box.size.x, H = box.size.y;
+        bool on = flash > 0.f;
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, W, H, 1.4f);
+        nvgFillColor(args.vg, on ? nvgRGBA(255, 112, 15, 235) : nvgRGBA(40, 25, 8, 255));
+        nvgFill(args.vg);
+        nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, on ? 255 : 120));
+        nvgStrokeWidth(args.vg, on ? 1.2f : 0.8f);
+        nvgStroke(args.vg);
+        float cx = W * 0.5f, cy = H * 0.5f, s = std::min(W, H) * 0.22f;
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, cx, cy - dir * s);
+        nvgLineTo(args.vg, cx + s * 1.2f, cy + dir * s);
+        nvgLineTo(args.vg, cx - s * 1.2f, cy + dir * s);
+        nvgClosePath(args.vg);
+        nvgFillColor(args.vg, on ? nvgRGBA(20, 10, 2, 255) : nvgRGBA(255, 190, 90, 255));
+        nvgFill(args.vg);
+        flash = std::max(0.f, flash - 0.1f);
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
+            if (module) {
+                ParamQuantity* pq = module->paramQuantities[SynTHBloKMatrix8::LEN_PARAM];
+                pq->setValue((float)clamp((int)pq->getValue() + dir, 1, 8));
+            }
+            flash = 1.f;
+            e.consume(this);
+        }
+    }
+};
+
+struct JLoopDisplay : OpaqueWidget {
+    SynTHBloKMatrix8* module = NULL;
+    int len() { return module ? clamp((int)module->params[SynTHBloKMatrix8::LEN_PARAM].getValue(), 1, 8) : 6; }
+    void draw(const DrawArgs& args) override {
+        float W = box.size.x, H = box.size.y;
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, W, H, 2.f);
+        nvgFillColor(args.vg, nvgRGBA(14, 9, 3, 255));
+        nvgFill(args.vg);
+        int n = len();
+        int step = module ? module->step : 2;
+        bool run = module ? module->running : true;
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        float top = 2.f;
+        if (font) {
+            char b[4]; snprintf(b, sizeof b, "%d", n);
+            nvgFontFaceId(args.vg, font->handle);
+            nvgFontSize(args.vg, 11.f);
+            nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+            nvgFillColor(args.vg, nvgRGBA(255, 190, 90, 255));
+            nvgText(args.vg, W * 0.5f, top, b, NULL);
+            top += 12.f;
+        }
+        // steps 1..8 top to bottom: lit = inside the loop, white = playhead
+        float ch = (H - top - 2.f) / 8.f;
+        for (int i = 0; i < 8; i++) {
+            bool in = i < n, head = run && step == i;
+            nvgBeginPath(args.vg);
+            nvgRoundedRect(args.vg, 3.f, top + i * ch + 0.6f, W - 6.f, ch - 1.2f, 0.8f);
+            nvgFillColor(args.vg, head ? nvgRGBA(255, 255, 255, 235) : in ? nvgRGBA(255, 112, 15, 220) : nvgRGBA(40, 25, 8, 255));
+            nvgFill(args.vg);
+        }
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.5f, 0.5f, W - 1.f, H - 1.f, 2.f);
+        nvgStrokeWidth(args.vg, 0.8f);
+        nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, 80));
+        nvgStroke(args.vg);
+    }
+    // click a step cell to loop up to it
+    void onButton(const ButtonEvent& e) override {
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
+            float top = 14.f, ch = (box.size.y - top - 2.f) / 8.f;
+            if (module && e.pos.y >= top) {
+                int i = clamp((int)((e.pos.y - top) / ch), 0, 7);
+                module->paramQuantities[SynTHBloKMatrix8::LEN_PARAM]->setValue((float)(i + 1));
+            }
+            e.consume(this);
+        }
+    }
+};
+
 struct SynTHBloKMatrix8Widget : ModuleWidget {
     SynTHBloKMatrix8Widget(SynTHBloKMatrix8* module) {
         setModule(module);
@@ -1062,6 +1151,18 @@ struct SynTHBloKMatrix8Widget : ModuleWidget {
             s->module = module; s->idx = i;
             addChild(s);
         }
+
+        // LOOP column beside the strips, under the OUT jacks (JAM cross pad UP / DOWN = length)
+        label(69.6f, 81.6f, "LOOP");
+        JLoopArrow* up = createWidget<JLoopArrow>(mm2px(Vec(66.1f, 85.5f)));      // level with the bank buttons
+        up->box.size = mm2px(Vec(7.f, 6.6f)); up->module = module; up->dir = 1;
+        addChild(up);
+        JLoopDisplay* ld = createWidget<JLoopDisplay>(mm2px(Vec(66.1f, 93.5f)));  // level with the strips
+        ld->box.size = mm2px(Vec(7.f, 22.5f)); ld->module = module;
+        addChild(ld);
+        JLoopArrow* dn = createWidget<JLoopArrow>(mm2px(Vec(66.1f, 117.5f)));     // level with the bottom buttons
+        dn->box.size = mm2px(Vec(7.f, 6.f)); dn->module = module; dn->dir = -1;
+        addChild(dn);
 
         // ---------------- right: everything else ----------------
         const float RX = 78.f, RW = 45.6f, RC = RX + RW * 0.5f;
