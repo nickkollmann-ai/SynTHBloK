@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="60.96mm"
+     height="128.5mm"
+     viewBox="0 0 60.96 128.5">
+
+  <!-- Gunmetal panel background -->
+  <rect x="0" y="0" width="60.96" height="128.5" fill="#1a1a1c"/>
+
+  <!-- Screw holes (3.2mm) -->
+  <circle cx="3" cy="7.1" r="1.6" fill="none" stroke="none"/>
+  <circle cx="57.96" cy="7.1" r="1.6" fill="none" stroke="none"/>
+  <circle cx="3" cy="121.4" r="1.6" fill="none" stroke="none"/>
+  <circle cx="57.96" cy="121.4" r="1.6" fill="none" stroke="none"/>
+
+  <!-- Jack hole (7.2mm diameter) -->
+  <circle cx="30.48" cy="118.5" r="3.6" fill="none" stroke="none"/>
+
+  <!-- CYBER-BIOMECH CUTOUT PATTERN -->
+  <!-- (Medium density, angular-organic hybrid) -->
+  <path d="
+    M10 20
+    C14 10, 22 8, 30 14
+    C38 20, 46 18, 50 10
+    C54 4, 60 8, 58 18
+    C56 28, 48 36, 38 40
+    C28 44, 18 52, 14 62
+    C10 72, 12 82, 20 90
+    C28 98, 40 102, 48 96
+    C56 90, 58 78, 52 70
+    C46 62, 34 58, 26 60
+    C18 62, 12 70, 14 78
+    C16 86, 26 92, 36 90
+    C46 88, 54 80, 56 70
+    C58 60, 54 48, 46 42
+    C38 36, 26 34, 18 38
+    C10 42, 6 52, 10 60
+    Z"
+    fill="none" stroke="none"/>
+
+  <!-- Additional biomech tunnels -->
+  <path d="
+    M8 40
+    C16 32, 28 30, 40 36
+    C52 42, 54 54, 46 62
+    C38 70, 24 72, 14 66
+    C4 60, 2 48, 8 40
+    Z"
+    fill="none" stroke="none"/>
+
+  <path d="
+    M20 88
+    C28 82, 38 82, 46 88
+    C54 94, 52 104, 42 108
+    C32 112, 22 108, 18 100
+    C14 92, 16 90, 20 88
+    Z"
+    fill="none" stroke="none"/>
+
+  <!-- NOiZEE TOYZ angular techno lettering (cut-through) -->
+  <!-- N -->
+  <path d="M10 110 L10 124 L16 110 L16 124" fill="none" stroke="none"/>
+  <!-- O -->
+  <path d="M20 110 L28 110 L28 124 L20 124 Z" fill="none" stroke="none"/>
+  <!-- i -->
+  <rect x="32" y="110" width="2" height="14" fill="none" stroke="none"/>
+  <!-- Z -->
+  <path d="M38 110 L48 110 L38 124 L48 124" fill="none" stroke="none"/>
+  <!-- E -->
+  <path d="M52 110 L60 110 L52 117 L60 117 L52 124 L60 124" fill="none" stroke="none"/>
+
+  <!-- TOYZ row -->
+  <!-- T -->
+  <path d="M12 126 L20 126 L16 134 L16 126" fill="none" stroke="none"/>
+  <!-- O -->
+  <path d="M22 126 L30 126 L30 134 L22 134 Z" fill="none" stroke="none"/>
+  <!-- Y -->
+  <path d="M32 126 L36 130 L40 126 L36 134" fill="none" stroke="none"/>
+  <!-- Z -->
+  <path d="M42 126 L52 126 L42 134 L52 134" fill="none" stroke="none"/>
+
+</svg>

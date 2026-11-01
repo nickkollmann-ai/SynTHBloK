@@ -1,0 +1,770 @@
+// ============================================================================
+// BLOKMASTER - mastering strip (rebuilt)
+//
+//  IN -> trim -> low cut -> tone EQ (low / tilt / high / air) -> M-S gain
+//     -> glue compressor (soft knee, sidechain HPF, external SC, auto makeup)
+//     -> 3-band leveler (MULTI) -> saturator (2x oversampled) -> punch
+//     -> width + mono bass -> look-ahead brick-wall limiter -> output gain
+//     -> mono check / side solo -> OUT
+//  Meters: spectrum, loudness (LUFS M / S / I), vectorscope, correlation,
+//          input / output peaks, GR for comp, leveler and limiter.
+// ============================================================================
+
+#include "plugin.hpp"
+#include "BloKMaster_layout.hpp"
+#include <cmath>
+#include <algorithm>
+
+namespace {
+
+const float FS_V = 5.f;     // 5 V = 0 dBFS
+
+inline float db2lin(float db) { return std::pow(10.f, db / 20.f); }
+inline float lin2db(float x) { return 20.f * std::log10(std::max(x, 1e-9f)); }
+inline float fclamp(float x, float a, float b) { return std::min(b, std::max(a, x)); }
+inline float onePole(float ms, float sr) { return 1.f - std::exp(-1.f / (std::max(ms, 0.01f) * 0.001f * sr)); }
+
+// ---------------------------------------------------------------------------
+// RBJ biquad (transposed direct form II)
+// ---------------------------------------------------------------------------
+struct Biquad {
+    float b0 = 1.f, b1 = 0.f, b2 = 0.f, a1 = 0.f, a2 = 0.f, z1 = 0.f, z2 = 0.f;
+
+    inline float process(float x) {
+        float y = b0 * x + z1;
+        z1 = b1 * x - a1 * y + z2;
+        z2 = b2 * x - a2 * y;
+        return y;
+    }
+    void reset() { z1 = z2 = 0.f; }
+    void copyCoefs(const Biquad& o) { b0 = o.b0; b1 = o.b1; b2 = o.b2; a1 = o.a1; a2 = o.a2; }
+    void raw(float B0, float B1, float B2, float A0, float A1, float A2) {
+        float i = 1.f / A0;
+        b0 = B0 * i; b1 = B1 * i; b2 = B2 * i; a1 = A1 * i; a2 = A2 * i;
+    }
+    static float fc(float f, float sr) { return fclamp(f, 5.f, 0.45f * sr); }
+
+    void lowpass(float f, float q, float sr) {
+        float w = 2.f * (float) M_PI * fc(f, sr) / sr, cw = std::cos(w), al = std::sin(w) / (2.f * q);
+        raw((1.f - cw) * 0.5f, 1.f - cw, (1.f - cw) * 0.5f, 1.f + al, -2.f * cw, 1.f - al);
+    }
+    void highpass(float f, float q, float sr) {
+        float w = 2.f * (float) M_PI * fc(f, sr) / sr, cw = std::cos(w), al = std::sin(w) / (2.f * q);
+        raw((1.f + cw) * 0.5f, -(1.f + cw), (1.f + cw) * 0.5f, 1.f + al, -2.f * cw, 1.f - al);
+    }
+    void bandpass(float f, float q, float sr) {
+        float w = 2.f * (float) M_PI * fc(f, sr) / sr, cw = std::cos(w), al = std::sin(w) / (2.f * q);
+        raw(al, 0.f, -al, 1.f + al, -2.f * cw, 1.f - al);
+    }
+    void lowShelf(float f, float gdb, float sr) {
+        float A = std::pow(10.f, gdb / 40.f), w = 2.f * (float) M_PI * fc(f, sr) / sr, cw = std::cos(w), sw = std::sin(w);
+        float al = sw * 0.5f * std::sqrt(2.f), tsa = 2.f * std::sqrt(A) * al;
+        raw(A * ((A + 1.f) - (A - 1.f) * cw + tsa), 2.f * A * ((A - 1.f) - (A + 1.f) * cw), A * ((A + 1.f) - (A - 1.f) * cw - tsa),
+            (A + 1.f) + (A - 1.f) * cw + tsa, -2.f * ((A - 1.f) + (A + 1.f) * cw), (A + 1.f) + (A - 1.f) * cw - tsa);
+    }
+    void highShelf(float f, float gdb, float sr) {
+        float A = std::pow(10.f, gdb / 40.f), w = 2.f * (float) M_PI * fc(f, sr) / sr, cw = std::cos(w), sw = std::sin(w);
+        float al = sw * 0.5f * std::sqrt(2.f), tsa = 2.f * std::sqrt(A) * al;
+        raw(A * ((A + 1.f) + (A - 1.f) * cw + tsa), -2.f * A * ((A - 1.f) + (A + 1.f) * cw), A * ((A + 1.f) + (A - 1.f) * cw - tsa),
+            (A + 1.f) - (A - 1.f) * cw + tsa, 2.f * ((A - 1.f) - (A + 1.f) * cw), (A + 1.f) - (A - 1.f) * cw - tsa);
+    }
+};
+
+// two channels sharing one set of coefficients
+struct BiquadPair {
+    Biquad c[2];
+    void sync() { c[1].copyCoefs(c[0]); }
+    void reset() { c[0].reset(); c[1].reset(); }
+};
+
+// Linkwitz-Riley 4th order = two cascaded Butterworth stages
+struct LR4 {
+    Biquad s1, s2;
+    inline float process(float x) { return s2.process(s1.process(x)); }
+    void setLP(float f, float sr) { s1.lowpass(f, 0.70710678f, sr); s2.copyCoefs(s1); }
+    void setHP(float f, float sr) { s1.highpass(f, 0.70710678f, sr); s2.copyCoefs(s1); }
+    void reset() { s1.reset(); s2.reset(); }
+};
+
+const int NSPEC = 24;
+const int NSCOPE = 256;
+const int LA_MAX = 128;
+
+} // namespace
+
+// ============================================================================
+// Module
+// ============================================================================
+struct BlokMaster : Module {
+
+    enum ParamIds {
+        TRIM_PARAM, TILT_PARAM, LOW_PARAM, HIGH_PARAM,
+        COMP_THRESH_PARAM, COMP_RATIO_PARAM, COMP_ATTACK_PARAM, COMP_RELEASE_PARAM, COMP_MIX_PARAM,
+        PUNCH_PARAM,
+        LIMIT_THRESH_PARAM, LIMIT_RELEASE_PARAM, LIMIT_CEILING_PARAM,
+        WIDTH_PARAM, MONO_BASS_PARAM, AIR_PARAM,
+        OUT_GAIN_PARAM,
+        // added in the rebuild (old patches keep the ids above)
+        LOWCUT_PARAM, COMP_KNEE_PARAM, COMP_SCHPF_PARAM,
+        DRIVE_PARAM, SATMIX_PARAM, MB_PARAM, MID_PARAM, SIDE_PARAM,
+        BYPASS_PARAM, AUTO_PARAM, MONO_PARAM, SIDESOLO_PARAM,
+        NUM_PARAMS
+    };
+    enum InputIds { IN_L_INPUT, IN_R_INPUT, SIDECHAIN_INPUT, THR_CV_INPUT, DRIVE_CV_INPUT, WIDTH_CV_INPUT, NUM_INPUTS };
+    enum OutputIds { OUT_L_OUTPUT, OUT_R_OUTPUT, NUM_OUTPUTS };
+    enum LightIds {
+        COMP_GR_LIGHT, LIMIT_GR_LIGHT, CORRELATION_LIGHT,
+        BYPASS_LIGHT, AUTO_LIGHT, MONO_LIGHT, SIDESOLO_LIGHT,
+        NUM_LIGHTS
+    };
+
+    // ---- values shared with the displays (written by the audio thread) ----
+    struct DisplayState {
+        float specEnv[NSPEC] = {};
+        float inPeak = 0.f, outPeak = 0.f;           // linear volts, decaying
+        float compGR = 0.f, mbGR = 0.f, limitGR = 0.f; // dB, positive = reduction
+        float corr = 0.f;
+        float lufsM = -70.f, lufsS = -70.f, lufsI = -70.f;
+        float peakHoldDb = -90.f;
+        float scopeL[NSCOPE] = {}, scopeR[NSCOPE] = {};
+        int scopeIdx = 0;
+    } disp;
+    float specFreq[NSPEC];
+
+    // ---- DSP state ----
+    float sr = 48000.f;
+    int ctrlCount = 0;
+
+    float trimLin = 1.f, outLin = 1.f, byp = 0.f;
+    BiquadPair lowCut, lowSh, highSh, tiltLo, tiltHi, airSh;
+
+    // compressor
+    BiquadPair scHp;
+    float compG = 0.f;                       // smoothed gain reduction (dB, >= 0)
+    float cThr = -12.f, cRatio = 2.f, cKnee = 6.f, cAtk = 0.01f, cRel = 0.001f, cMix = 1.f;
+
+    // 3-band leveler
+    LR4 lp1[2], hp1[2], lp2[2], hp2[2], apLo[2], apHi[2];
+    float mbFast[3] = {}, mbSlow[3] = {}, mbGain[3] = {};
+    float mbMixSm = 0.f;
+
+    // saturator (2x oversampled)
+    Biquad osLp1[2], osLp2[2];
+    float osPrev[2] = {}, dcX[2] = {}, dcY[2] = {};
+
+    // punch
+    float punchFast = 0.f, punchSlow = 0.f;
+
+    // stereo
+    Biquad monoHp;
+    float widthSm = 1.f;
+
+    // limiter
+    int laN = 72;
+    float limDl[2][LA_MAX];
+    float limGreq[2 * LA_MAX];
+    float limGmin[LA_MAX];
+    int limW = 0, limG = 0, limM = 0;
+    float limRel = 1.f;
+
+    // meters
+    Biquad specBp[NSPEC];
+    float specSm[NSPEC] = {};
+    BiquadPair kShelf, kHp;
+    float msM = 0.f, msS = 0.f;
+    double intSum = 0.0, intCount = 0.0;
+    float corrLR = 0.f, corrLL = 0.f, corrRR = 0.f;
+    float peakHold = 0.f; int peakHoldTimer = 0;
+    int scopeDiv = 0;
+
+    BlokMaster() {
+        config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
+
+        configParam(TRIM_PARAM, -12.f, 12.f, 0.f, "Input trim", " dB");
+        configParam(TILT_PARAM, -1.f, 1.f, 0.f, "Tilt (dark to bright)");
+        configParam(LOW_PARAM, -12.f, 12.f, 0.f, "Low shelf (120 Hz)", " dB");
+        configParam(HIGH_PARAM, -12.f, 12.f, 0.f, "High shelf (6 kHz)", " dB");
+
+        configParam(COMP_THRESH_PARAM, -40.f, 0.f, -12.f, "Compressor threshold", " dB");
+        configParam(COMP_RATIO_PARAM, 1.f, 20.f, 2.f, "Compressor ratio", ":1");
+        configParam(COMP_ATTACK_PARAM, 0.1f, 100.f, 10.f, "Compressor attack", " ms");
+        configParam(COMP_RELEASE_PARAM, 20.f, 1000.f, 120.f, "Compressor release", " ms");
+        configParam(COMP_MIX_PARAM, 0.f, 1.f, 1.f, "Compressor mix (parallel)", "%", 0.f, 100.f);
+
+        configParam(PUNCH_PARAM, 0.f, 1.f, 0.f, "Punch (transient emphasis)", "%", 0.f, 100.f);
+
+        configParam(LIMIT_THRESH_PARAM, -12.f, 0.f, -1.f, "Limiter threshold (push into the ceiling)", " dB");
+        configParam(LIMIT_RELEASE_PARAM, 10.f, 200.f, 50.f, "Limiter release", " ms");
+        configParam(LIMIT_CEILING_PARAM, -6.f, 0.f, -0.1f, "Limiter ceiling", " dB");
+
+        configParam(WIDTH_PARAM, 0.f, 2.f, 1.f, "Stereo width", "%", 0.f, 100.f);
+        configParam(MONO_BASS_PARAM, 20.f, 300.f, 20.f, "Mono bass below (20 = off)", " Hz");
+        configParam(AIR_PARAM, 0.f, 1.f, 0.f, "Air (12 kHz shelf)", "%", 0.f, 100.f);
+
+        configParam(OUT_GAIN_PARAM, -12.f, 12.f, 0.f, "Output gain", " dB");
+
+        configParam(LOWCUT_PARAM, 20.f, 300.f, 20.f, "Low cut (20 = off)", " Hz");
+        configParam(COMP_KNEE_PARAM, 0.f, 12.f, 6.f, "Compressor knee", " dB");
+        configParam(COMP_SCHPF_PARAM, 20.f, 400.f, 20.f, "Compressor sidechain high-pass (20 = off)", " Hz");
+        configParam(DRIVE_PARAM, 0.f, 24.f, 0.f, "Saturation drive", " dB");
+        configParam(SATMIX_PARAM, 0.f, 1.f, 1.f, "Saturation mix", "%", 0.f, 100.f);
+        configParam(MB_PARAM, 0.f, 1.f, 0.f, "Multiband leveler amount", "%", 0.f, 100.f);
+        configParam(MID_PARAM, -6.f, 6.f, 0.f, "Mid gain", " dB");
+        configParam(SIDE_PARAM, -6.f, 6.f, 0.f, "Side gain", " dB");
+
+        configSwitch(BYPASS_PARAM, 0.f, 1.f, 0.f, "Bypass", {"Active", "Bypassed"});
+        configSwitch(AUTO_PARAM, 0.f, 1.f, 0.f, "Compressor auto makeup gain", {"Off", "On"});
+        configSwitch(MONO_PARAM, 0.f, 1.f, 0.f, "Mono check", {"Off", "On"});
+        configSwitch(SIDESOLO_PARAM, 0.f, 1.f, 0.f, "Side solo (hear only the stereo difference)", {"Off", "On"});
+
+        configInput(IN_L_INPUT, "Left in");
+        configInput(IN_R_INPUT, "Right in (normalled to left)");
+        configInput(SIDECHAIN_INPUT, "External sidechain for the compressor");
+        configInput(THR_CV_INPUT, "Compressor threshold CV (4 dB per volt)");
+        configInput(DRIVE_CV_INPUT, "Saturation drive CV (2.4 dB per volt)");
+        configInput(WIDTH_CV_INPUT, "Stereo width CV (20% per volt)");
+        configOutput(OUT_L_OUTPUT, "Left out");
+        configOutput(OUT_R_OUTPUT, "Right out");
+
+        for (int i = 0; i < NSPEC; i++) specFreq[i] = 30.f * std::pow(16000.f / 30.f, (float) i / (NSPEC - 1));
+        std::fill(limDl[0], limDl[0] + LA_MAX, 0.f);
+        std::fill(limDl[1], limDl[1] + LA_MAX, 0.f);
+        std::fill(limGreq, limGreq + 2 * LA_MAX, 1.f);
+        std::fill(limGmin, limGmin + LA_MAX, 1.f);
+        onSampleRateChange();
+        updateControlRate();
+    }
+
+    void onReset() override {
+        compG = 0.f; limRel = 1.f; mbMixSm = 0.f;
+        for (int i = 0; i < 3; i++) { mbFast[i] = mbSlow[i] = 0.f; mbGain[i] = 0.f; }
+    }
+
+    // ------------------------------------------------------------------
+    // fixed filters that depend only on the sample rate
+    // ------------------------------------------------------------------
+    void onSampleRateChange() override {
+        sr = APP->engine->getSampleRate();
+        for (int ch = 0; ch < 2; ch++) {
+            lp1[ch].setLP(180.f, sr); hp1[ch].setHP(180.f, sr);
+            lp2[ch].setLP(3200.f, sr); hp2[ch].setHP(3200.f, sr);
+            apLo[ch].setLP(3200.f, sr); apHi[ch].setHP(3200.f, sr);
+            lp1[ch].reset(); hp1[ch].reset(); lp2[ch].reset(); hp2[ch].reset(); apLo[ch].reset(); apHi[ch].reset();
+            osLp1[ch].lowpass(0.45f * sr, 0.70710678f, 2.f * sr); osLp2[ch].copyCoefs(osLp1[ch]);
+            osLp1[ch].reset(); osLp2[ch].reset();
+        }
+        for (int i = 0; i < NSPEC; i++) specBp[i].bandpass(specFreq[i], 4.3f, sr);
+        // K-weighting (ITU-R BS.1770): high shelf + 38 Hz high-pass
+        kShelf.c[0].highShelf(1681.97f, 3.99984f, sr);
+        kShelf.sync();
+        kHp.c[0].highpass(38.1355f, 0.5003f, sr);
+        kHp.sync();
+        laN = (int) fclamp(std::floor(0.0015f * sr), 8.f, (float) LA_MAX - 1.f);
+        std::fill(limDl[0], limDl[0] + LA_MAX, 0.f);
+        std::fill(limDl[1], limDl[1] + LA_MAX, 0.f);
+        std::fill(limGreq, limGreq + 2 * LA_MAX, 1.f);
+        std::fill(limGmin, limGmin + LA_MAX, 1.f);
+        limRel = 1.f;
+    }
+
+    // ------------------------------------------------------------------
+    // knob-dependent filters, refreshed every 32 samples
+    // ------------------------------------------------------------------
+    void updateControlRate() {
+        float lc = params[LOWCUT_PARAM].getValue();
+        lowCut.c[0].highpass(lc, 0.70710678f, sr); lowCut.sync();
+        lowSh.c[0].lowShelf(120.f, params[LOW_PARAM].getValue(), sr); lowSh.sync();
+        highSh.c[0].highShelf(6000.f, params[HIGH_PARAM].getValue(), sr); highSh.sync();
+        float t = params[TILT_PARAM].getValue();
+        tiltLo.c[0].lowShelf(650.f, -t * 5.f, sr); tiltLo.sync();
+        tiltHi.c[0].highShelf(650.f, t * 5.f, sr); tiltHi.sync();
+        airSh.c[0].highShelf(12000.f, params[AIR_PARAM].getValue() * 9.f, sr); airSh.sync();
+        scHp.c[0].highpass(params[COMP_SCHPF_PARAM].getValue(), 0.70710678f, sr); scHp.sync();
+        monoHp.highpass(params[MONO_BASS_PARAM].getValue(), 0.70710678f, sr);
+    }
+
+    // ------------------------------------------------------------------
+    // main audio callback
+    // ------------------------------------------------------------------
+    void process(const ProcessArgs& args) override {
+        if (++ctrlCount >= 32) { ctrlCount = 0; updateControlRate(); }
+
+        // ---------------- inputs ----------------
+        float inL = inputs[IN_L_INPUT].getVoltage();
+        float inR = inputs[IN_R_INPUT].isConnected() ? inputs[IN_R_INPUT].getVoltage() : inL;
+        float l = inL, r = inR;
+
+        disp.inPeak = std::max(disp.inPeak * 0.99995f, std::max(std::fabs(inL), std::fabs(inR)));
+
+        // ---------------- trim + filters ----------------
+        float trimT = db2lin(params[TRIM_PARAM].getValue());
+        trimLin += (trimT - trimLin) * 0.002f;
+        l *= trimLin; r *= trimLin;
+
+        if (params[LOWCUT_PARAM].getValue() > 20.5f) { l = lowCut.c[0].process(l); r = lowCut.c[1].process(r); }
+        l = airSh.c[0].process(highSh.c[0].process(lowSh.c[0].process(tiltHi.c[0].process(tiltLo.c[0].process(l)))));
+        r = airSh.c[1].process(highSh.c[1].process(lowSh.c[1].process(tiltHi.c[1].process(tiltLo.c[1].process(r)))));
+
+        // ---------------- mid / side gain ----------------
+        float midDb = params[MID_PARAM].getValue(), sideDb = params[SIDE_PARAM].getValue();
+        if (std::fabs(midDb) > 0.01f || std::fabs(sideDb) > 0.01f) {
+            float m = 0.5f * (l + r) * db2lin(midDb), s = 0.5f * (l - r) * db2lin(sideDb);
+            l = m + s; r = m - s;
+        }
+
+        // ---------------- glue compressor ----------------
+        float thrCv = inputs[THR_CV_INPUT].isConnected() ? inputs[THR_CV_INPUT].getVoltage() * 4.f : 0.f;
+        float thr = fclamp(params[COMP_THRESH_PARAM].getValue() + thrCv, -60.f, 6.f);
+        float ratio = params[COMP_RATIO_PARAM].getValue();
+        float knee = params[COMP_KNEE_PARAM].getValue();
+        float aC = onePole(params[COMP_ATTACK_PARAM].getValue(), sr);
+        float rC = onePole(params[COMP_RELEASE_PARAM].getValue(), sr);
+        float det;
+        if (inputs[SIDECHAIN_INPUT].isConnected()) {
+            float sc = inputs[SIDECHAIN_INPUT].getVoltage();
+            det = std::fabs(scHp.c[0].process(sc));
+            (void) scHp.c[1].process(0.f);
+        } else {
+            det = std::max(std::fabs(scHp.c[0].process(l)), std::fabs(scHp.c[1].process(r)));
+        }
+        float lvDb = lin2db(det / FS_V);
+        float over = lvDb - thr, outDb;
+        if (2.f * over < -knee) outDb = lvDb;
+        else if (knee > 0.01f && 2.f * std::fabs(over) <= knee) outDb = lvDb + (1.f / ratio - 1.f) * (over + knee * 0.5f) * (over + knee * 0.5f) / (2.f * knee);
+        else outDb = thr + over / ratio;
+        float grT = std::max(0.f, lvDb - outDb);
+        compG += (grT - compG) * (grT > compG ? aC : rC);
+        float makeup = params[AUTO_PARAM].getValue() > 0.5f ? -thr * (1.f - 1.f / ratio) * 0.5f : 0.f;
+        float cg = db2lin(-compG + makeup);
+        float mix = params[COMP_MIX_PARAM].getValue();
+        l = l * (1.f - mix) + l * cg * mix;
+        r = r * (1.f - mix) + r * cg * mix;
+
+        // ---------------- 3-band leveler (MULTI) ----------------
+        float mbAmt = params[MB_PARAM].getValue();
+        float mbT = mbAmt > 0.001f ? fclamp(mbAmt * 10.f, 0.f, 1.f) : 0.f;
+        mbMixSm += (mbT - mbMixSm) * 0.002f;
+        float mbGrNow = 0.f;
+        if (mbMixSm > 0.0005f) {
+            float bl[3], br[3];
+            float lowL = lp1[0].process(l), restL = hp1[0].process(l);
+            float lowR = lp1[1].process(r), restR = hp1[1].process(r);
+            bl[0] = apLo[0].process(lowL) + apHi[0].process(lowL);
+            br[0] = apLo[1].process(lowR) + apHi[1].process(lowR);
+            bl[1] = lp2[0].process(restL); br[1] = lp2[1].process(restR);
+            bl[2] = hp2[0].process(restL); br[2] = hp2[1].process(restR);
+            float fastC = onePole(12.f, sr), slowC = onePole(900.f, sr), gC = onePole(25.f, sr);
+            float sumL = 0.f, sumR = 0.f;
+            for (int b = 0; b < 3; b++) {
+                float lv = 0.5f * (std::fabs(bl[b]) + std::fabs(br[b])) / FS_V;
+                mbFast[b] += (lv - mbFast[b]) * fastC;
+                mbSlow[b] += (lv - mbSlow[b]) * slowC;
+                float tg = 0.f;
+                if (mbSlow[b] > 1e-4f) tg = fclamp((lin2db(mbSlow[b]) - lin2db(mbFast[b])) * mbAmt * 0.75f, -9.f, 5.f);
+                mbGain[b] += (tg - mbGain[b]) * gC;
+                float g = db2lin(mbGain[b]);
+                sumL += bl[b] * g; sumR += br[b] * g;
+                mbGrNow = std::max(mbGrNow, -mbGain[b]);
+            }
+            l = l * (1.f - mbMixSm) + sumL * mbMixSm;
+            r = r * (1.f - mbMixSm) + sumR * mbMixSm;
+        }
+
+        // ---------------- saturation (2x oversampled) ----------------
+        float driveCv = inputs[DRIVE_CV_INPUT].isConnected() ? inputs[DRIVE_CV_INPUT].getVoltage() * 2.4f : 0.f;
+        float driveDb = fclamp(params[DRIVE_PARAM].getValue() + driveCv, 0.f, 30.f);
+        if (driveDb > 0.05f) {
+            float g = db2lin(driveDb), norm = 1.f / std::sqrt(g), smix = params[SATMIX_PARAM].getValue();
+            float xs[2] = {l, r};
+            for (int ch = 0; ch < 2; ch++) {
+                float x = xs[ch], xm = 0.5f * (osPrev[ch] + x);
+                float a = FS_V * std::tanh(g * (xm / FS_V) + 0.08f);
+                float b = FS_V * std::tanh(g * (x / FS_V) + 0.08f);
+                (void) osLp2[ch].process(osLp1[ch].process(a));
+                float y = osLp2[ch].process(osLp1[ch].process(b)) * norm;
+                osPrev[ch] = x;
+                float dc = y - dcX[ch] + 0.995f * dcY[ch];            // remove the DC the asymmetry creates
+                dcX[ch] = y; dcY[ch] = dc;
+                xs[ch] = x * (1.f - smix) + dc * smix;
+            }
+            l = xs[0]; r = xs[1];
+        }
+
+        // ---------------- punch ----------------
+        float punch = params[PUNCH_PARAM].getValue();
+        {
+            float lv = 0.5f * (std::fabs(l) + std::fabs(r));
+            punchFast += (lv - punchFast) * onePole(1.f, sr);
+            punchSlow += (lv - punchSlow) * onePole(25.f, sr);
+            if (punch > 0.001f) {
+                float tr = (punchFast - punchSlow) / (punchSlow + 0.02f);
+                float pg = db2lin(10.f * punch * fclamp(tr, 0.f, 1.f));
+                l *= pg; r *= pg;
+            }
+        }
+
+        // ---------------- stereo: width + mono bass ----------------
+        float widthCv = inputs[WIDTH_CV_INPUT].isConnected() ? inputs[WIDTH_CV_INPUT].getVoltage() * 0.2f : 0.f;
+        float wT = fclamp(params[WIDTH_PARAM].getValue() + widthCv, 0.f, 2.f);
+        widthSm += (wT - widthSm) * 0.002f;
+        {
+            float m = 0.5f * (l + r), s = 0.5f * (l - r) * widthSm;
+            if (params[MONO_BASS_PARAM].getValue() > 20.5f) s = monoHp.process(s);
+            l = m + s; r = m - s;
+        }
+
+        // ---------------- look-ahead limiter ----------------
+        float ceilDb = params[LIMIT_CEILING_PARAM].getValue();
+        float pushDb = std::max(0.f, ceilDb - params[LIMIT_THRESH_PARAM].getValue());
+        float push = db2lin(pushDb), ceilLin = FS_V * db2lin(ceilDb);
+        float limRelStep = onePole(params[LIMIT_RELEASE_PARAM].getValue(), sr);
+        float limOut[2];
+        {
+            float pk = std::max(std::fabs(l), std::fabs(r)) * push;
+            float greq = pk > ceilLin ? ceilLin / pk : 1.f;
+            limGreq[limG] = greq;
+            float mn = 1.f; int idx = limG;
+            for (int k = 0; k < laN; k++) { mn = std::min(mn, limGreq[idx]); idx = (idx == 0) ? 2 * LA_MAX - 1 : idx - 1; }
+            limGmin[limM] = mn;
+            float sum = 0.f; idx = limM;
+            for (int k = 0; k < laN; k++) { sum += limGmin[idx]; idx = (idx == 0) ? LA_MAX - 1 : idx - 1; }
+            float gbox = sum / (float) laN;
+            limG = (limG + 1 >= 2 * LA_MAX) ? 0 : limG + 1;
+            limM = (limM + 1 >= LA_MAX) ? 0 : limM + 1;
+            limRel = std::min(gbox, limRel + (1.f - limRel) * limRelStep);
+            limDl[0][limW] = l; limDl[1][limW] = r;
+            int rd = limW - (laN - 1); if (rd < 0) rd += LA_MAX;
+            limOut[0] = limDl[0][rd] * push * limRel;
+            limOut[1] = limDl[1][rd] * push * limRel;
+            limW = (limW + 1 >= LA_MAX) ? 0 : limW + 1;
+            limOut[0] = fclamp(limOut[0], -ceilLin, ceilLin);
+            limOut[1] = fclamp(limOut[1], -ceilLin, ceilLin);
+        }
+        l = limOut[0]; r = limOut[1];
+
+        // ---------------- output gain + monitoring ----------------
+        float oT = db2lin(params[OUT_GAIN_PARAM].getValue());
+        outLin += (oT - outLin) * 0.002f;
+        l *= outLin; r *= outLin;
+        if (params[SIDESOLO_PARAM].getValue() > 0.5f) { float s = 0.5f * (l - r); l = s; r = s; }
+        else if (params[MONO_PARAM].getValue() > 0.5f) { float m = 0.5f * (l + r); l = m; r = m; }
+
+        // ---------------- bypass (click-free crossfade) ----------------
+        float bT = params[BYPASS_PARAM].getValue() > 0.5f ? 1.f : 0.f;
+        byp += (bT - byp) * 0.002f;
+        float oL = l * (1.f - byp) + inL * byp, oR = r * (1.f - byp) + inR * byp;
+        outputs[OUT_L_OUTPUT].setVoltage(oL);
+        outputs[OUT_R_OUTPUT].setVoltage(oR);
+
+        // ---------------- metering ----------------
+        float pkOut = std::max(std::fabs(oL), std::fabs(oR));
+        disp.outPeak = std::max(disp.outPeak * 0.99995f, pkOut);
+        if (pkOut > peakHold) { peakHold = pkOut; peakHoldTimer = (int) (1.5f * sr); }
+        else if (--peakHoldTimer < 0) peakHold *= 0.9998f;
+        disp.peakHoldDb = lin2db(peakHold / FS_V);
+        disp.compGR += (compG - disp.compGR) * 0.01f;
+        disp.mbGR += (mbGrNow * mbMixSm - disp.mbGR) * 0.01f;
+        disp.limitGR += (-lin2db(limRel) - disp.limitGR) * 0.02f;
+
+        // correlation
+        {
+            const float c = 0.0004f;
+            corrLR += (oL * oR - corrLR) * c; corrLL += (oL * oL - corrLL) * c; corrRR += (oR * oR - corrRR) * c;
+            float den = std::sqrt(corrLL * corrRR);
+            disp.corr = den > 1e-6f ? fclamp(corrLR / den, -1.f, 1.f) : 0.f;
+        }
+        // scope (every 3rd sample)
+        if (++scopeDiv >= 3) {
+            scopeDiv = 0;
+            disp.scopeL[disp.scopeIdx] = oL / FS_V; disp.scopeR[disp.scopeIdx] = oR / FS_V;
+            disp.scopeIdx = (disp.scopeIdx + 1) % NSCOPE;
+        }
+        // spectrum
+        {
+            float mono = 0.5f * (oL + oR) / FS_V;
+            float aA = onePole(2.f, sr), aR = onePole(120.f, sr);
+            for (int i = 0; i < NSPEC; i++) {
+                if (specFreq[i] > 0.45f * sr) { disp.specEnv[i] = 0.f; continue; }
+                float y = std::fabs(specBp[i].process(mono));
+                specSm[i] += (y - specSm[i]) * (y > specSm[i] ? aA : aR);
+                disp.specEnv[i] = specSm[i];
+            }
+        }
+        // loudness (K-weighted, BS.1770 style)
+        {
+            float kl = kHp.c[0].process(kShelf.c[0].process(oL / FS_V));
+            float kr = kHp.c[1].process(kShelf.c[1].process(oR / FS_V));
+            float e = kl * kl + kr * kr;
+            msM += (e - msM) * onePole(200.f, sr);
+            msS += (e - msS) * onePole(1500.f, sr);
+            float lm = -0.691f + 10.f * std::log10(std::max(msM, 1e-10f));
+            disp.lufsM = lm; disp.lufsS = -0.691f + 10.f * std::log10(std::max(msS, 1e-10f));
+            if (lm > -70.f) { intSum += msM; intCount += 1.0; }
+            if (intCount > 0.5) disp.lufsI = -0.691f + 10.f * (float) std::log10(std::max(intSum / intCount, 1e-10));
+        }
+
+        // lights
+        float dt = args.sampleTime;
+        lights[COMP_GR_LIGHT].setSmoothBrightness(fclamp(compG / 10.f, 0.f, 1.f), dt);
+        lights[LIMIT_GR_LIGHT].setSmoothBrightness(fclamp(disp.limitGR / 6.f, 0.f, 1.f), dt);
+        lights[CORRELATION_LIGHT].setSmoothBrightness((disp.corr + 1.f) * 0.5f, dt);
+        lights[BYPASS_LIGHT].setBrightness(params[BYPASS_PARAM].getValue());
+        lights[AUTO_LIGHT].setBrightness(params[AUTO_PARAM].getValue());
+        lights[MONO_LIGHT].setBrightness(params[MONO_PARAM].getValue());
+        lights[SIDESOLO_LIGHT].setBrightness(params[SIDESOLO_PARAM].getValue());
+    }
+
+    void resetIntegrated() { intSum = 0.0; intCount = 0.0; disp.lufsI = -70.f; }
+};
+
+// ============================================================================
+// Displays
+// ============================================================================
+namespace {
+NVGcolor AMB(int a = 255) { return nvgRGBA(255, 190, 90, a); }
+NVGcolor ORG(int a = 255) { return nvgRGBA(255, 122, 0, a); }
+
+struct MasterDisplayBase : TransparentWidget {
+    BlokMaster* module = nullptr;
+    std::shared_ptr<window::Font> font;
+    void bg(const DrawArgs& a) {
+        nvgBeginPath(a.vg);
+        nvgRoundedRect(a.vg, 0, 0, box.size.x, box.size.y, 3.f);
+        nvgFillColor(a.vg, nvgRGBA(14, 9, 3, 255));
+        nvgFill(a.vg);
+    }
+    void frame(const DrawArgs& a) {
+        nvgBeginPath(a.vg);
+        nvgRoundedRect(a.vg, 0.5f, 0.5f, box.size.x - 1.f, box.size.y - 1.f, 3.f);
+        nvgStrokeWidth(a.vg, 0.8f);
+        nvgStrokeColor(a.vg, nvgRGBA(255, 180, 90, 80));
+        nvgStroke(a.vg);
+    }
+    bool loadFont() {
+        if (!font) font = APP->window->loadFont(asset::system("res/fonts/ShareTechMono-Regular.ttf"));
+        return (bool) font;
+    }
+    void text(const DrawArgs& a, float x, float y, const char* s, float size, NVGcolor c, int align) {
+        if (!loadFont()) return;
+        nvgFontFaceId(a.vg, font->handle);
+        nvgFontSize(a.vg, size);
+        nvgFillColor(a.vg, c);
+        nvgTextAlign(a.vg, align);
+        nvgText(a.vg, x, y, s, nullptr);
+    }
+    void draw(const DrawArgs& a) override { bg(a); }
+};
+
+// ---- ANALYZER: spectrum + loudness -----------------------------------------
+struct SpectrumDisplay : MasterDisplayBase {
+    float hold[NSPEC] = {};
+    void drawLayer(const DrawArgs& a, int layer) override {
+        if (layer != 1) return;
+        float W = box.size.x, H = box.size.y;
+        float sx = 4.f, sy = 4.f, sw = W - 8.f, sh = H * 0.62f;
+
+        // grid
+        nvgStrokeWidth(a.vg, 0.5f);
+        nvgStrokeColor(a.vg, nvgRGBA(255, 180, 90, 28));
+        for (int k = 0; k <= 4; k++) { nvgBeginPath(a.vg); nvgMoveTo(a.vg, sx, sy + sh * k / 4.f); nvgLineTo(a.vg, sx + sw, sy + sh * k / 4.f); nvgStroke(a.vg); }
+
+        float bw = sw / NSPEC;
+        for (int i = 0; i < NSPEC; i++) {
+            float v = 0.f;
+            if (module) {
+                float f = module->specFreq[i];
+                float db = lin2db(module->disp.specEnv[i] * 1.6f) + 3.f * std::log2(std::max(f, 20.f) / 1000.f);   // +3 dB/oct tilt = pink reference
+                v = fclamp((db + 66.f) / 66.f, 0.f, 1.f);
+            } else {
+                v = 0.55f + 0.3f * std::sin(i * 0.5f) - 0.015f * i;      // module browser preview
+            }
+            hold[i] = std::max(v, hold[i] - 0.004f);
+            float h = v * sh, x = sx + i * bw + 0.5f;
+            NVGpaint g = nvgLinearGradient(a.vg, 0, sy + sh - h, 0, sy + sh, nvgRGBA(255, 220, 120, 255), nvgRGBA(255, 100, 0, 200));
+            nvgBeginPath(a.vg); nvgRect(a.vg, x, sy + sh - h, bw - 1.f, h); nvgFillPaint(a.vg, g); nvgFill(a.vg);
+            nvgBeginPath(a.vg); nvgRect(a.vg, x, sy + sh - hold[i] * sh - 1.f, bw - 1.f, 1.2f); nvgFillColor(a.vg, nvgRGBA(255, 240, 200, 200)); nvgFill(a.vg);
+        }
+        // frequency ticks
+        const char* fl[5] = {"50", "200", "1k", "4k", "16k"};
+        float ff[5] = {50.f, 200.f, 1000.f, 4000.f, 16000.f};
+        for (int k = 0; k < 5; k++) {
+            float pos = std::log(ff[k] / 30.f) / std::log(16000.f / 30.f);
+            text(a, sx + sw * pos, sy + sh + 8.f, fl[k], 6.5f, nvgRGBA(255, 180, 90, 120), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+        }
+        // loudness readout
+        float lm = module ? module->disp.lufsM : -14.2f, ls = module ? module->disp.lufsS : -13.8f;
+        float li = module ? module->disp.lufsI : -14.0f, pk = module ? module->disp.peakHoldDb : -0.3f;
+        char b[48];
+        float y0 = H - 17.f, colW = (W - 8.f) / 4.f;
+        const char* nm[4] = {"MOM", "SHORT", "INTEG", "PEAK"};
+        float val[4] = {lm, ls, li, pk};
+        for (int k = 0; k < 4; k++) {
+            float x = 4.f + colW * (k + 0.5f);
+            text(a, x, y0, nm[k], 6.f, nvgRGBA(255, 180, 90, 120), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+            if (val[k] < -69.f) snprintf(b, sizeof b, "--");
+            else snprintf(b, sizeof b, "%.1f", val[k]);
+            NVGcolor c = (k == 3 && val[k] > -0.5f) ? nvgRGBA(255, 70, 50, 255) : AMB();
+            text(a, x, y0 + 6.5f, b, 8.5f, c, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+        }
+        frame(a);
+    }
+    void onButton(const event::Button& e) override {
+        if (module && e.action == GLFW_PRESS && e.button == GLFW_MOUSE_BUTTON_LEFT && e.pos.y > box.size.y * 0.7f) {
+            module->resetIntegrated();          // click the readout to restart the integrated loudness
+            e.consume(this);
+        }
+    }
+};
+
+// ---- METERS: vectorscope, correlation, level / GR bars ----------------------
+struct MeterDisplay : MasterDisplayBase {
+    void drawBar(const DrawArgs& a, float x, float y, float w, float h, float frac, bool fromTop, NVGcolor c, const char* label) {
+        nvgBeginPath(a.vg); nvgRoundedRect(a.vg, x, y, w, h, 1.5f); nvgFillColor(a.vg, nvgRGBA(40, 26, 10, 255)); nvgFill(a.vg);
+        frac = fclamp(frac, 0.f, 1.f);
+        float fh = h * frac;
+        nvgBeginPath(a.vg);
+        if (fromTop) nvgRoundedRect(a.vg, x, y, w, fh, 1.5f); else nvgRoundedRect(a.vg, x, y + h - fh, w, fh, 1.5f);
+        nvgFillColor(a.vg, c); nvgFill(a.vg);
+        text(a, x + w * 0.5f, y + h + 2.f, label, 6.f, nvgRGBA(255, 180, 90, 140), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+    }
+    void drawLayer(const DrawArgs& a, int layer) override {
+        if (layer != 1) return;
+        float W = box.size.x, H = box.size.y;
+
+        // --- vectorscope (left) ---
+        float cs = std::min(H - 22.f, W * 0.46f), cx = 4.f + cs * 0.5f, cy = 4.f + cs * 0.5f;
+        nvgSave(a.vg);
+        nvgBeginPath(a.vg); nvgRoundedRect(a.vg, 4.f, 4.f, cs, cs, 2.f); nvgFillColor(a.vg, nvgRGBA(26, 16, 5, 255)); nvgFill(a.vg);
+        nvgStrokeWidth(a.vg, 0.5f); nvgStrokeColor(a.vg, nvgRGBA(255, 180, 90, 40));
+        nvgBeginPath(a.vg); nvgMoveTo(a.vg, 4.f, cy); nvgLineTo(a.vg, 4.f + cs, cy); nvgMoveTo(a.vg, cx, 4.f); nvgLineTo(a.vg, cx, 4.f + cs); nvgStroke(a.vg);
+        nvgScissor(a.vg, 4.f, 4.f, cs, cs);
+        if (module) {
+            for (int k = 0; k < NSCOPE; k++) {
+                int i = (module->disp.scopeIdx + k) % NSCOPE;
+                float l = module->disp.scopeL[i], r = module->disp.scopeR[i];
+                float px = cx + (l - r) * 0.7071f * cs * 0.5f * 1.4f, py = cy - (l + r) * 0.7071f * cs * 0.5f * 1.4f;
+                int al = 20 + (int) (170.f * k / NSCOPE);
+                nvgBeginPath(a.vg); nvgRect(a.vg, px - 0.6f, py - 0.6f, 1.3f, 1.3f); nvgFillColor(a.vg, AMB(al)); nvgFill(a.vg);
+            }
+        } else {
+            for (int k = 0; k < 120; k++) {
+                float t = k * 0.12f;
+                nvgBeginPath(a.vg); nvgRect(a.vg, cx + std::sin(t * 1.3f) * cs * 0.18f, cy + std::cos(t) * cs * 0.3f, 1.3f, 1.3f); nvgFillColor(a.vg, AMB(120)); nvgFill(a.vg);
+            }
+        }
+        nvgResetScissor(a.vg);
+        text(a, 6.f, 5.f, "L", 6.f, nvgRGBA(255, 180, 90, 110), NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+        text(a, 2.f + cs, 5.f, "R", 6.f, nvgRGBA(255, 180, 90, 110), NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+        nvgRestore(a.vg);
+
+        // --- correlation bar under the scope ---
+        float corr = module ? module->disp.corr : 0.8f;
+        float by = 4.f + cs + 4.f, bh = 5.f;
+        nvgBeginPath(a.vg); nvgRoundedRect(a.vg, 4.f, by, cs, bh, 2.f); nvgFillColor(a.vg, nvgRGBA(40, 26, 10, 255)); nvgFill(a.vg);
+        float mid = 4.f + cs * 0.5f, px = mid + corr * cs * 0.5f;
+        nvgBeginPath(a.vg); nvgRect(a.vg, std::min(mid, px), by, std::fabs(px - mid), bh);
+        nvgFillColor(a.vg, corr >= 0.f ? nvgRGBA(120, 220, 90, 230) : nvgRGBA(255, 70, 50, 230)); nvgFill(a.vg);
+        text(a, 4.f, by + bh + 2.f, "-1", 6.f, nvgRGBA(255, 180, 90, 120), NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+        text(a, 4.f + cs * 0.5f, by + bh + 2.f, "CORR", 6.f, nvgRGBA(255, 180, 90, 120), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+        text(a, 4.f + cs, by + bh + 2.f, "+1", 6.f, nvgRGBA(255, 180, 90, 120), NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+
+        // --- level + GR bars (right) ---
+        float bx0 = cs + 12.f, bwid = (W - bx0 - 4.f) / 5.f - 2.f, bTop = 4.f, bH = H - 22.f;
+        float inDb = module ? lin2db(module->disp.inPeak / FS_V) : -9.f, outDb = module ? lin2db(module->disp.outPeak / FS_V) : -1.f;
+        float cg = module ? module->disp.compGR : 3.f, mg = module ? module->disp.mbGR : 2.f, lg = module ? module->disp.limitGR : 2.f;
+        auto lvlCol = [](float db) { return db > -0.5f ? nvgRGBA(255, 70, 50, 255) : db > -6.f ? nvgRGBA(255, 190, 60, 255) : nvgRGBA(120, 220, 90, 255); };
+        drawBar(a, bx0 + 0 * (bwid + 2.f), bTop, bwid, bH, (inDb + 48.f) / 48.f, false, lvlCol(inDb), "IN");
+        drawBar(a, bx0 + 1 * (bwid + 2.f), bTop, bwid, bH, cg / 12.f, true, nvgRGBA(255, 140, 30, 255), "CMP");
+        drawBar(a, bx0 + 2 * (bwid + 2.f), bTop, bwid, bH, mg / 9.f, true, nvgRGBA(255, 190, 90, 255), "MB");
+        drawBar(a, bx0 + 3 * (bwid + 2.f), bTop, bwid, bH, lg / 12.f, true, nvgRGBA(255, 70, 50, 255), "LIM");
+        drawBar(a, bx0 + 4 * (bwid + 2.f), bTop, bwid, bH, (outDb + 48.f) / 48.f, false, lvlCol(outDb), "OUT");
+        frame(a);
+    }
+};
+} // namespace
+
+// ============================================================================
+// Widget
+// ============================================================================
+struct BlokMasterWidget : ModuleWidget {
+    BlokMasterWidget(BlokMaster* module) {
+        setModule(module);
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/BloKMaster.svg")));
+        using namespace rack::componentlibrary;
+        const float W = BML::PANEL_W;
+
+        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(W - 3.5f, 3.5f))));
+        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 125.f))));
+        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(W - 3.5f, 125.f))));
+
+        auto knob = [&](int col, int row, int id) {
+            addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(BML::KX[col], BML::KY[row])), module, id));
+        };
+        // row 1: tone
+        knob(0, 0, BlokMaster::TRIM_PARAM);     knob(1, 0, BlokMaster::LOWCUT_PARAM);   knob(2, 0, BlokMaster::LOW_PARAM);
+        knob(3, 0, BlokMaster::TILT_PARAM);     knob(4, 0, BlokMaster::HIGH_PARAM);     knob(5, 0, BlokMaster::AIR_PARAM);
+        // row 2: glue compressor
+        knob(0, 1, BlokMaster::COMP_THRESH_PARAM); knob(1, 1, BlokMaster::COMP_RATIO_PARAM); knob(2, 1, BlokMaster::COMP_ATTACK_PARAM);
+        knob(3, 1, BlokMaster::COMP_RELEASE_PARAM); knob(4, 1, BlokMaster::COMP_KNEE_PARAM); knob(5, 1, BlokMaster::COMP_SCHPF_PARAM);
+        knob(6, 1, BlokMaster::COMP_MIX_PARAM);
+        // row 3: color / dynamics / mid-side
+        knob(0, 2, BlokMaster::DRIVE_PARAM);    knob(1, 2, BlokMaster::SATMIX_PARAM);   knob(2, 2, BlokMaster::PUNCH_PARAM);
+        knob(3, 2, BlokMaster::MB_PARAM);       knob(4, 2, BlokMaster::MID_PARAM);      knob(5, 2, BlokMaster::SIDE_PARAM);
+        // row 4: stereo / limiter / out
+        knob(0, 3, BlokMaster::WIDTH_PARAM);    knob(1, 3, BlokMaster::MONO_BASS_PARAM); knob(2, 3, BlokMaster::LIMIT_THRESH_PARAM);
+        knob(3, 3, BlokMaster::LIMIT_CEILING_PARAM); knob(4, 3, BlokMaster::LIMIT_RELEASE_PARAM); knob(5, 3, BlokMaster::OUT_GAIN_PARAM);
+
+        // monitor buttons (round TL1105 with the light under the cap, like the other modules)
+        const int btnParam[4] = {BlokMaster::BYPASS_PARAM, BlokMaster::AUTO_PARAM, BlokMaster::MONO_PARAM, BlokMaster::SIDESOLO_PARAM};
+        const int btnLight[4] = {BlokMaster::BYPASS_LIGHT, BlokMaster::AUTO_LIGHT, BlokMaster::MONO_LIGHT, BlokMaster::SIDESOLO_LIGHT};
+        for (int i = 0; i < 4; i++) {
+            Vec p = mm2px(Vec(BML::BTN_X[i], BML::BTN_Y));
+            if (i == 0) addChild(createLightCentered<SmallLight<RedLight>>(p, module, btnLight[i]));
+            else if (i == 1) addChild(createLightCentered<SmallLight<GreenLight>>(p, module, btnLight[i]));
+            else addChild(createLightCentered<SmallLight<YellowLight>>(p, module, btnLight[i]));
+            auto* b = createParamCentered<TL1105>(p, module, btnParam[i]);
+            b->momentary = false;
+            addParam(b);
+        }
+
+        // CV inputs
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(BML::CV_X[0], BML::CV_Y)), module, BlokMaster::THR_CV_INPUT));
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(BML::CV_X[1], BML::CV_Y)), module, BlokMaster::DRIVE_CV_INPUT));
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(BML::CV_X[2], BML::CV_Y)), module, BlokMaster::WIDTH_CV_INPUT));
+
+        // audio I/O
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(BML::IN_X[0], BML::IO_Y)), module, BlokMaster::IN_L_INPUT));
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(BML::IN_X[1], BML::IO_Y)), module, BlokMaster::IN_R_INPUT));
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(BML::IN_X[2], BML::IO_Y)), module, BlokMaster::SIDECHAIN_INPUT));
+        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(BML::OUT_X[0], BML::IO_Y)), module, BlokMaster::OUT_L_OUTPUT));
+        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(BML::OUT_X[1], BML::IO_Y)), module, BlokMaster::OUT_R_OUTPUT));
+
+        // tiny status lights beside the section headings
+        addChild(createLightCentered<TinyLight<RedLight>>(mm2px(Vec(93.f, 33.6f)), module, BlokMaster::COMP_GR_LIGHT));
+        addChild(createLightCentered<TinyLight<RedLight>>(mm2px(Vec(93.f, 76.8f)), module, BlokMaster::LIMIT_GR_LIGHT));
+        addChild(createLightCentered<TinyLight<GreenLight>>(mm2px(Vec(BML::OUT_X[1] + 0.f, BML::IO_Y - 7.2f)), module, BlokMaster::CORRELATION_LIGHT));
+
+        // displays
+        auto* sp = new SpectrumDisplay();
+        sp->module = module;
+        sp->box.pos = mm2px(Vec(BML::D1[0], BML::D1[1]));
+        sp->box.size = mm2px(Vec(BML::D1[2], BML::D1[3]));
+        addChild(sp);
+
+        auto* md = new MeterDisplay();
+        md->module = module;
+        md->box.pos = mm2px(Vec(BML::D2[0], BML::D2[1]));
+        md->box.size = mm2px(Vec(BML::D2[2], BML::D2[3]));
+        addChild(md);
+    }
+
+    void appendContextMenu(Menu* menu) override {
+        auto* m = dynamic_cast<BlokMaster*>(module);
+        if (!m) return;
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuItem("Restart integrated loudness", "", [=]() { m->resetIntegrated(); }));
+    }
+};
+
+Model* modelBloKMaster = createModel<BlokMaster, BlokMasterWidget>("BlokMaster");

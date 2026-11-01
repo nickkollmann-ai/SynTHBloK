@@ -1,0 +1,193 @@
+{
+  "slug": "SynTHBloK",
+  "name": "SynTHBloK",
+  "version": "2.0.0",
+  "license": "proprietary",
+  "brand": "NoiZee ToyZ",
+  "author": "Nicholas Kollmann",
+  "modules": [
+    {
+      "slug": "SynTHBloK",
+      "name": "SynTHBloK-QUAD",
+      "description": "Quad-oscillator synth voice with filter, envelope, glide, accent and LFO",
+      "tags": [
+        "Synth voice",
+        "Oscillator",
+        "Low-frequency oscillator"
+      ],
+      "expander": {
+        "direction": "right",
+        "child": [
+          "SynTHBloKPoly",
+          "SynTHBloKStereo",
+          "SynTHBloKFX"
+        ]
+      }
+    },
+    {
+      "slug": "SynTHBloKPoly",
+      "name": "SynTHBloK Poly Expander",
+      "description": "Polyphonic unison engine for SynTHBloK",
+      "tags": [
+        "Synth voice",
+        "Polyphonic",
+        "Expander"
+      ],
+      "expander": {
+        "direction": "left",
+        "parent": "SynTHBloK"
+      }
+    },
+    {
+      "slug": "SynTHBloKStereo",
+      "name": "SynTHBloK Stereo Expander",
+      "description": "Stereo width, tilt, air, glue, punch and clip, with analyzer",
+      "tags": [
+        "Effect",
+        "Dynamics",
+        "Expander"
+      ],
+      "expander": {
+        "direction": "left",
+        "parent": "SynTHBloK"
+      }
+    },
+    {
+      "slug": "SynTHBloKFX",
+      "name": "SynTHBloK FX Expander",
+      "description": "Delay and space effects with tape, analog and modern character",
+      "tags": [
+        "Effect",
+        "Delay",
+        "Expander"
+      ],
+      "expander": {
+        "direction": "left",
+        "parent": "SynTHBloK"
+      }
+    },
+    {
+      "slug": "SynTHBloKResonator",
+      "name": "SynTHBloK-R Resonator",
+      "description": "Stereo modal resonator with metal, wood, membrane and tube bodies",
+      "tags": [
+        "Effect",
+        "Physical modeling",
+        "Filter"
+      ]
+    },
+    {
+      "slug": "SynTHBloKMix24",
+      "name": "SynTHBloK MIX-24 Fire Edition",
+      "description": "Six-channel stereo mixer with per-channel tilt, drive, air and glue, mute/solo and meters",
+      "tags": [
+        "Mixer",
+        "Utility"
+      ]
+    },
+    {
+      "slug": "NoizeeFlagshipFilter",
+      "name": "SynTHBloK-F Flagship Filter",
+      "description": "Stereo state-variable filter with morph, drive, FM, keytrack and chaos",
+      "tags": [
+        "Filter"
+      ]
+    },
+    {
+      "slug": "BlokMaster",
+      "name": "BloKMaster",
+      "description": "Mastering strip: trim, tilt EQ, shelves, glue compressor, punch, limiter, stereo tools, air and output gain",
+      "tags": [
+        "Dynamics",
+        "Limiter",
+        "Compressor",
+        "Equalizer",
+        "Utility"
+      ]
+    },
+    {
+      "slug": "SynTHBloKPlayer",
+      "name": "SynTHBloK Player Plus",
+      "description": "MIDI file player with a watch folder: 16 poly tracks (pitch, gate, velocity), 16th-note clock, reset and end outputs, speed and transpose",
+      "tags": [
+        "Sequencer",
+        "Utility",
+        "External"
+      ],
+      "expander": {
+        "direction": "right",
+        "child": [
+          "SynTHBloKPlayerView"
+        ]
+      }
+    },
+    {
+      "slug": "SynTHBloKKick",
+      "name": "SynTHBloK-K Kick",
+      "description": "Hard techno kick: pitch-swept sine, click, drive, tone, schranz rumble tail with ducking, accent and envelope out",
+      "tags": [
+        "Drum",
+        "Synth voice",
+        "Percussion"
+      ]
+    },
+    {
+      "slug": "SynTHBloKPlayerView",
+      "name": "SynTHBloK MIDI + Expansion Module",
+      "description": "MIDI display for Player Plus: scrolling piano roll of the loaded MIDI with playhead, track activity and transport readout",
+      "tags": [
+        "Visual",
+        "Utility",
+        "Expander"
+      ],
+      "expander": {
+        "direction": "left",
+        "parent": "SynTHBloKPlayer"
+      }
+    },
+    {
+      "slug": "SynTHBloKSnareHat",
+      "name": "SynTHBloK-D Snare/Hat",
+      "description": "Techno snare and hi-hat voice: two-oscillator snare body with noise snap, six-oscillator metallic hats with closed/open triggers and choke, drive, tone and accent",
+      "tags": [
+        "Drum",
+        "Synth voice",
+        "Percussion"
+      ]
+    },
+    {
+      "slug": "SynTHBloKEuclid",
+      "name": "SynTHBloK-E Euclid",
+      "description": "Four-channel Euclidean rhythm generator: steps, hits and rotate per channel, clock/reset/run inputs, 10 ms trigger outputs for drums and gates",
+      "tags": [
+        "Sequencer",
+        "Clock modulator",
+        "Utility"
+      ]
+    },
+    {
+      "slug": "SynTHBloKJamProbe",
+      "name": "SynTHBloK-J JAM Probe",
+      "description": "MIDI monitor and test transmitter for mapping controllers such as the Maschine JAM: live message log, per-control statistics, test notes/CCs, auto sweep, copy/save map summary",
+      "tags": [
+        "Utility",
+        "MIDI"
+      ]
+    },
+    {
+      "slug": "SynTHBloKJam",
+      "name": "SynTHBloK-K JAM",
+      "description": "Maschine JAM controller: 8x8 pad trigger sequencer with 8 patterns, plus the 8 touch strips as CV outputs with 8 banks; JAM lights follow the module",
+      "tags": [
+        "Sequencer",
+        "Controller",
+        "MIDI"
+      ]
+    }
+  ],
+  "authorEmail": "support@liquidnick.com",
+  "authorUrl": "https://www.liquidnick.com",
+  "pluginUrl": "https://www.liquidnick.com/#modular",
+  "manualUrl": "",
+  "donateUrl": ""
+}

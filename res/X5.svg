@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="274.32mm"
+  height="128.5mm"
+  viewBox="0 0 274.32 128.5">
+
+  <!-- Background panel -->
+  <rect x="0" y="0" width="274.32" height="128.5" fill="#111111"/>
+
+  <!-- Common layout metrics -->
+  <!-- Bands 1–5: 5 columns, then Global, then Output -->
+  <!-- X positions (centers for knobs) -->
+  <!-- band1: 25, band2: 70, band3: 115, band4: 160, band5: 205, global: 240, output: 265 -->
+
+  <!-- Horizontal separators (optional subtle lines) -->
+  <line x1="0" y1="32" x2="274.32" y2="32" stroke="#333" stroke-width="0.4"/>
+  <line x1="0" y1="60" x2="274.32" y2="60" stroke="#333" stroke-width="0.4"/>
+  <line x1="0" y1="88" x2="274.32" y2="88" stroke="#333" stroke-width="0.4"/>
+
+  <!-- Vertical separators between bands -->
+  <line x1="47.5" y1="0" x2="47.5" y2="128.5" stroke="#222" stroke-width="0.5"/>
+  <line x1="92.5" y1="0" x2="92.5" y2="128.5" stroke="#222" stroke-width="0.5"/>
+  <line x1="137.5" y1="0" x2="137.5" y2="128.5" stroke="#222" stroke-width="0.5"/>
+  <line x1="182.5" y1="0" x2="182.5" y2="128.5" stroke="#222" stroke-width="0.5"/>
+  <line x1="227.5" y1="0" x2="227.5" y2="128.5" stroke="#222" stroke-width="0.5"/>
+  <line x1="252.5" y1="0" x2="252.5" y2="128.5" stroke="#222" stroke-width="0.5"/>
+
+  <!-- KNOB ROW Y POSITIONS -->
+  <!-- Threshold row -->
+  <!-- y = 22 -->
+  <!-- Ratio row -->
+  <!-- y = 50 -->
+  <!-- Attack row -->
+  <!-- y = 78 -->
+  <!-- Release / Global / Output row -->
+  <!-- y = 106 -->
+
+  <!-- ===== BAND 1 KNOBS ===== -->
+  <circle cx="25" cy="22" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- THRESHOLD 1 -->
+  <circle cx="25" cy="50" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- RATIO 1 -->
+  <circle cx="25" cy="78" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- ATTACK 1 -->
+  <circle cx="25" cy="106" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- RELEASE 1 -->
+
+  <!-- ===== BAND 2 KNOBS ===== -->
+  <circle cx="70" cy="22" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- THRESHOLD 2 -->
+  <circle cx="70" cy="50" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- RATIO 2 -->
+  <circle cx="70" cy="78" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- ATTACK 2 -->
+  <circle cx="70" cy="106" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- RELEASE 2 -->
+
+  <!-- ===== BAND 3 KNOBS ===== -->
+  <circle cx="115" cy="22" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- THRESHOLD 3 -->
+  <circle cx="115" cy="50" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- RATIO 3 -->
+  <circle cx="115" cy="78" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- ATTACK 3 -->
+  <circle cx="115" cy="106" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- RELEASE 3 -->
+
+  <!-- ===== BAND 4 KNOBS ===== -->
+  <circle cx="160" cy="22" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- THRESHOLD 4 -->
+  <circle cx="160" cy="50" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- RATIO 4 -->
+  <circle cx="160" cy="78" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- ATTACK 4 -->
+  <circle cx="160" cy="106" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- RELEASE 4 -->
+
+  <!-- ===== BAND 5 KNOBS ===== -->
+  <circle cx="205" cy="22" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- THRESHOLD 5 -->
+  <circle cx="205" cy="50" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- RATIO 5 -->
+  <circle cx="205" cy="78" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- ATTACK 5 -->
+  <circle cx="205" cy="106" r="6" fill="#000" stroke="#777" stroke-width="0.6"/> <!-- RELEASE 5 -->
+
+  <!-- ===== GLOBAL: GLUE / PUNCH / CLIP ===== -->
+  <circle cx="240" cy="36" r="6" fill="#000" stroke="#999" stroke-width="0.6"/> <!-- GLUE -->
+  <circle cx="240" cy="64" r="6" fill="#000" stroke="#999" stroke-width="0.6"/> <!-- PUNCH -->
+  <circle cx="240" cy="92" r="6" fill="#000" stroke="#999" stroke-width="0.6"/> <!-- CLIP -->
+
+  <!-- ===== OUTPUT KNOB ===== -->
+  <circle cx="265" cy="78" r="7" fill="#000" stroke="#bbb" stroke-width="0.7"/> <!-- OUTPUT -->
+
+  <!-- ===== OUTPUT METER (VERTICAL BAR) ===== -->
+  <rect x="261" y="15" width="3" height="40" fill="#222" stroke="#555" stroke-width="0.4"/>
+<!-- ===== VISUAL READOUT SECTION ===== -->
+<rect
+  x="0"
+  y="0"
+  width="274.32"
+  height="28"
+  fill="#0A0A0A"
+  stroke="#222"
+  stroke-width="0.6"
+/>
+
+<!-- Optional subtle grid lines -->
+<line x1="0" y1="7" x2="274.32" y2="7" stroke="#1A1A1A" stroke-width="0.4"/>
+<line x1="0" y1="14" x2="274.32" y2="14" stroke="#1A1A1A" stroke-width="0.4"/>
+<line x1="0" y1="21" x2="274.32" y2="21" stroke="#1A1A1A" stroke-width="0.4"/>
+
+<!-- Band divider markers (optional) -->
+<line x1="47.5" y1="0" x2="47.5" y2="28" stroke="#222" stroke-width="0.5"/>
+<line x1="92.5" y1="0" x2="92.5" y2="28" stroke="#222" stroke-width="0.5"/>
+<line x1="137.5" y1="0" x2="137.5" y2="28" stroke="#222" stroke-width="0.5"/>
+<line x1="182.5" y1="0" x2="182.5" y2="28" stroke="#222" stroke-width="0.5"/>
+<line x1="227.5" y1="0" x2="227.5" y2="28" stroke="#222" stroke-width="0.5"/>
+<line x1="252.5" y1="0" x2="252.5" y2="28" stroke="#222" stroke-width="0.5"/>
+
+<!-- Placeholder text (remove later or convert to paths) -->
+<text x="137.16" y="18" font-size="6" fill="#666" text-anchor="middle">
+  VISUAL READOUT
+</text>
+
+</svg>
