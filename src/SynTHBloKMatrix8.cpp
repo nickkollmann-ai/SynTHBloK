@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -69,31 +70,54 @@ static float polyBlep(float t, float dt) {
     return 0.f;
 }
 
-// One voice: morphing oscillator (saw -> square -> sine), resonant low-pass (TPT state-variable)
-// swept by the envelope, exponential decay, drive.
-struct M8Voice {
-    float phase = 0.f, env = 0.f, cut = 0.5f;
-    float ic1 = 0.f, ic2 = 0.f;
-    void trigger() { env = 1.f; }
-    float process(float sr, const float* p) {
-        float semis = std::round(p[VP_PITCH] * 36.f);
-        float freq = 65.406f * std::pow(2.f, semis / 12.f);
-        float dt = std::min(freq / sr, 0.45f);
+// Morphing oscillator: saw -> square -> sine as w goes 0 -> 0.5 -> 1 (band-limited edges).
+struct M8Osc {
+    float phase = 0.f;
+    float process(float dt, float w) {
         phase += dt;
         if (phase >= 1.f) phase -= 1.f;
         float saw = 2.f * phase - 1.f - polyBlep(phase, dt);
         float t2 = phase + 0.5f; if (t2 >= 1.f) t2 -= 1.f;
         float sq = (phase < 0.5f ? 1.f : -1.f) + polyBlep(phase, dt) - polyBlep(t2, dt);
-        float sine = std::sin(2.f * M_PI * phase);
+        float sine = std::sin(2.f * float(M_PI) * phase);
+        return w < 0.5f ? saw + (sq - saw) * (w * 2.f) : sq + (sine - sq) * ((w - 0.5f) * 2.f);
+    }
+};
+
+// One voice: two detuned morphing oscillators plus a sine sub an octave down, a slow random
+// "analog" drift on pitch and cutoff, resonant low-pass (TPT state-variable) swept by the
+// envelope, exponential decay, drive.
+struct M8Voice {
+    M8Osc oscA, oscB;
+    float subPhase = 0.f, env = 0.f, cut = 0.5f;
+    float ic1 = 0.f, ic2 = 0.f;
+    float drift = 0.f, driftTarget = 0.f, driftTimer = 0.f;
+    uint32_t rng = 1;
+    explicit M8Voice(uint32_t seed = 1) : rng(seed * 2654435761u + 1u) { oscB.phase = 0.37f; }
+    float rand01() { rng = rng * 1664525u + 1013904223u; return (rng >> 8) * (1.f / 16777216.f); }
+    void trigger() { env = 1.f; }
+    float process(float sr, const float* p) {
+        // drift: a new random target every ~0.3-1 s, glided to; +-1 = +-6 cents / +-0.03 cutoff
+        driftTimer -= 1.f / sr;
+        if (driftTimer <= 0.f) { driftTarget = rand01() * 2.f - 1.f; driftTimer = 0.3f + 0.7f * rand01(); }
+        drift += (driftTarget - drift) * (2.f / sr);
+
+        float semis = std::round(p[VP_PITCH] * 36.f) + drift * 0.06f;
+        float freq = 65.406f * std::pow(2.f, semis / 12.f);
+        const float detune = 1.0041f;   // +-7 cents
         float w = p[VP_WAVE];
-        float osc = w < 0.5f ? saw + (sq - saw) * (w * 2.f) : sq + (sine - sq) * ((w - 0.5f) * 2.f);
+        float osc = 0.5f * (oscA.process(std::min(freq * detune / sr, 0.45f), w)
+                          + oscB.process(std::min(freq / detune / sr, 0.45f), w));
+        subPhase += 0.5f * freq / sr;
+        if (subPhase >= 1.f) subPhase -= 1.f;
+        osc += 0.35f * std::sin(2.f * float(M_PI) * subPhase);
 
         // decay time constant 15 ms .. 1.2 s
         float decay = 0.015f * std::pow(80.f, p[VP_DECAY]);
         env *= std::exp(-1.f / (decay * sr));
 
         // cutoff 40 Hz .. 16 kHz, +2.5 octaves of envelope sweep; smoothed against zipper noise
-        cut += (p[VP_CUTOFF] - cut) * 0.002f;
+        cut += (p[VP_CUTOFF] + drift * 0.03f - cut) * 0.002f;
         float fc = std::min(40.f * std::pow(400.f, cut) * std::pow(2.f, 2.5f * env), sr * 0.45f);
         float g = std::tan(M_PI * fc / sr);
         float k = 2.f - 1.9f * p[VP_RES];
@@ -109,9 +133,61 @@ struct M8Voice {
     }
 };
 
+// Stereo ping-pong delay: left feeds right and back, a low-pass in the loop darkens each repeat.
+struct M8Delay {
+    std::vector<float> bl, br;
+    int pos = 0;
+    float lpL = 0.f, lpR = 0.f, time = 0.375f;
+    void init(float sr) { bl.assign((size_t)(sr * 2.1f), 0.f); br.assign(bl.size(), 0.f); pos = 0; }
+    void process(float inL, float inR, float sr, float targetTime, float& outL, float& outR) {
+        if (bl.empty()) init(sr);
+        time += (clamp(targetTime, 0.02f, 2.f) - time) * 0.0002f;   // glide when the tempo changes
+        int n = (int)bl.size();
+        float d = time * sr;
+        int i0 = (int)d; float f = d - i0;
+        auto tap = [&](std::vector<float>& b) {
+            int a = (pos - i0 + n) % n, c = (pos - i0 - 1 + n) % n;
+            return b[a] + (b[c] - b[a]) * f;
+        };
+        float dl = tap(bl), dr = tap(br);
+        lpL += (dl - lpL) * 0.35f;
+        lpR += (dr - lpR) * 0.35f;
+        bl[pos] = inL + lpR * 0.5f;          // ping-pong: each side feeds the other
+        br[pos] = inR + lpL * 0.5f;
+        pos = (pos + 1) % n;
+        outL = dl; outR = dr;
+    }
+};
+
+// Small stereo reverb (Freeverb-style: 4 damped combs + 2 allpasses per side).
+struct M8Reverb {
+    struct Comb { std::vector<float> b; int i = 0; float lp = 0.f;
+        float process(float x, float fb, float damp) { float y = b[i]; lp = y + (lp - y) * damp; b[i] = x + lp * fb; i = (i + 1) % (int)b.size(); return y; } };
+    struct AllPass { std::vector<float> b; int i = 0;
+        float process(float x) { float y = b[i]; b[i] = x + y * 0.5f; i = (i + 1) % (int)b.size(); return y - x; } };
+    Comb cl[4], cr[4];
+    AllPass al[2], ar[2];
+    bool ready = false;
+    void init(float sr) {
+        static const int combs[4] = {1116, 1188, 1277, 1356}, aps[2] = {556, 441};
+        float s = sr / 44100.f;
+        for (int k = 0; k < 4; k++) { cl[k].b.assign((size_t)(combs[k] * s), 0.f); cr[k].b.assign((size_t)((combs[k] + 23) * s), 0.f); }
+        for (int k = 0; k < 2; k++) { al[k].b.assign((size_t)(aps[k] * s), 0.f); ar[k].b.assign((size_t)((aps[k] + 23) * s), 0.f); }
+        ready = true;
+    }
+    void process(float inL, float inR, float sr, float& outL, float& outR) {
+        if (!ready) init(sr);
+        float in = (inL + inR) * 0.15f, l = 0.f, r = 0.f;
+        for (int k = 0; k < 4; k++) { l += cl[k].process(in, 0.84f, 0.3f); r += cr[k].process(in, 0.84f, 0.3f); }
+        for (int k = 0; k < 2; k++) { l = al[k].process(l); r = ar[k].process(r); }
+        outL = l; outR = r;
+    }
+};
+
 struct SynTHBloKMatrix8 : Module {
     enum ParamIds { LEN_PARAM, PAT_PARAM, PAGE_PARAM, OFFC_PARAM, ONC_PARAM, HEADC_PARAM, HITC_PARAM, CLEAR_PARAM, LEARN_PARAM,
-                    BANK_PARAM, RANGE_PARAM, BONC_PARAM, BOFFC_PARAM, RUN_PARAM, RESET_PARAM, KNOB_PARAM, NUM_PARAMS };
+                    BANK_PARAM, RANGE_PARAM, BONC_PARAM, BOFFC_PARAM, RUN_PARAM, RESET_PARAM, KNOB_PARAM,
+                    DELAY_PARAM, SPACE_PARAM, NUM_PARAMS };
     enum InputIds { CLOCK_INPUT, RESET_INPUT, RUN_INPUT, NUM_INPUTS };
     enum OutputIds { TRIG_OUTPUT, STRIP_OUTPUT = TRIG_OUTPUT + 8, KNOB_OUTPUT = STRIP_OUTPUT + 8,
                      AUDIO_L_OUTPUT, AUDIO_R_OUTPUT, NUM_OUTPUTS };
@@ -138,7 +214,19 @@ struct SynTHBloKMatrix8 : Module {
     bool muteHeld = false, soloHeld = false, jamReset = false;
     int knobCC = kKnobFirstCC;    // knob page the JAM last sent from, for the value sent back
     float knobSm = 0.f;
-    M8Voice voice[8];
+    M8Voice voice[8] = {M8Voice(1), M8Voice(2), M8Voice(3), M8Voice(4), M8Voice(5), M8Voice(6), M8Voice(7), M8Voice(8)};
+    M8Delay delay;
+    M8Reverb reverb;
+    float delayMix = 0.f, spaceMix = 0.f;
+
+    // JAM knob pages: MST = master, GRP = delay, IN1 = space, CUE = master.
+    int knobParam() {
+        switch (knobCC) {
+            case kKnobFirstCC + 1: return DELAY_PARAM;
+            case kKnobFirstCC + 2: return SPACE_PARAM;
+            default: return KNOB_PARAM;
+        }
+    }
     float master = 0.8f;
 
     int lastLed[kNumLed];
@@ -164,7 +252,9 @@ struct SynTHBloKMatrix8 : Module {
         configParam(BOFFC_PARAM, 0.f, 127.f, 20.f, "LED colour: other bank buttons");
         configSwitch(RUN_PARAM, 0.f, 1.f, 1.f, "Run (the RUN jack takes over when patched)", {"Stopped", "Running"});
         configButton(RESET_PARAM, "Reset (the RESET jack takes over when patched)");
-        configParam(KNOB_PARAM, 0.f, 1.f, 0.8f, "Master volume (follows the JAM knob)", "%", 0.f, 100.f);
+        configParam(KNOB_PARAM, 0.f, 1.f, 0.8f, "Master volume (JAM knob on MST or CUE)", "%", 0.f, 100.f);
+        configParam(DELAY_PARAM, 0.f, 1.f, 0.f, "Delay, ping-pong dotted 1/8 (JAM knob on GRP)", "%", 0.f, 100.f);
+        configParam(SPACE_PARAM, 0.f, 1.f, 0.f, "Space / reverb (JAM knob on IN1)", "%", 0.f, 100.f);
         for (int i = 0; i < CLEAR_PARAM; i++) paramQuantities[i]->snapEnabled = true;
         paramQuantities[BANK_PARAM]->snapEnabled = true;
         paramQuantities[BONC_PARAM]->snapEnabled = true;
@@ -243,7 +333,7 @@ struct SynTHBloKMatrix8 : Module {
     ~SynTHBloKMatrix8() { clearLeds(); }
 
     int desiredLed(int idx, bool running) {
-        if (idx == kKnobLed) return (int)std::round(params[KNOB_PARAM].getValue() * 127.f);
+        if (idx == kKnobLed) return (int)std::round(params[knobParam()].getValue() * 127.f);
         if (idx >= 88) {
             switch (kBtnCC[idx - 88]) {
                 case CC_PLAY: return running ? 127 : 0;
@@ -330,10 +420,10 @@ struct SynTHBloKMatrix8 : Module {
                 if (isBtn) jamButton(a, b);
                 else if (a >= kKnobFirstCC && a <= kKnobLastCC) {
                     knobCC = a;
-                    params[KNOB_PARAM].setValue(b / 127.f);
+                    params[knobParam()].setValue(b / 127.f);
                     lastLed[kKnobLed] = b;   // already showing on the JAM
                 }
-                else if (a == kKnobPushCC && b > 0) params[KNOB_PARAM].setValue(0.f);
+                else if (a == kKnobPushCC && b > 0) paramQuantities[knobParam()]->reset();   // back to its default
                 else if (a >= 0 && a < 8 && b > 0) params[PAT_PARAM].setValue((float)(a + 1));
                 else if (a >= 8 && a < 16 && b > 0) params[BANK_PARAM].setValue((float)(a - 8 + 1));
                 else if (a >= 48 && a < 112) {
@@ -386,6 +476,17 @@ struct SynTHBloKMatrix8 : Module {
                 l += s * std::cos(pan);
                 r += s * std::sin(pan);
             }
+            // Delay locks to the clock: dotted 1/8 = 3 clock pulses at a 16th-note clock.
+            float delayTime = (clockPeriod > 0.f && sinceClock < 2.f) ? clockPeriod * 3.f : 0.375f;
+            float dl, dr, rl, rr;
+            delay.process(l, r, args.sampleRate, delayTime, dl, dr);
+            delayMix += (params[DELAY_PARAM].getValue() - delayMix) * k;
+            l += dl * delayMix * 0.8f;
+            r += dr * delayMix * 0.8f;
+            reverb.process(l, r, args.sampleRate, rl, rr);
+            spaceMix += (params[SPACE_PARAM].getValue() - spaceMix) * k;
+            l += rl * spaceMix;
+            r += rr * spaceMix;
             master += (params[KNOB_PARAM].getValue() - master) * k;
             outputs[AUDIO_L_OUTPUT].setVoltage(5.f * std::tanh(l * 0.5f * master));
             outputs[AUDIO_R_OUTPUT].setVoltage(5.f * std::tanh(r * 0.5f * master));
@@ -830,10 +931,11 @@ struct JClockDisplay : TransparentWidget {
 // Amber value arc around the knob (MIDI + colours), so its position reads like the JAM's meter.
 struct JKnobRing : TransparentWidget {
     SynTHBloKMatrix8* module = NULL;
+    int param = SynTHBloKMatrix8::KNOB_PARAM;
     JKnobRing() { box.size = mm2px(Vec(19.f, 19.f)); }
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
-        float v = module ? module->params[SynTHBloKMatrix8::KNOB_PARAM].getValue() : 0.6f;
+        float v = module ? module->params[param].getValue() : 0.6f;
         float cx = box.size.x * 0.5f, cy = box.size.y * 0.5f, rr = box.size.x * 0.5f - 2.f;
         float a0 = M_PI * 0.75f, a1 = M_PI * 2.25f;
         nvgBeginPath(args.vg);
@@ -939,6 +1041,21 @@ struct SynTHBloKMatrix8Widget : ModuleWidget {
         label(RX + 6.f, KY + 5.5f, "OUT L");
         addOutput(createOutputCentered<SmallJack>(mm2px(Vec(RX + RW - 6.f, KY)), module, SynTHBloKMatrix8::AUDIO_R_OUTPUT));
         label(RX + RW - 6.f, KY + 5.5f, "OUT R");
+
+        // DELAY and SPACE between the BPM display and the master knob (JAM knob on GRP / IN1).
+        const float FY = 51.f;
+        const int FX_PARAM[2] = {SynTHBloKMatrix8::DELAY_PARAM, SynTHBloKMatrix8::SPACE_PARAM};
+        const char* FX_NAME[2] = {"DELAY", "SPACE"};
+        for (int i = 0; i < 2; i++) {
+            float x = i == 0 ? RX + 11.f : RX + RW - 11.f;
+            JKnobRing* fr = createWidgetCentered<JKnobRing>(mm2px(Vec(x, FY)));
+            fr->box.size = mm2px(Vec(12.f, 12.f));
+            fr->box.pos = mm2px(Vec(x - 6.f, FY - 6.f));
+            fr->module = module; fr->param = FX_PARAM[i];
+            addChild(fr);
+            addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(x, FY)), module, FX_PARAM[i]));
+            label(x, FY + 7.5f, FX_NAME[i]);
+        }
 
         // All right-panel jacks in one row just above the buttons, labels on top.
         const char* JNAME[4] = {"RUN", "RESET", "CLOCK", "KNOB"};
