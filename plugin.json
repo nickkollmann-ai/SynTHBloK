@@ -194,6 +194,19 @@
         "Controller",
         "MIDI"
       ]
+    },
+    {
+      "slug": "SynTHBloKGrainForge",
+      "name": "SynTHBloK GRAIN-FORGE",
+      "description": "Glitch, granular stretch, robot-voice harmonics and a warp delay whose repeats loop back through the stretch and robot stages; clock-locked stereo FX chain",
+      "tags": [
+        "Effect",
+        "Granular",
+        "Delay",
+        "Pitch shifter",
+        "Formant",
+        "Clock modulator"
+      ]
     }
   ],
   "authorEmail": "support@liquidnick.com",
