@@ -1,7 +1,12 @@
 #include "plugin.hpp"
 #include "SynTHBloKMix24.hpp"
 #include "SynTHBloKMix24_layout.hpp"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmisleading-indentation"   // the FX header packs statements onto one line
 #include "SynTHBloKMix24_fx.hpp"
+#pragma GCC diagnostic pop
+#include "OledUi.hpp"
+#include "KnobTicks.hpp"
 
 using namespace rack;
 
@@ -864,34 +869,19 @@ struct MixSwitch : app::ParamWidget {
     }
 };
 
-// Levels display: 6 channel meters + master L/R, dBFS, peak hold, clip lamp.  Click = reset peak/clip.
+// Levels OLED (the MIX-12 design): 6 channel meters (L / R pairs) + master L / R as vertical bars, dBFS scale,
+// peak hold, master peak and clip lamp. Channel numbers: red = muted, yellow = solo, dim = unpatched or silenced by
+// a solo. Click = reset the peaks and clip.
 struct MixLevelsDisplay : TransparentWidget {
     SynTHBloKMix24* module = nullptr;
-    std::shared_ptr<window::Font> font;
-    float peak[16] = {};
+    float peak[14] = {};
     float peakMaster = 0.f;
     float clipHold = 0.f;
+    static constexpr float DB_LO = -48.f, DB_HI = 6.f;
+    static constexpr int N = 24;
 
-    bool loadFont() {
-        if (!font) font = APP->window->loadFont(asset::system("res/fonts/ShareTechMono-Regular.ttf"));
-        return (bool) font;
-    }
-    void text(const DrawArgs& a, float x, float y, const char* s, float size, NVGcolor c, int align) {
-        if (!loadFont()) return;
-        nvgFontFaceId(a.vg, font->handle);
-        nvgFontSize(a.vg, size);
-        nvgFillColor(a.vg, c);
-        nvgTextAlign(a.vg, align);
-        nvgText(a.vg, x, y, s, nullptr);
-    }
     static float toDb(float v) { return v > 1e-5f ? 20.f * std::log10(v) : -120.f; }
-
-    void draw(const DrawArgs& a) override {
-        nvgBeginPath(a.vg);
-        nvgRoundedRect(a.vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgFillColor(a.vg, nvgRGBA(14, 9, 3, 255));
-        nvgFill(a.vg);
-    }
+    static float pos(float v) { return rack::math::clamp((toDb(v) - DB_LO) / (DB_HI - DB_LO), 0.f, 1.f); }
     void onButton(const ButtonEvent& e) override {
         if (e.action == GLFW_PRESS && e.button == GLFW_MOUSE_BUTTON_LEFT) {
             for (float& p : peak) p = 0.f;
@@ -900,27 +890,24 @@ struct MixLevelsDisplay : TransparentWidget {
             e.consume(this);
         }
     }
-    void bar(const DrawArgs& a, float x, float y, float w, float h, float lvl, float& pk, bool big) {
-        const int N = 24;
-        const float DB_LO = -48.f, DB_HI = 6.f;
-        float db = toDb(lvl);
-        float pos = rack::math::clamp((db - DB_LO) / (DB_HI - DB_LO), 0.f, 1.f);
+    void bar(const DrawArgs& a, float x, float y0, float y1, float w, float lvl, float& pk) {
+        float p = pos(lvl);
         pk = std::max(lvl, pk * 0.9975f);
-        float ppos = rack::math::clamp((toDb(pk) - DB_LO) / (DB_HI - DB_LO), 0.f, 1.f);
-        float sw = w / N;
+        float pp = pos(pk);
+        float sh = (y1 - y0) / N;
         for (int i = 0; i < N; i++) {
             float segPos = (i + 1.f) / N;
             float segDb = DB_LO + (DB_HI - DB_LO) * segPos;
-            bool lit = segPos <= pos + 1e-4f;
-            bool pkSeg = (int) std::ceil(ppos * N) == i + 1;
+            bool lit = segPos <= p + 1e-4f;
+            bool pkSeg = (int) std::ceil(pp * N) == i + 1 && pp > 0.02f;
             NVGcolor c;
             if (segDb > -1.f)      c = nvgRGBA(255, 40, 30, 255);
             else if (segDb > -9.f) c = nvgRGBA(255, 112, 15, 255);
             else                   c = nvgRGBA(255, 176, 60, 255);
-            if (!lit && !(pkSeg && ppos > 0.02f)) { c = nvgRGBA(46, 29, 10, 255); }
-            else if (!lit) { c.a = 0.5f; }
+            if (!lit && !pkSeg) c = nvgRGBA(46, 29, 10, 255);
+            else if (!lit) c.a = 0.5f;
             nvgBeginPath(a.vg);
-            nvgRect(a.vg, x + i * sw + 0.4f, y, sw - 0.8f, h);
+            nvgRect(a.vg, x, y1 - (i + 1) * sh + 0.3f, w, sh - 0.6f);
             nvgFillColor(a.vg, c);
             nvgFill(a.vg);
         }
@@ -928,15 +915,12 @@ struct MixLevelsDisplay : TransparentWidget {
     void drawLayer(const DrawArgs& a, int layer) override {
         if (layer != 1) return;
         const float W = box.size.x, H = box.size.y;
-        const float u = W / MXL::D1[2];            // px per mm
-        const NVGcolor AMB = nvgRGBA(255, 190, 90, 255);
-        const NVGcolor DIM = nvgRGBA(255, 190, 90, 120);
-        const NVGcolor RED = nvgRGBA(255, 50, 40, 255);
-        const float fs = 2.7f * u;                     // label size
-        const float x0 = W * 0.045f, bx = W * 0.21f, bw = W * 0.58f, vx = W - W * 0.045f;
-        const float rowH = 5.2f * u, bh = 4.0f * u;
+        oled::box(a, W, H);
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(a.vg, font->handle);
+        nvgScissor(a.vg, 0, 0, W, H);
 
-        static const char* names[6] = {"CH1", "CH2", "CH3", "CH4", "CH5", "CH6"};
         static const int muteP[6] = {SynTHBloKMix24::MAIN_MUTE_PARAM, SynTHBloKMix24::POLY_MUTE_PARAM, SynTHBloKMix24::STEREO_MUTE_PARAM,
                                      SynTHBloKMix24::FX_MUTE_PARAM, SynTHBloKMix24::EXT1_MUTE_PARAM, SynTHBloKMix24::EXT2_MUTE_PARAM};
         static const int soloP[6] = {SynTHBloKMix24::MAIN_SOLO_PARAM, SynTHBloKMix24::POLY_SOLO_PARAM, SynTHBloKMix24::STEREO_SOLO_PARAM,
@@ -944,96 +928,131 @@ struct MixLevelsDisplay : TransparentWidget {
         static const int inL[6] = {SynTHBloKMix24::MAIN_L_INPUT, SynTHBloKMix24::POLY_L_INPUT, SynTHBloKMix24::STEREO_L_INPUT,
                                    SynTHBloKMix24::FX_L_INPUT, SynTHBloKMix24::EXT1_L_INPUT, SynTHBloKMix24::EXT2_L_INPUT};
 
-        float chv[6], mL, mR;
-        bool conn[6], mute[6], solo[6];
-        bool anySolo = false;
-        for (int i = 0; i < 6; i++) {
+        float envL[6], envR[6], mL, mR;
+        bool conn[6], stereo[6], mute[6], solo[6], anySolo = false;
+        for (int c = 0; c < 6; c++) {
             if (module) {
-                chv[i] = module->chEnv[i];
-                conn[i] = module->inputs[inL[i]].isConnected();
-                mute[i] = module->params[muteP[i]].getValue() > 0.5f;
-                solo[i] = module->params[soloP[i]].getValue() > 0.5f;
-                anySolo = anySolo || solo[i];
+                envL[c] = module->chEnvLR[c][0];
+                envR[c] = module->chEnvLR[c][1];
+                bool lc = module->inputs[inL[c]].isConnected(), rc = module->inputs[inL[c] + 1].isConnected();
+                conn[c] = lc || rc;
+                stereo[c] = lc && rc;
+                mute[c] = module->params[muteP[c]].getValue() > 0.5f;
+                solo[c] = module->params[soloP[c]].getValue() > 0.5f;
+                anySolo = anySolo || solo[c];
             } else {   // browser preview
                 static const float demo[6] = {0.55f, 0.30f, 0.42f, 0.12f, 0.0f, 0.20f};
-                chv[i] = demo[i]; conn[i] = i != 4; mute[i] = false; solo[i] = false;
+                envL[c] = demo[c]; envR[c] = demo[c] * 0.9f;
+                conn[c] = demo[c] > 0.f; stereo[c] = c % 3 != 1; mute[c] = false; solo[c] = false;
             }
         }
         if (module) { mL = module->masterLLevel; mR = module->masterRLevel; }
         else { mL = 0.62f; mR = 0.55f; }
 
         // header
-        text(a, x0, 4.2f * u, "LEVELS", fs, DIM, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
-        text(a, vx, 4.2f * u, "dBFS", fs, DIM, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
+        const float yh = mm2px(oled::kRow * 0.5f);
+        nvgFontSize(a.vg, 6.f);
+        nvgFillColor(a.vg, oled::dim());
+        nvgTextAlign(a.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgText(a.vg, 4.f, yh, "LEVELS", NULL);
+        nvgTextAlign(a.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+        nvgText(a.vg, W - 4.f, yh, "dBFS", NULL);
 
-        char buf[24];
-        float y = 7.0f * u;
-        for (int i = 0; i < 6; i++, y += rowH) {
-            bool dead = !conn[i];
-            bool off = anySolo ? !solo[i] : mute[i];
-            NVGcolor lc = dead ? nvgRGBA(255, 190, 90, 60) : (off ? nvgRGBA(255, 190, 90, 110) : AMB);
-            text(a, x0, y + bh, names[i], fs, lc, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
-            {
-                float hl = bh * 0.5f - 0.5f;
-                float lv0 = (dead || off) ? 0.f : (module ? module->chEnvLR[i][0] : chv[i]);
-                float lv1 = (dead || off) ? 0.f : (module ? module->chEnvLR[i][1] : chv[i] * 0.9f);
-                bar(a, bx, y, bw, hl, lv0, peak[i * 2], false);
-                bar(a, bx, y + bh * 0.5f + 0.5f, bw, hl, lv1, peak[i * 2 + 1], false);
-            }
-            if (dead)            text(a, vx, y + bh, "--", fs, nvgRGBA(255, 190, 90, 60), NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
-            else if (mute[i])    text(a, vx, y + bh, "MUTE", fs, RED, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
-            else if (off)        text(a, vx, y + bh, "off", fs, DIM, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
-            else {
-                float db = toDb(chv[i]);
-                if (db < -60.f) snprintf(buf, sizeof buf, "-inf");
-                else snprintf(buf, sizeof buf, "%.1f", db);
-                text(a, vx, y + bh, buf, fs, solo[i] ? nvgRGBA(255, 220, 90, 255) : AMB, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
-            }
-        }
-        // separator
-        y += 0.6f * u;
+        // geometry
+        const float x0 = 4.f, scaleW = mm2px(4.2f);
+        const float y0 = mm2px(oled::kRow + 1.6f), y1 = H - mm2px(2.f * oled::kRow + 0.4f);
+        const float inner = W - x0 - 4.f - scaleW;
+        const float gap = mm2px(1.4f), pm = mm2px(4.2f);
+        const float pc = (inner - gap - 2.f * pm) / 6;
+
         nvgBeginPath(a.vg);
-        nvgMoveTo(a.vg, x0, y);
-        nvgLineTo(a.vg, W - x0, y);
-        nvgStrokeWidth(a.vg, 0.8f);
-        nvgStrokeColor(a.vg, nvgRGBA(255, 180, 90, 60));
-        nvgStroke(a.vg);
-        y += 1.5f * u;
-
-        // master L / R
-        const float mbh = 3.8f * u;
-        float ml[2] = {mL, mR};
-        const char* mn[2] = {"OUT L", "OUT R"};
-        for (int k = 0; k < 2; k++, y += 5.8f * u) {
-            text(a, x0, y + mbh, mn[k], fs, AMB, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
-            bar(a, bx, y, bw, mbh, ml[k], peak[12 + k], true);
-            float db = toDb(ml[k]);
-            if (db < -60.f) snprintf(buf, sizeof buf, "-inf"); else snprintf(buf, sizeof buf, "%.1f", db);
-            text(a, vx, y + mbh, buf, fs, db > -1.f ? RED : AMB, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
+        oled::divider(a, 4.f, mm2px(oled::kRow), W - 4.f, mm2px(oled::kRow));
+        oled::divider(a, 4.f, H - mm2px(oled::kRow), W - 4.f, H - mm2px(oled::kRow));
+        // scale lines at 0 / -12 / -24 / -36 dB
+        static const float marks[4] = {0.f, -12.f, -24.f, -36.f};
+        for (float db : marks) {
+            float y = y1 - (y1 - y0) * (db - DB_LO) / (DB_HI - DB_LO);
+            oled::divider(a, x0, y, x0 + inner, y);
         }
+        oled::dividerStroke(a);
+        nvgFontSize(a.vg, 5.f);
+        nvgTextAlign(a.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+        nvgFillColor(a.vg, oled::dim());
+        for (float db : marks) {
+            float y = y1 - (y1 - y0) * (db - DB_LO) / (DB_HI - DB_LO);
+            char s[8];
+            snprintf(s, sizeof s, "%d", (int) db);
+            nvgText(a.vg, W - 4.f, y, s, NULL);
+        }
+
+        // channel bars + numbers
+        const float numY = y1 + mm2px(1.9f);
+        char buf[32];
+        for (int c = 0; c < 6; c++) {
+            float x = x0 + c * pc;
+            bool off = anySolo ? !solo[c] : mute[c];
+            bool dead = !conn[c] || off;
+            const float lrGap = mm2px(0.4f);   // a visible split, so each pair reads as L + R
+            float bw = (pc - mm2px(0.7f) - lrGap) * 0.5f;
+            float bx = x + mm2px(0.35f);
+            if (stereo[c]) {   // both jacks patched: L + R bars
+                bar(a, bx, y0, y1, bw, dead ? 0.f : envL[c], peak[2 * c]);
+                bar(a, bx + bw + lrGap, y0, y1, bw, dead ? 0.f : envR[c], peak[2 * c + 1]);
+            } else {           // one jack (or none): a single mono bar
+                bar(a, bx, y0, y1, 2.f * bw + lrGap, dead ? 0.f : std::max(envL[c], envR[c]), peak[2 * c]);
+                peak[2 * c + 1] = 0.f;
+            }
+            NVGcolor nc = mute[c] ? nvgRGBA(255, 50, 40, 255) : solo[c] ? nvgRGBA(255, 220, 90, 255)
+                        : dead ? oled::amber(70) : oled::amber();
+            snprintf(buf, sizeof buf, "%d", c + 1);
+            nvgFontSize(a.vg, 5.f);
+            nvgTextAlign(a.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+            nvgFillColor(a.vg, nc);
+            nvgText(a.vg, x + pc * 0.5f, numY, buf, NULL);
+        }
+        // master L / R
+        float mxs[2] = {mL, mR};
+        static const char* const mn[2] = {"L", "R"};
+        for (int k = 0; k < 2; k++) {
+            float x = x0 + 6 * pc + gap + k * pm;
+            bar(a, x + mm2px(0.3f), y0, y1, pm - mm2px(0.6f), mxs[k], peak[12 + k]);
+            nvgFontSize(a.vg, 5.f);
+            nvgTextAlign(a.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+            nvgFillColor(a.vg, oled::amber());
+            nvgText(a.vg, x + pm * 0.5f, numY, mn[k], NULL);
+        }
+
+        // footer: master level, peak hold, clip lamp
         float mx = std::max(mL, mR);
         peakMaster = std::max(peakMaster, mx);
-        if (mx >= 0.97f) clipHold = 1.f; else clipHold = std::max(0.f, clipHold - 0.004f);
-
-        // footer: peak hold + clip lamp
-        float fy = H - 2.1f * u;
-        float pdb = toDb(peakMaster);
-        if (pdb < -60.f) snprintf(buf, sizeof buf, "PK  --"); else snprintf(buf, sizeof buf, "PK %.1f", pdb);
-        text(a, x0, fy, buf, fs, DIM, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
-        NVGcolor cc = clipHold > 0.f ? nvgRGBA(255, 50, 40, (int)(120 + 135 * clipHold)) : nvgRGBA(255, 190, 90, 60);
-        text(a, vx, fy, "CLIP", fs, cc, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
+        if (mx >= 0.97f) clipHold = 1.f;
+        else clipHold = std::max(0.f, clipHold - 0.004f);
+        const float yf = H - mm2px(oled::kRow * 0.5f);
+        float odb = toDb(mx), pdb = toDb(peakMaster);
+        nvgTextAlign(a.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgFontSize(a.vg, 6.f);
+        nvgFillColor(a.vg, oled::dim());
+        nvgText(a.vg, 4.f, yf, "OUT", NULL);
+        if (odb < -60.f) snprintf(buf, sizeof buf, "-inf");
+        else snprintf(buf, sizeof buf, "%.1f", odb);
+        nvgFontSize(a.vg, 7.5f);
+        nvgFillColor(a.vg, odb > -1.f ? nvgRGBA(255, 50, 40, 255) : oled::amber());
+        nvgText(a.vg, mm2px(6.f), yf, buf, NULL);
+        if (pdb < -60.f) snprintf(buf, sizeof buf, "PK --");
+        else snprintf(buf, sizeof buf, "PK %.1f", pdb);
+        nvgFontSize(a.vg, 6.f);
+        nvgFillColor(a.vg, oled::dim());
+        nvgText(a.vg, W * 0.42f, yf, buf, NULL);
+        nvgTextAlign(a.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+        nvgFillColor(a.vg, clipHold > 0.f ? nvgRGBA(255, 50, 40, (int) (120 + 135 * clipHold)) : oled::amber(60));
+        nvgText(a.vg, W - 4.f, yf, "CLIP", NULL);
         if (clipHold > 0.f) {
             nvgBeginPath(a.vg);
-            nvgCircle(a.vg, vx - fs * 3.4f, fy - fs * 0.35f, fs * 0.28f);
-            nvgFillColor(a.vg, nvgRGBA(255, 50, 40, (int)(255 * clipHold)));
+            nvgCircle(a.vg, W - 4.f - mm2px(5.4f), yf, mm2px(0.5f));
+            nvgFillColor(a.vg, nvgRGBA(255, 50, 40, (int) (255 * clipHold)));
             nvgFill(a.vg);
         }
-        // frame
-        nvgBeginPath(a.vg);
-        nvgRoundedRect(a.vg, 0.5f, 0.5f, W - 1.f, H - 1.f, 3.f);
-        nvgStrokeWidth(a.vg, 0.8f);
-        nvgStrokeColor(a.vg, nvgRGBA(255, 180, 90, 80));
-        nvgStroke(a.vg);
+        nvgResetScissor(a.vg);
     }
 };
 
@@ -1145,6 +1164,52 @@ struct MixFxDisplay : TransparentWidget {
     }
 };
 
+// Amber value arc around an FX knob (0..1 of the knob's range), as on MATRIX-DUO.
+struct MixRing : TransparentWidget {
+    Module* module = nullptr;
+    int param = 0;
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        float v = module ? module->paramQuantities[param]->getScaledValue() : 0.5f;
+        float cx = box.size.x * 0.5f, cy = box.size.y * 0.5f, rr = box.size.x * 0.5f - 1.5f;
+        float a0 = M_PI * 0.75f, a1 = M_PI * 2.25f;
+        nvgBeginPath(args.vg);
+        nvgArc(args.vg, cx, cy, rr, a0, a1, NVG_CW);
+        nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, 40));
+        nvgStrokeWidth(args.vg, 1.8f);
+        nvgStroke(args.vg);
+        if (v > 0.001f) {
+            nvgBeginPath(args.vg);
+            nvgArc(args.vg, cx, cy, rr, a0, a0 + (a1 - a0) * v, NVG_CW);
+            nvgStrokeColor(args.vg, nvgRGBA(255, 112, 15, 235));
+            nvgStrokeWidth(args.vg, 1.8f);
+            nvgStroke(args.vg);
+        }
+    }
+};
+
+// FX column labels (the panel SVG keeps only the AUX FX title).
+struct MixFxLabels : TransparentWidget {
+    void text(const DrawArgs& a, float xMm, float yMm, const char* s, float size) {
+        nvgFontSize(a.vg, size);
+        nvgText(a.vg, mm2px(xMm), mm2px(yMm), s, NULL);
+    }
+    void draw(const DrawArgs& a) override {
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(a.vg, font->handle);
+        nvgTextLetterSpacing(a.vg, 0.6f);
+        nvgTextAlign(a.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(a.vg, nvgRGB(0xff, 0xff, 0xff));
+        static const char* const pl[3] = {"P1", "P2", "P3"};
+        for (int i = 0; i < 3; i++) text(a, MXL::PX[i], MXL::PY + 6.4f, pl[i], 6.f);
+        text(a, MXL::RET[0], MXL::RET[1] + 12.f, "RETURN", 6.f);
+        text(a, MXL::FXC[0], MXL::FXC[1] + 6.4f, "PROGRAM", 6.f);
+        static const char* const fj[4] = {"SND L", "SND R", "RTN L", "RTN R"};
+        for (int i = 0; i < 4; i++) text(a, MXL::FXJ_X[i], MXL::FXJ_Y - 4.8f, fj[i], 5.5f);
+    }
+};
+
 // -------------------------------------------------------------
 // WIDGET IMPLEMENTATION
 // -------------------------------------------------------------
@@ -1199,15 +1264,29 @@ SynTHBloKMix24Widget::SynTHBloKMix24Widget(SynTHBloKMix24* module) {
     d->box.size = mm2px(Vec(MXL::D1[2], MXL::D1[3]));
     addChild(d);
 
-    // onboard FX: program selector (detented), P1..P3, return
+    // onboard FX, as on MATRIX-DUO's FINAL stage: P1..P3 small ring knobs, the big RETURN, program selector (detented).
+    // The column is 33 mm wide, so the small rings are 9.4 mm (ticks 0.85x) at a 10.6 mm pitch.
     {
-        auto* sel = createParamCentered<RoundBlackKnob>(mm(MXL::FXC[0], MXL::FXC[1]), module, SynTHBloKMix24::OB_FX_SEL_PARAM);
+        auto* lbl = createWidget<MixFxLabels>(Vec(0.f, 0.f));
+        lbl->box.size = mm(MXL::PANEL_W, 128.5f);
+        addChild(lbl);
+        auto ring = [&](float x, float y, float d, int param) {   // ticks + value ring, d = ring diameter (mm)
+            addChild(KnobTicks::create(Vec(x, y), d / 11.f));
+            MixRing* r = createWidget<MixRing>(mm(x - d * 0.5f, y - d * 0.5f));
+            r->box.size = mm(d, d); r->module = module; r->param = param;
+            addChild(r);
+        };
+        ring(MXL::FXC[0], MXL::FXC[1], 9.4f, SynTHBloKMix24::OB_FX_SEL_PARAM);
+        auto* sel = createParamCentered<RoundSmallBlackKnob>(mm(MXL::FXC[0], MXL::FXC[1]), module, SynTHBloKMix24::OB_FX_SEL_PARAM);
         sel->snap = true;
         addParam(sel);
         static const int pp[3] = {SynTHBloKMix24::OB_FX_P1_PARAM, SynTHBloKMix24::OB_FX_P2_PARAM, SynTHBloKMix24::OB_FX_P3_PARAM};
-        for (int i = 0; i < 3; i++)
-            addParam(createParamCentered<ArcKnob<Trimpot>>(mm(MXL::PX[i], MXL::PY), module, pp[i]));
-        addParam(createParamCentered<ArcKnob<Trimpot>>(mm(MXL::RET[0], MXL::RET[1]), module, SynTHBloKMix24::OB_FX_RET_PARAM));
+        for (int i = 0; i < 3; i++) {
+            ring(MXL::PX[i], MXL::PY, 9.4f, pp[i]);
+            addParam(createParamCentered<RoundSmallBlackKnob>(mm(MXL::PX[i], MXL::PY), module, pp[i]));
+        }
+        ring(MXL::RET[0], MXL::RET[1], 19.f, SynTHBloKMix24::OB_FX_RET_PARAM);
+        addParam(createParamCentered<RoundLargeBlackKnob>(mm(MXL::RET[0], MXL::RET[1]), module, SynTHBloKMix24::OB_FX_RET_PARAM));
         auto* fd = new MixFxDisplay();
         fd->module = module;
         fd->box.pos = mm2px(Vec(MXL::D2[0], MXL::D2[1]));

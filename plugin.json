@@ -86,6 +86,24 @@
       ]
     },
     {
+      "slug": "SynTHBloKMix12",
+      "name": "SynTHBloK MIX-12 Fire Edition",
+      "description": "Twelve-channel stereo mixer with per-channel tilt, drive, air and glue, mute/solo, meters and an aux FX bus",
+      "tags": [
+        "Mixer",
+        "Utility"
+      ]
+    },
+    {
+      "slug": "SynTHBloKMix8",
+      "name": "SynTHBloK MIX-8 Fire Edition",
+      "description": "Eight-channel stereo mixer with per-channel tilt, drive, air and glue, mute/solo, meters and an aux FX bus",
+      "tags": [
+        "Mixer",
+        "Utility"
+      ]
+    },
+    {
       "slug": "NoizeeFlagshipFilter",
       "name": "SynTHBloK-F Flagship Filter",
       "description": "Stereo state-variable filter with morph, drive, FM, keytrack and chaos",

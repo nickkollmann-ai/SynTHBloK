@@ -15,10 +15,12 @@ static const float JX[4] = {104.600f, 116.000f, 127.400f, 138.800f};
 static const float JY[2] = {104.400f, 115.600f};
 static const float D1[4] = {95.000f, 35.600f, 53.400f, 56.000f};
 static const float D2[4] = {153.800f, 16.200f, 30.160f, 30.000f};
-static const float FXC[2] = {168.880f, 107.000f};
+// FX column as on MATRIX-DUO's FINAL stage (labels drawn in code): P1-P3 small ring knobs, big RETURN,
+// PROGRAM, then the send / return jacks along the foot of the column
+static const float FXC[2] = {168.880f, 100.000f};
 static const float FXJ_X[4] = {156.280f, 164.680f, 173.080f, 181.480f};
-static const float FXJ_Y = 88.00f;
-static const float PX[3] = {158.880f, 168.880f, 178.880f};
-static const float PY = 54.00f;
-static const float RET[2] = {168.880f, 69.500f};
+static const float FXJ_Y = 118.20f;
+static const float PX[3] = {158.280f, 168.880f, 179.480f};
+static const float PY = 54.50f;
+static const float RET[2] = {168.880f, 76.000f};
 }
