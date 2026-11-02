@@ -7,6 +7,7 @@
 #pragma GCC diagnostic pop
 #include "OledUi.hpp"
 #include "KnobTicks.hpp"
+#include "JackLed.hpp"
 
 using namespace rack;
 
@@ -169,8 +170,36 @@ struct SynTHBloKMix24 : Module {
         LIGHTS_LEN
     };
 
+    // PAN vs WIDTH per channel (right-click menu, saved with the patch). The defaults are the old fixed setup.
+    const bool kWidthDefault[6] = {false, true, true, true, false, true};
+    const int kPanParam[6] = {MAIN_PAN_PARAM, POLY_WID_PARAM, STEREO_WID_PARAM, FX_WID_PARAM, EXT1_PAN_PARAM, EXT2_WID_PARAM};
+    bool widthMode[6] = {false, true, true, true, false, true};
+
     SynTHBloKMix24();
     void process(const ProcessArgs& args) override;
+
+    void setWidthMode(int c, bool w) {
+        widthMode[c] = w;
+        paramQuantities[kPanParam[c]]->name = string::f("CH %d %s", c + 1, w ? "width" : "pan");
+    }
+    void onReset() override {
+        for (int c = 0; c < 6; c++) setWidthMode(c, kWidthDefault[c]);
+    }
+    json_t* dataToJson() override {
+        json_t* root = json_object();
+        json_t* a = json_array();
+        for (int c = 0; c < 6; c++) json_array_append_new(a, json_boolean(widthMode[c]));
+        json_object_set_new(root, "widthMode", a);
+        return root;
+    }
+    void dataFromJson(json_t* root) override {
+        json_t* a = json_object_get(root, "widthMode");
+        if (!a) return;   // older patches keep the fixed setup
+        for (int c = 0; c < 6; c++) {
+            json_t* v = json_array_get(a, c);
+            setWidthMode(c, v ? json_is_true(v) : kWidthDefault[c]);
+        }
+    }
 };
 
 // -------------------------------------------------------------
@@ -178,6 +207,7 @@ struct SynTHBloKMix24 : Module {
 // -------------------------------------------------------------
 struct SynTHBloKMix24Widget : ModuleWidget {
     SynTHBloKMix24Widget(SynTHBloKMix24* module);
+    void appendContextMenu(Menu* menu) override;
 };
 
 // -------------------------------------------------------------
@@ -546,27 +576,27 @@ auto processAir = [&](float L, float R, float air, int idx) {
     };
 
     // --- PROCESS ALL CHANNELS ---
-    doChannel(0, mainL,   mainR,   MAIN_LVL_PARAM,   MAIN_PAN_PARAM,   true,
+    doChannel(0, mainL,   mainR,   MAIN_LVL_PARAM,   MAIN_PAN_PARAM,   !widthMode[0],
                                 MAIN_TILT_PARAM, MAIN_DRIVE_PARAM, MAIN_AIR_PARAM,
                                 MAIN_GLUE_PARAM, MAIN_MUTE_PARAM);
 
-    doChannel(1, polyL,   polyR,   POLY_LVL_PARAM,   POLY_WID_PARAM,   false,
+    doChannel(1, polyL,   polyR,   POLY_LVL_PARAM,   POLY_WID_PARAM,   !widthMode[1],
                                 POLY_TILT_PARAM, POLY_DRIVE_PARAM, POLY_AIR_PARAM,
                                 POLY_GLUE_PARAM, POLY_MUTE_PARAM);
 
-    doChannel(2, stereoL, stereoR, STEREO_LVL_PARAM, STEREO_WID_PARAM, false,
+    doChannel(2, stereoL, stereoR, STEREO_LVL_PARAM, STEREO_WID_PARAM, !widthMode[2],
                                 STEREO_TILT_PARAM, STEREO_DRIVE_PARAM, STEREO_AIR_PARAM,
                                 STEREO_GLUE_PARAM, STEREO_MUTE_PARAM);
 
-    doChannel(3, fxL,     fxR,     FX_LVL_PARAM,     FX_WID_PARAM,     false,
+    doChannel(3, fxL,     fxR,     FX_LVL_PARAM,     FX_WID_PARAM,     !widthMode[3],
                                 FX_TILT_PARAM, FX_DRIVE_PARAM, FX_AIR_PARAM,
                                 FX_GLUE_PARAM, FX_MUTE_PARAM);
 
-    doChannel(4, ext1L,   ext1R,   EXT1_LVL_PARAM,   EXT1_PAN_PARAM,   true,
+    doChannel(4, ext1L,   ext1R,   EXT1_LVL_PARAM,   EXT1_PAN_PARAM,   !widthMode[4],
                                 EXT1_TILT_PARAM, EXT1_DRIVE_PARAM, EXT1_AIR_PARAM,
                                 EXT1_GLUE_PARAM, EXT1_MUTE_PARAM);
 
-    doChannel(5, ext2L,   ext2R,   EXT2_LVL_PARAM,   EXT2_WID_PARAM,   false,
+    doChannel(5, ext2L,   ext2R,   EXT2_LVL_PARAM,   EXT2_WID_PARAM,   !widthMode[5],
                                 EXT2_TILT_PARAM, EXT2_DRIVE_PARAM, EXT2_AIR_PARAM,
                                 EXT2_GLUE_PARAM, EXT2_MUTE_PARAM);
 
@@ -1056,111 +1086,110 @@ struct MixLevelsDisplay : TransparentWidget {
     }
 };
 
-// Mackie / Yamaha style FX readout: program name + what P1..P3 do for it
+// FX OLED (the MIX-12 design): program number + name with a wet meter, what P1..P3 do for it with values,
+// return, the 6 sends.
 struct MixFxDisplay : TransparentWidget {
     SynTHBloKMix24* module = nullptr;
-    std::shared_ptr<window::Font> font;
-    void draw(const DrawArgs& a) override {
-        nvgBeginPath(a.vg);
-        nvgRoundedRect(a.vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgFillColor(a.vg, nvgRGBA(14, 9, 3, 255));
-        nvgFill(a.vg);
-    }
-    void txt(const DrawArgs& a, float x, float y, const char* s, float size, NVGcolor c, int align) {
-        if (!font) font = APP->window->loadFont(asset::system("res/fonts/ShareTechMono-Regular.ttf"));
-        if (!font) return;
-        nvgFontFaceId(a.vg, font->handle);
-        nvgFontSize(a.vg, size);
-        nvgFillColor(a.vg, c);
-        nvgTextAlign(a.vg, align);
-        nvgText(a.vg, x, y, s, nullptr);
-    }
     void bar(const DrawArgs& a, float x, float y, float w, float h, float v, NVGcolor c) {
-        v = rack::math::clamp(v, 0.f, 1.f);
         nvgBeginPath(a.vg);
         nvgRect(a.vg, x, y, w, h);
         nvgFillColor(a.vg, nvgRGBA(46, 29, 10, 255));
         nvgFill(a.vg);
         nvgBeginPath(a.vg);
-        nvgRect(a.vg, x, y, w * v, h);
+        nvgRect(a.vg, x, y, w * rack::math::clamp(v, 0.f, 1.f), h);
         nvgFillColor(a.vg, c);
         nvgFill(a.vg);
     }
     void drawLayer(const DrawArgs& a, int layer) override {
         if (layer != 1) return;
         const float W = box.size.x, H = box.size.y;
-        const float u = W / MXL::D2[2];
-        static const char* names[8] = {"OFF", "ROOM", "HALL", "PLATE", "ECHO", "PING-PONG", "CHORUS", "FLANGER"};
-        static const char* pn[8][3] = {{"", "", ""}, {"SIZE", "DAMP", "PRE"}, {"SIZE", "DAMP", "PRE"}, {"DECAY", "TONE", "PRE"},
-                                       {"TIME", "FBK", "TONE"}, {"TIME", "FBK", "TONE"}, {"RATE", "DEPTH", "SPREAD"}, {"RATE", "DEPTH", "FBK"}};
+        oled::box(a, W, H);
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(a.vg, font->handle);
+        nvgScissor(a.vg, 0, 0, W, H);
+        static const char* const names[8] = {"OFF", "ROOM", "HALL", "PLATE", "ECHO", "PING-PONG", "CHORUS", "FLANGER"};
+        static const char* const pn[8][3] = {{"P1", "P2", "P3"}, {"SIZE", "DAMP", "PRE"}, {"SIZE", "DAMP", "PRE"}, {"DECAY", "TONE", "PRE"},
+                                             {"TIME", "FBK", "TONE"}, {"TIME", "FBK", "TONE"}, {"RATE", "DEPTH", "SPREAD"}, {"RATE", "DEPTH", "FBK"}};
         int sel = 2;
-        float p[3] = {0.5f, 0.5f, 0.4f}, ret = 0.5f, snd[6] = {0.6f, 0.3f, 0.f, 0.8f, 0.f, 0.15f}, wet = 0.35f;
+        float p[3] = {0.5f, 0.5f, 0.4f}, ret = 0.5f, wet = 0.35f;
+        float snd[6] = {0.6f, 0.3f, 0.f, 0.8f, 0.f, 0.15f};
         if (module) {
             sel = (int) std::round(module->params[SynTHBloKMix24::OB_FX_SEL_PARAM].getValue());
             for (int i = 0; i < 3; i++) p[i] = module->params[SynTHBloKMix24::OB_FX_P1_PARAM + i].getValue();
             ret = module->params[SynTHBloKMix24::OB_FX_RET_PARAM].getValue();
-            for (int i = 0; i < 6; i++) snd[i] = module->params[SynTHBloKMix24::OB_SEND_1_PARAM + i].getValue();
+            for (int c = 0; c < 6; c++) snd[c] = module->params[SynTHBloKMix24::OB_SEND_1_PARAM + c].getValue();
             wet = rack::math::clamp(module->fxWetEnv / 1.3f, 0.f, 1.f);
         }
         sel = rack::math::clamp(sel, 0, 7);
         const bool off = sel == 0;
-        const NVGcolor AMB = nvgRGBA(255, 190, 90, 255), DIM = nvgRGBA(255, 190, 90, 120), ORG = nvgRGBA(255, 150, 30, 255);
+        const NVGcolor ORG = nvgRGBA(255, 150, 30, 255);
         char buf[32];
+        const float u = mm2px(1.f);
 
-        // header: program number + name, activity meter
+        // header: program number + name, wet meter
+        const float yh = mm2px(oled::kRow * 0.5f);
         snprintf(buf, sizeof buf, "%d", sel);
-        txt(a, 2.0f * u, 5.4f * u, buf, 3.8f * u, DIM, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
-        txt(a, 6.0f * u, 5.4f * u, names[sel], 3.8f * u, off ? DIM : AMB, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
+        nvgTextAlign(a.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgFontSize(a.vg, 6.f);
+        nvgFillColor(a.vg, oled::dim());
+        nvgText(a.vg, 4.f, yh, buf, NULL);
+        nvgFontSize(a.vg, 8.f);
+        nvgFillColor(a.vg, off ? oled::dim() : oled::amber());
+        nvgText(a.vg, 4.f + 2.6f * u, yh, names[sel], NULL);
         for (int i = 0; i < 8; i++) {
             bool lit = !off && (i + 1) / 8.f <= std::sqrt(wet) + 1e-4f;
             nvgBeginPath(a.vg);
-            nvgRect(a.vg, (W - 2.0f * u) - (8 - i) * 1.4f * u + 0.2f * u, 2.0f * u, 1.0f * u, 3.4f * u);
+            nvgRect(a.vg, W - 4.f - (8 - i) * 1.2f * u + 0.2f * u, yh - 1.4f * u, 0.8f * u, 2.8f * u);
             nvgFillColor(a.vg, lit ? (i > 5 ? nvgRGBA(255, 60, 40, 255) : ORG) : nvgRGBA(46, 29, 10, 255));
             nvgFill(a.vg);
         }
-        // separator
         nvgBeginPath(a.vg);
-        nvgMoveTo(a.vg, 2.0f * u, 7.4f * u);
-        nvgLineTo(a.vg, W - 2.0f * u, 7.4f * u);
-        nvgStrokeWidth(a.vg, 0.8f);
-        nvgStrokeColor(a.vg, nvgRGBA(255, 180, 90, 60));
-        nvgStroke(a.vg);
+        oled::divider(a, 4.f, mm2px(oled::kRow), W - 4.f, mm2px(oled::kRow));
+        oled::divider(a, 4.f, H - mm2px(7.4f), W - 4.f, H - mm2px(7.4f));
+        oled::dividerStroke(a);
 
-        // parameters P1..P3 + return, with values
+        // P1..P3 + return
         for (int i = 0; i < 4; i++) {
-            float y = (11.4f + 3.9f * i) * u;
+            float y = mm2px(oled::kRow + 2.6f + 3.9f * i);
             const char* nm = i < 3 ? pn[sel][i] : "RETURN";
             float v = i < 3 ? p[i] : ret;
-            NVGcolor c = off ? DIM : AMB;
-            txt(a, 2.0f * u, y, nm, 2.2f * u, i < 3 && nm[0] == 0 ? DIM : c, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
-            bar(a, 11.8f * u, y - 2.2f * u, 11.4f * u, 2.2f * u, v, off ? nvgRGBA(255, 150, 30, 90) : ORG);
-            if (i < 3 && (sel == 4 || sel == 5) && i == 0)      snprintf(buf, sizeof buf, "%dms", (int) (20.f + 1180.f * v * v));
-            else if (i < 3 && (sel == 6 || sel == 7) && i == 0) snprintf(buf, sizeof buf, "%.1fHz", 0.05f + 5.f * v * v);
-            else                                                snprintf(buf, sizeof buf, "%d%%", (int) std::round(v * 100.f));
-            txt(a, W - 2.0f * u, y, buf, 2.2f * u, c, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
+            NVGcolor c = off ? oled::dim() : oled::amber();
+            nvgTextAlign(a.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+            nvgFontSize(a.vg, 6.f);
+            nvgFillColor(a.vg, oled::dim());
+            nvgText(a.vg, 4.f, y, nm, NULL);
+            bar(a, 12.5f * u, y - 1.f * u, W - 12.5f * u - 10.f * u, 2.f * u, v, off ? nvgRGBA(255, 150, 30, 90) : ORG);
+            if (i == 0 && (sel == 4 || sel == 5)) snprintf(buf, sizeof buf, "%dms", (int) (20.f + 1180.f * v * v));
+            else if (i == 0 && (sel == 6 || sel == 7)) snprintf(buf, sizeof buf, "%.1fHz", 0.05f + 5.f * v * v);
+            else snprintf(buf, sizeof buf, "%d%%", (int) std::round(v * 100.f));
+            nvgTextAlign(a.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+            nvgFontSize(a.vg, 6.5f);
+            nvgFillColor(a.vg, c);
+            nvgText(a.vg, W - 4.f, y, buf, NULL);
         }
 
-        // channel sends
-        txt(a, 2.0f * u, 27.8f * u, "SEND", 1.8f * u, DIM, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
-        for (int i = 0; i < 6; i++) {
-            float x = (10.2f + 3.2f * i) * u;
+        // channel sends 1..6
+        const float sy1 = H - mm2px(1.4f), sh = mm2px(4.6f), sx0 = 9.f * u, sw = (W - 4.f - sx0) / 6;
+        nvgTextAlign(a.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgFontSize(a.vg, 6.f);
+        nvgFillColor(a.vg, oled::dim());
+        nvgText(a.vg, 4.f, sy1 - sh * 0.5f, "SEND", NULL);
+        for (int c = 0; c < 6; c++) {
+            float x = sx0 + c * sw + 0.2f * u, w = sw - 0.4f * u;
             nvgBeginPath(a.vg);
-            nvgRect(a.vg, x, 24.2f * u, 1.8f * u, 3.6f * u);
+            nvgRect(a.vg, x, sy1 - sh, w, sh);
             nvgFillColor(a.vg, nvgRGBA(46, 29, 10, 255));
             nvgFill(a.vg);
-            float h = 3.6f * u * rack::math::clamp(snd[i], 0.f, 1.f);
-            nvgBeginPath(a.vg);
-            nvgRect(a.vg, x, 27.8f * u - h, 1.8f * u, h);
-            nvgFillColor(a.vg, snd[i] > 0.001f ? ORG : nvgRGBA(46, 29, 10, 255));
-            nvgFill(a.vg);
-            snprintf(buf, sizeof buf, "%d", i + 1);
-            txt(a, x + 0.9f * u, 28.2f * u, buf, 1.4f * u, DIM, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+            float h = sh * rack::math::clamp(snd[c], 0.f, 1.f);
+            if (h > 0.f) {
+                nvgBeginPath(a.vg);
+                nvgRect(a.vg, x, sy1 - h, w, h);
+                nvgFillColor(a.vg, ORG);
+                nvgFill(a.vg);
+            }
         }
-        nvgBeginPath(a.vg);
-        nvgRoundedRect(a.vg, 0.5f, 0.5f, W - 1.f, H - 1.f, 3.f);
-        nvgStrokeWidth(a.vg, 0.8f);
-        nvgStrokeColor(a.vg, nvgRGBA(255, 180, 90, 80));
-        nvgStroke(a.vg);
+        nvgResetScissor(a.vg);
     }
 };
 
@@ -1188,25 +1217,55 @@ struct MixRing : TransparentWidget {
     }
 };
 
-// FX column labels (the panel SVG keeps only the AUX FX title).
-struct MixFxLabels : TransparentWidget {
-    void text(const DrawArgs& a, float xMm, float yMm, const char* s, float size) {
+// Title + every static label on the panel, as on MIX-12 / MIX-8 (the SVG carries no text).
+struct MixPanelText : TransparentWidget {
+    SynTHBloKMix24* module = nullptr;
+    void text(const DrawArgs& a, float xMm, float yMm, const char* s, float size, NVGcolor c) {
         nvgFontSize(a.vg, size);
+        nvgFillColor(a.vg, c);
         nvgText(a.vg, mm2px(xMm), mm2px(yMm), s, NULL);
     }
     void draw(const DrawArgs& a) override {
         std::shared_ptr<window::Font> font = APP->window->uiFont;
         if (!font) return;
         nvgFontFaceId(a.vg, font->handle);
+        // title
+        nvgTextAlign(a.vg, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
+        text(a, 8.5f, 3.5f, "SynTHBloK", 11.f, nvgRGB(0xff, 0xff, 0xff));
+        nvgTextLetterSpacing(a.vg, 0.8f);
+        text(a, 8.5f, 6.4f, "MIX-6  FIRE EDITION", 10.f, nvgRGB(0xff, 0x7a, 0x00));
         nvgTextLetterSpacing(a.vg, 0.6f);
+
+        const NVGcolor LBL = nvgRGB(0xbb, 0xbb, 0xbb), SUB = nvgRGB(0x88, 0x88, 0x88);
         nvgTextAlign(a.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFillColor(a.vg, nvgRGB(0xff, 0xff, 0xff));
+        char num[4];
+        for (int c = 0; c < 6; c++) {
+            float x = MXL::CX[c];
+            snprintf(num, sizeof num, "%d", c + 1);
+            text(a, x, 12.2f, num, 8.f, nvgRGB(0xff, 0x7a, 0x00));
+            bool w = module ? module->widthMode[c] : (c != 0 && c != 4);
+            const char* kn[7] = {"LVL", w ? "WID" : "PAN", "TILT", "DRIVE", "AIR", "GLUE", "SEND"};
+            for (int k = 0; k < 7; k++) text(a, x, MXL::KY[k] + 5.8f, kn[k], 5.5f, SUB);
+            text(a, x - 5.2f, MXL::LJ_Y, "L", 6.f, LBL);
+            text(a, x - 5.2f, MXL::RJ_Y, "R", 6.f, LBL);
+        }
+        // master
+        const float mc = MXL::MCOL + MXL::MCOL_W * 0.5f;
+        text(a, mc, 12.2f, "MASTER", 7.f, LBL);
+        static const char* const mk[5] = {"LVL", "WIDTH", "TILT", "GLUE", "CLIP"};
+        for (int i = 0; i < 5; i++) text(a, MXL::MKX[i], MXL::MKY + 5.8f, mk[i], 5.5f, SUB);
+        text(a, mc, 94.4f, "ROW CV  /  MAIN OUT", 6.f, SUB);
+        static const char* const jl[2][4] = {{"LVL", "PAN", "TILT", "DRIVE"}, {"AIR", "GLUE", "OUT L", "OUT R"}};
+        for (int r = 0; r < 2; r++)
+            for (int i = 0; i < 4; i++) text(a, MXL::JX[i], MXL::JY[r] - 4.8f, jl[r][i], 6.f, LBL);
+        // FX
+        text(a, MXL::FC, 12.2f, "AUX FX", 7.f, LBL);
         static const char* const pl[3] = {"P1", "P2", "P3"};
-        for (int i = 0; i < 3; i++) text(a, MXL::PX[i], MXL::PY + 6.4f, pl[i], 6.f);
-        text(a, MXL::RET[0], MXL::RET[1] + 12.f, "RETURN", 6.f);
-        text(a, MXL::FXC[0], MXL::FXC[1] + 6.4f, "PROGRAM", 6.f);
+        for (int i = 0; i < 3; i++) text(a, MXL::PX[i], MXL::PY + 7.f, pl[i], 6.f, LBL);
+        text(a, MXL::FC, MXL::RET[1] + 12.f, "RETURN", 6.f, LBL);
+        text(a, MXL::FC, MXL::FXC[1] + 7.f, "PROGRAM", 6.f, LBL);
         static const char* const fj[4] = {"SND L", "SND R", "RTN L", "RTN R"};
-        for (int i = 0; i < 4; i++) text(a, MXL::FXJ_X[i], MXL::FXJ_Y - 4.8f, fj[i], 5.5f);
+        for (int i = 0; i < 4; i++) text(a, MXL::FXJ_X[i], MXL::FXJ_Y - 4.8f, fj[i], 5.5f, LBL);
     }
 };
 
@@ -1216,7 +1275,7 @@ struct MixFxLabels : TransparentWidget {
 SynTHBloKMix24Widget::SynTHBloKMix24Widget(SynTHBloKMix24* module) {
     setModule(module);
     setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKMix24.svg")));
-    box.size = Vec(37 * RACK_GRID_WIDTH, RACK_GRID_HEIGHT);   // 37 HP
+    box.size = Vec(38 * RACK_GRID_WIDTH, RACK_GRID_HEIGHT);   // 38 HP (the FX column is as wide as on MIX-12 / MIX-8)
 
     using namespace rack::componentlibrary;
     auto mm = [](float x, float y) { return mm2px(Vec(x, y)); };
@@ -1225,6 +1284,11 @@ SynTHBloKMix24Widget::SynTHBloKMix24Widget(SynTHBloKMix24* module) {
     addChild(createWidgetCentered<ScrewSilver>(mm(MXL::PANEL_W - 3.5f, 3.5f)));
     addChild(createWidgetCentered<ScrewSilver>(mm(3.5f, 125.0f)));
     addChild(createWidgetCentered<ScrewSilver>(mm(MXL::PANEL_W - 3.5f, 125.0f)));
+
+    MixPanelText* t = createWidget<MixPanelText>(Vec(0.f, 0.f));
+    t->box.size = mm(MXL::PANEL_W, 128.5f);
+    t->module = module;
+    addChild(t);
 
     // channel strips: param ids are 8 per channel (LVL, PAN|WID, TILT, DRIVE, AIR, GLUE, MUTE, SOLO)
     static const int base[6] = {SynTHBloKMix24::MAIN_LVL_PARAM, SynTHBloKMix24::POLY_LVL_PARAM, SynTHBloKMix24::STEREO_LVL_PARAM,
@@ -1264,25 +1328,21 @@ SynTHBloKMix24Widget::SynTHBloKMix24Widget(SynTHBloKMix24* module) {
     d->box.size = mm2px(Vec(MXL::D1[2], MXL::D1[3]));
     addChild(d);
 
-    // onboard FX, as on MATRIX-DUO's FINAL stage: P1..P3 small ring knobs, the big RETURN, program selector (detented).
-    // The column is 33 mm wide, so the small rings are 9.4 mm (ticks 0.85x) at a 10.6 mm pitch.
+    // onboard FX, as on MIX-12 / MIX-8: P1..P3 small ring knobs, the big RETURN, program selector (detented)
     {
-        auto* lbl = createWidget<MixFxLabels>(Vec(0.f, 0.f));
-        lbl->box.size = mm(MXL::PANEL_W, 128.5f);
-        addChild(lbl);
         auto ring = [&](float x, float y, float d, int param) {   // ticks + value ring, d = ring diameter (mm)
             addChild(KnobTicks::create(Vec(x, y), d / 11.f));
             MixRing* r = createWidget<MixRing>(mm(x - d * 0.5f, y - d * 0.5f));
             r->box.size = mm(d, d); r->module = module; r->param = param;
             addChild(r);
         };
-        ring(MXL::FXC[0], MXL::FXC[1], 9.4f, SynTHBloKMix24::OB_FX_SEL_PARAM);
+        ring(MXL::FXC[0], MXL::FXC[1], 11.f, SynTHBloKMix24::OB_FX_SEL_PARAM);
         auto* sel = createParamCentered<RoundSmallBlackKnob>(mm(MXL::FXC[0], MXL::FXC[1]), module, SynTHBloKMix24::OB_FX_SEL_PARAM);
         sel->snap = true;
         addParam(sel);
         static const int pp[3] = {SynTHBloKMix24::OB_FX_P1_PARAM, SynTHBloKMix24::OB_FX_P2_PARAM, SynTHBloKMix24::OB_FX_P3_PARAM};
         for (int i = 0; i < 3; i++) {
-            ring(MXL::PX[i], MXL::PY, 9.4f, pp[i]);
+            ring(MXL::PX[i], MXL::PY, 11.f, pp[i]);
             addParam(createParamCentered<RoundSmallBlackKnob>(mm(MXL::PX[i], MXL::PY), module, pp[i]));
         }
         ring(MXL::RET[0], MXL::RET[1], 19.f, SynTHBloKMix24::OB_FX_RET_PARAM);
@@ -1299,6 +1359,8 @@ SynTHBloKMix24Widget::SynTHBloKMix24Widget(SynTHBloKMix24* module) {
     addOutput(createOutputCentered<SmallJack>(mm(MXL::FXJ_X[1], MXL::FXJ_Y), module, SynTHBloKMix24::FX_SEND_R_OUTPUT));
     addInput(createInputCentered<SmallJack>(mm(MXL::FXJ_X[2], MXL::FXJ_Y), module, SynTHBloKMix24::FX_RTN_L_INPUT));
     addInput(createInputCentered<SmallJack>(mm(MXL::FXJ_X[3], MXL::FXJ_Y), module, SynTHBloKMix24::FX_RTN_R_INPUT));
+    addChild(JackLed::create(Vec(MXL::FXJ_X[0] + 3.6f, MXL::FXJ_Y), module, SynTHBloKMix24::FX_SEND_L_OUTPUT, true));
+    addChild(JackLed::create(Vec(MXL::FXJ_X[1] + 3.6f, MXL::FXJ_Y), module, SynTHBloKMix24::FX_SEND_R_OUTPUT, true));
 
     // global CV (row-wise) + master outputs share one 4 x 2 grid under the levels display
     static const int gcv[6] = {SynTHBloKMix24::GLOBAL_1_CV_INPUT, SynTHBloKMix24::GLOBAL_2_CV_INPUT, SynTHBloKMix24::GLOBAL_3_CV_INPUT,
@@ -1309,6 +1371,22 @@ SynTHBloKMix24Widget::SynTHBloKMix24Widget(SynTHBloKMix24* module) {
     addInput(createInputCentered<SmallJack>(mm(MXL::JX[1], MXL::JY[1]), module, gcv[5]));
     addOutput(createOutputCentered<SmallJack>(mm(MXL::JX[2], MXL::JY[1]), module, SynTHBloKMix24::MASTER_L_OUTPUT));
     addOutput(createOutputCentered<SmallJack>(mm(MXL::JX[3], MXL::JY[1]), module, SynTHBloKMix24::MASTER_R_OUTPUT));
+    addChild(JackLed::create(Vec(MXL::JX[2] + 3.6f, MXL::JY[1]), module, SynTHBloKMix24::MASTER_L_OUTPUT, true));
+    addChild(JackLed::create(Vec(MXL::JX[3] + 3.6f, MXL::JY[1]), module, SynTHBloKMix24::MASTER_R_OUTPUT, true));
+}
+
+void SynTHBloKMix24Widget::appendContextMenu(Menu* menu) {
+    SynTHBloKMix24* m = getModule<SynTHBloKMix24>();
+    if (!m) return;
+    menu->addChild(new MenuSeparator);
+    menu->addChild(createMenuLabel("PAN / WIDTH knob"));
+    menu->addChild(createMenuItem("All channels: pan", "", [=]() { for (int c = 0; c < 6; c++) m->setWidthMode(c, false); }));
+    menu->addChild(createMenuItem("All channels: stereo width", "", [=]() { for (int c = 0; c < 6; c++) m->setWidthMode(c, true); }));
+    menu->addChild(createSubmenuItem("Per channel", "", [=](Menu* sub) {
+        for (int c = 0; c < 6; c++)
+            sub->addChild(createCheckMenuItem(string::f("CH %d: stereo width", c + 1), "",
+                                              [=]() { return m->widthMode[c]; }, [=]() { m->setWidthMode(c, !m->widthMode[c]); }));
+    }));
 }
 
 // -------------------------------------------------------------
