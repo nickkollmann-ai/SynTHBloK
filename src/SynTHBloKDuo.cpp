@@ -13,6 +13,10 @@
 //  UP / DOWN = length, PREV / NEXT = pattern, MUTE / SOLO = the shown synth,
 //  knob MST / CUE = MASTER, GRP = LEAD level, IN1 = BASS level (push = default). Lights follow.
 // ============================================================================
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#include "Matrix8_dsp.hpp"   // M8Delay / M8Reverb for the FINAL stage
+#pragma GCC diagnostic pop
 #include "Matrix8_ui.hpp"
 #include "DualOsc_dsp.hpp"
 #include "KnobTicks.hpp"
@@ -117,11 +121,14 @@ struct SynTHBloKDuo : Module {
                     FLT_CUT_PARAM, FLT_RES_PARAM, FLT_ENV_PARAM, FLT_STAGES_PARAM, FLT_MODE_PARAM, FLT_ATK_PARAM, FLT_DEC_PARAM,
                     FLT_SUS_PARAM, FLT_REL_PARAM, FLT_AMP_PARAM, FLT_BYPASS_PARAM, FLT_IN_PARAM, FLT_DRYWET_PARAM, FLT_TRIG_PARAM,
                     FX_ON_PARAM, MIDI_ON_PARAM,
+                    // FINAL stage (MATRIX FORGE's): DELAY and SPACE, then FORGE FX and MASTER
+                    DELAY_PARAM, SPACE_PARAM,
                     NUM_PARAMS };
-    enum InputIds { CLOCK_INPUT, RESET_INPUT, RUN_INPUT, NUM_INPUTS };
+    // IN L / R, OPEN, GLITCH, GATE: as on MATRIX FORGE (the last three go straight to FORGE FX)
+    enum InputIds { CLOCK_INPUT, RESET_INPUT, RUN_INPUT, IN_L_INPUT, IN_R_INPUT, OPEN_INPUT, GLITCH_INPUT, GATE_INPUT, NUM_INPUTS };
     enum OutputIds { OUT_L_OUTPUT, OUT_R_OUTPUT, LEAD_OUTPUT, BASS_OUTPUT, LEAD_CV_OUTPUT, LEAD_GATE_OUTPUT, BASS_CV_OUTPUT, BASS_GATE_OUTPUT,
                      ENUMS(STRIP_OUTPUT, 8), KNOB_OUTPUT, ENUMS(TRIG_OUTPUT, 8), NUM_OUTPUTS };
-    enum LightIds { ENUMS(ADSR_LIGHT, 4), NUM_LIGHTS };
+    enum LightIds { NUM_LIGHTS };
     static const int kFltSm = FLT_DRYWET_PARAM - FLT_CUT_PARAM + 1;
 
     uint8_t note[8][2][8];        // [pattern][LEAD, BASS][step]: bit d = scale degree d (a chord), 0 = rest
@@ -141,6 +148,9 @@ struct SynTHBloKDuo : Module {
     bool running = true, pendingReset = false;
     float sinceClock = 10.f, clockPeriod = 0.f, internalTimer = 0.f, resetFlash = 0.f;
     float masterVol = 0.8f, mixSm = 0.5f;
+    M8Delay m8delay;
+    M8Reverb reverb;
+    float delayMix = 0.f, spaceMix = 0.f;
     dsp::SchmittTrigger clkTrig, rstTrig, runTrig, rstBtnTrig, clrTrig;
 
     // Maschine JAM ("JAM Template 4 Rack", MIDI channel 1): its 8x8 pads are the note grid.
@@ -163,7 +173,7 @@ struct SynTHBloKDuo : Module {
     dsp::PulseGenerator trigPulse[8];   // row jacks: a note in that row played (LEAD or BASS)
     DUFilter flt;
     DUAdsr fltEnv;
-    float fltSm[kFltSm] = {}, fltGate = 0.f, envS1 = 0.f, envS2 = 0.f, stageLvl[4] = {};
+    float fltSm[kFltSm] = {}, fltGate = 0.f, envS1 = 0.f, envS2 = 0.f;
     bool fltSmInit = false;
     // FORGE FX: a whole GRAIN-FORGE, outside the Rack engine. Its knobs bind to it directly; its params and
     // data are saved in this module's data ("fx"). It runs on this module's clock, after the master filter.
@@ -190,15 +200,16 @@ struct SynTHBloKDuo : Module {
         configSwitch(BANK_PARAM, 1.f, 8.f, 1.f, "Strip bank", std::vector<std::string>(kBankLabel, kBankLabel + 8));
         configSwitch(RANGE_PARAM, 0.f, 1.f, 0.f, "STRIP CV range", {"0..10 V", "-5..+5 V"});
         configParam(MIX_PARAM, 0.f, 1.f, 0.5f, "Mix LEAD <-> BASS (middle = both full)", "%", 0.f, 100.f);
+        // the panel's CUTOFF / RES / ENV / MODE and ATK / DEC / SUS / REL, as on MATRIX FORGE
         configParam(FLT_CUT_PARAM, 0.f, 1.f, 1.f, "Filter cutoff (LP fully open / HP fully down = off)", " Hz", 1000.f, 20.f);
         configParam(FLT_RES_PARAM, 0.f, 1.f, 0.f, "Filter resonance", "%", 0.f, 100.f);
-        configParam(FLT_ENV_PARAM, -1.f, 1.f, 0.f, "Filter env depth (+ sweeps cutoff up, - down)", "%", 0.f, 100.f);
+        configParam(FLT_ENV_PARAM, 0.f, 1.f, 0.f, "Filter envelope amount", "%", 0.f, 100.f);
         configSwitch(FLT_STAGES_PARAM, 0.f, 2.f, 0.f, "Filter stages", {"1 stage (12 dB)", "2 stages (24 dB)", "3 stages (36 dB)"});
-        configSwitch(FLT_MODE_PARAM, 0.f, 2.f, 0.f, "Filter type", {"Low-pass", "Band-pass", "High-pass"});
-        configParam(FLT_ATK_PARAM, 0.f, 1.f, 0.1f, "Filter env attack", " ms", 667.f, 3.f);
-        configParam(FLT_DEC_PARAM, 0.f, 1.f, 0.45f, "Filter env decay", " ms", 333.f, 12.f);
-        configParam(FLT_SUS_PARAM, 0.f, 1.f, 0.3f, "Filter env sustain", "%", 0.f, 100.f);
-        configParam(FLT_REL_PARAM, 0.f, 1.f, 0.4f, "Filter env release", " ms", 333.f, 12.f);
+        configParam(FLT_MODE_PARAM, 0.f, 1.f, 0.f, "Filter mode (low-pass -> band-pass -> high-pass)", "%", 0.f, 100.f);
+        configParam(FLT_ATK_PARAM, 0.f, 1.f, 0.1f, "Filter envelope attack", " ms", 667.f, 3.f);
+        configParam(FLT_DEC_PARAM, 0.f, 1.f, 0.45f, "Filter envelope decay", " ms", 333.f, 12.f);
+        configParam(FLT_SUS_PARAM, 0.f, 1.f, 0.3f, "Filter envelope sustain", "%", 0.f, 100.f);
+        configParam(FLT_REL_PARAM, 0.f, 1.f, 0.4f, "Filter envelope release", " ms", 333.f, 12.f);
         configParam(FLT_AMP_PARAM, 0.f, 1.f, 0.f, "Filter env to level (pluck / gate)", "%", 0.f, 100.f);
         configSwitch(FLT_BYPASS_PARAM, 0.f, 1.f, 0.f, "Filter env bypass (the ADSR off the filter)", {"Env on", "Env bypassed"});
         configParam(FLT_IN_PARAM, 0.f, 2.f, 1.f, "Filter input gain", "%", 0.f, 100.f);
@@ -206,6 +217,8 @@ struct SynTHBloKDuo : Module {
         configSwitch(FLT_TRIG_PARAM, 0.f, 4.f, 0.f, "Filter env trigger", {"Any note", "LEAD notes", "BASS notes", "Every beat", "Every step"});
         configSwitch(FX_ON_PARAM, 0.f, 1.f, 1.f, "FORGE FX (off = OUT L / R dry)", {"Off", "On"});
         configSwitch(MIDI_ON_PARAM, 0.f, 1.f, 1.f, "JAM MIDI (off = ignore the JAM, its lights dark)", {"Off", "On"});
+        configParam(DELAY_PARAM, 0.f, 1.f, 0.f, "Delay, ping-pong dotted 1/8 (before FORGE FX)", "%", 0.f, 100.f);
+        configParam(SPACE_PARAM, 0.f, 1.f, 0.f, "Space / reverb (before FORGE FX)", "%", 0.f, 100.f);
         // FX knobs set the engine's values straight away (it smooths them itself); Rack's drag smoothing
         // would point the engine at a module it doesn't know
         for (ParamQuantity* q : fx.paramQuantities) q->smoothEnabled = false;
@@ -249,6 +262,11 @@ struct SynTHBloKDuo : Module {
         configInput(CLOCK_INPUT, "Clock (16th notes; the BPM knob runs it when unpatched)");
         configInput(RESET_INPUT, "Reset (trigger: same as pressing RESET)");
         configInput(RUN_INPUT, "Run (trigger: toggles RUN, like pressing it)");
+        configInput(IN_L_INPUT, "Left (added to LEAD + BASS before FORGE FX)");
+        configInput(IN_R_INPUT, "Right (left is copied here when unpatched)");
+        configInput(OPEN_INPUT, "Open (gate): FORGE FX PULSE lets everything through while high");
+        configInput(GLITCH_INPUT, "FORGE FX glitch now (trigger)");
+        configInput(GATE_INPUT, "FORGE FX filter env gate (fires its ADSR when its TRIG is GATE)");
         configOutput(OUT_L_OUTPUT, "Left: LEAD + BASS through MASTER");
         configOutput(OUT_R_OUTPUT, "Right: LEAD + BASS through MASTER");
         configOutput(LEAD_OUTPUT, "Lead audio");
@@ -706,31 +724,42 @@ struct SynTHBloKDuo : Module {
                                       fs(FLT_SUS_PARAM), 0.012f * std::pow(333.f, fs(FLT_REL_PARAM)), sr);
         float ec = 1.f - std::exp(-1.f / (0.0015f * sr));   // round the envelope's corners: no pops
         envS1 += (envRaw - envS1) * ec; envS2 += (envS1 - envS2) * ec;
-        {   // stage lights: the active stage flashes and fades over 150 ms
-            int st = fltEnv.st == DUAdsr::ATK ? 0 : fltEnv.st == DUAdsr::REL ? 3
-                   : fltEnv.st == DUAdsr::DEC ? (std::fabs(fltEnv.v - fs(FLT_SUS_PARAM)) < 0.02f ? 2 : 1) : -1;
-            for (int k = 0; k < 4; k++) {
-                stageLvl[k] = std::max(k == st ? 1.f : 0.f, stageLvl[k] - args.sampleTime / 0.15f);
-                lights[ADSR_LIGHT + k].setBrightness(stageLvl[k]);
-            }
-        }
         float env = envS2 * (1.f - fs(FLT_BYPASS_PARAM));
-        float fenv = fs(FLT_ENV_PARAM) * std::fabs(fs(FLT_ENV_PARAM));   // squared: fine sweeps around the middle
+        float fenv = fs(FLT_ENV_PARAM) * std::fabs(fs(FLT_ENV_PARAM));   // squared: fine sweeps at the low end
         float fcut = clamp(fs(FLT_CUT_PARAM) + env * fenv, 0.f, 1.f);
         float fres = fs(FLT_RES_PARAM) + 0.2f * env * std::fabs(fenv);
         float wet = mix * fs(FLT_IN_PARAM);
-        flt.process(wet, fcut, fres, sr, fs(FLT_STAGES_PARAM), fs(FLT_MODE_PARAM));
+        flt.process(wet, fcut, fres, sr, fs(FLT_STAGES_PARAM), 2.f * fs(FLT_MODE_PARAM));   // MODE 0..1 morphs LP -> BP -> HP
         float ea = std::min(env, 1.f) * std::fabs(fenv);   // big sweeps run hot: tame the peak a little
         wet *= 1.f - ea * (0.25f + 0.2f * fs(FLT_RES_PARAM));
         wet *= 1.f - fs(FLT_AMP_PARAM) * (1.f - fs(FLT_BYPASS_PARAM)) * (1.f - std::min(envS2, 1.f));
         mix += (wet - mix) * fs(FLT_DRYWET_PARAM);
-        // ---- FORGE FX (stereo from here on; it always runs, so ON crossfades) and master ----
-        float dry = 5.f * std::tanh(mix), fxL, fxR;
-        fx.processFx(args, dry, dry, edge && running, stepSec, rst, fxL, fxR);
+        // ---- FINAL, as on MATRIX FORGE: delay (dotted 1/8 = 3 steps) and space (stereo from here on),
+        //      then FORGE FX (it always runs, so ON crossfades), then MASTER ----
+        float l = mix, r = mix, dl, dr, rl, rr;
+        m8delay.process(l, r, sr, stepSec * 3.f, dl, dr);
+        delayMix += (params[DELAY_PARAM].getValue() - delayMix) * km;
+        l += dl * delayMix * 0.8f;
+        r += dr * delayMix * 0.8f;
+        reverb.process(l, r, sr, rl, rr);
+        spaceMix += (params[SPACE_PARAM].getValue() - spaceMix) * km;
+        l += rl * spaceMix;
+        r += rr * spaceMix;
+        // IN L / R join here, and OPEN / GLITCH / GATE reach FORGE FX's own jacks, as on MATRIX FORGE
+        float inL = inputs[IN_L_INPUT].getVoltage();
+        float inR = inputs[IN_R_INPUT].isConnected() ? inputs[IN_R_INPUT].getVoltage() : inL;
+        float dryL = 5.f * std::tanh(l) + inL, dryR = 5.f * std::tanh(r) + inR, fxL, fxR;
+        typedef SynTHBloKGrainForge G;
+        const int fwd[3][2] = {{OPEN_INPUT, G::OPEN_INPUT}, {GLITCH_INPUT, G::GLITCH_INPUT}, {GATE_INPUT, G::GATE_INPUT}};
+        for (auto& f : fwd) {
+            fx.inputs[f[1]].setChannels(inputs[f[0]].getChannels());
+            fx.inputs[f[1]].setVoltage(inputs[f[0]].getVoltage());
+        }
+        fx.processFx(args, dryL, dryR, edge && running, stepSec, rst, fxL, fxR);
         fxOnSm += (params[FX_ON_PARAM].getValue() - fxOnSm) * km;
-        masterVol += (params[MASTER_PARAM].getValue() - masterVol) * (1.f - std::exp(-args.sampleTime * 1000.f));
-        outputs[OUT_L_OUTPUT].setVoltage((dry + (5.f * fxL - dry) * fxOnSm) * masterVol);
-        outputs[OUT_R_OUTPUT].setVoltage((dry + (5.f * fxR - dry) * fxOnSm) * masterVol);
+        masterVol += (params[MASTER_PARAM].getValue() - masterVol) * km;
+        outputs[OUT_L_OUTPUT].setVoltage((dryL + (5.f * fxL - dryL) * fxOnSm) * masterVol);
+        outputs[OUT_R_OUTPUT].setVoltage((dryR + (5.f * fxR - dryR) * fxOnSm) * masterVol);
         if (midiOn) processJamLeds(args);
     }
 
@@ -930,11 +959,6 @@ struct DUToggle : app::ParamWidget {
     }
 };
 
-// Filter ADSR stage light, amber like the rings.
-struct DUAmberLight : GrayModuleLightWidget {
-    DUAmberLight() { addBaseColor(nvgRGB(255, 140, 40)); }
-};
-
 struct DUTitle : TransparentWidget {
     void draw(const DrawArgs& args) override {
         std::shared_ptr<window::Font> font = APP->window->uiFont;
@@ -1028,15 +1052,17 @@ struct DUHeader : TransparentWidget {
         int n = DU::kScopeN, p = module ? module->scopePos : 0;
         for (int i = 0; i < n; i++) x[i] = module ? module->scope[e][(p + i) % n] : 0.6f * std::sin(i * 0.15f);
     }
-    void drawScope(const DrawArgs& args, float x, float y, float w, float h, NVGcolor col) {
+    void drawScope(const DrawArgs& args, float x, float y, float w, float h, NVGcolor col, bool axis = true) {
         const int n = DU::kScopeN, show = n / 2;
         float s[n];
         history(s);
         int start = 0;   // the first rising zero crossing that still leaves a full window
         for (int i = 1; i < n - show; i++) if (s[i - 1] < 0.f && s[i] >= 0.f) { start = i; break; }
-        nvgBeginPath(args.vg);
-        oled::divider(args, x, y + h * 0.5f, x + w, y + h * 0.5f);
-        oled::dividerStroke(args);
+        if (axis) {
+            nvgBeginPath(args.vg);
+            oled::divider(args, x, y + h * 0.5f, x + w, y + h * 0.5f);
+            oled::dividerStroke(args);
+        }
         nvgBeginPath(args.vg);
         for (int i = 0; i < show; i++) {
             float px = x + w * i / (show - 1), py = y + h * 0.5f - clamp(s[start + i], -1.f, 1.f) * h * 0.46f;
@@ -1079,6 +1105,14 @@ struct DUHeader : TransparentWidget {
         float xs[5] = {0.f, a, a + d, a + d + hold, 1.f}, ys[5] = {0.f, 1.f, sus, sus, 0.f};
         auto X = [&](float f) { return x + w * f; };
         auto Y = [&](float v) { return y + h - 1.f - (h - 2.f) * v; };
+        // behind the shaper, same hue, see-through: the ADSR area, brighter as the envelope opens
+        float lvNow = module ? clamp(module->eng[e][0].adsr, 0.f, 1.f) : 0.5f;
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, X(0.f), Y(0.f));
+        for (int i = 1; i < 5; i++) nvgLineTo(args.vg, X(xs[i]), Y(ys[i]));
+        nvgClosePath(args.vg);
+        nvgFillColor(args.vg, nvgRGBA(255, 150, 50, (int)(22 + 80 * lvNow)));
+        nvgFill(args.vg);
         nvgBeginPath(args.vg);
         for (int i = 0; i < 5; i++) { if (i) nvgLineTo(args.vg, X(xs[i]), Y(ys[i])); else nvgMoveTo(args.vg, X(xs[i]), Y(ys[i])); }
         nvgStrokeColor(args.vg, col);
@@ -1442,72 +1476,50 @@ struct SynTHBloKDuoWidget : ModuleWidget {
             if (module && d.param == DU::RESET_PARAM) c->flash = &module->resetFlash;   // lit on any reset
             addParam(c);
         }
-        // master filter, laid out like GRAIN-FORGE's: FILTER, RES, ENV, STG, TYPE; the ADSR + V (env -> level)
-        // with stage lights; INPUT, DRY / WET and BYP (env off the filter)
-        auto ringKnob = [&](float x, float y, int param) {
+        // FINAL stage, exactly as on MATRIX FORGE: CUTOFF RES ENV MODE / ATK DEC SUS REL / DELAY, the big MASTER
+        // (the JAM knob on MST / CUE), SPACE / two rows of six jacks. Knob rows sit 1.5 mm lower: this OLED has a KEY row.
+        auto col4 = [&](int i) { return RX + RW * (i + 0.5f) / 4.f; };
+        auto smallKnob = [&](float x, float y, int param, const char* name) {
             addChild(KnobTicks::create(Vec(x, y)));
             DURing* r = createWidget<DURing>(mm2px(Vec(x - 5.5f, y - 5.5f)));
             r->box.size = mm2px(Vec(11.f, 11.f)); r->module = module; r->param = param;
             addChild(r);
             addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(x, y)), module, param));
+            label(x, y + 7.f, name);
         };
-        const float FY = 50.f;
-        ringKnob(RX + 7.f, FY, DU::FLT_CUT_PARAM); label(RX + 7.f, FY + 8.f, "FILTER");
-        knob(RX + 17.f, FY, DU::FLT_RES_PARAM, NULL); label(RX + 17.f, FY + 8.f, "RES");
-        knob(RX + 25.5f, FY, DU::FLT_ENV_PARAM, NULL); label(RX + 25.5f, FY + 8.f, "ENV");
-        // STG (1 / 2 / 3) | TYPE (LP / BP / HP) | BYP in one OLED, as tall as FILTER's ring
-        const float BX = RX + 30.5f, BW = 18.f, BH = 11.f, BY = FY - BH * 0.5f, PAD = 0.8f, GAP = 0.6f;
-        oled::Box* fb = createWidget<oled::Box>(mm2px(Vec(BX, BY)));
-        fb->box.size = mm2px(Vec(BW, BH));
-        addChild(fb);
-        const float colW[3] = {4.6f, 5.8f, BW - 2.f * PAD - 2.f * GAP - 4.6f - 5.8f};
-        const float rowH = (BH - 2.f * PAD - 2.f * 0.5f) / 3.f;
-        static const char* const fNames[2][3] = {{"1", "2", "3"}, {"LP", "BP", "HP"}};
-        float cx = BX + PAD;
-        for (int col = 0; col < 3; col++) {
-            for (int row = 0; row < (col < 2 ? 3 : 1); row++) {
-                oled::Cell* c = createParam<oled::Cell>(mm2px(Vec(cx, BY + PAD + row * (rowH + 0.5f))), module,
-                                                col == 0 ? DU::FLT_STAGES_PARAM : col == 1 ? DU::FLT_MODE_PARAM : DU::FLT_BYPASS_PARAM);
-                c->box.size = mm2px(Vec(colW[col], col < 2 ? rowH : BH - 2.f * PAD));
-                c->module = module; c->fontSize = 6.f;
-                if (col < 2) { c->label = fNames[col][row]; c->setTo = row; }
-                else { c->label = "BYP"; c->latch = true; }
-                addParam(c);
-            }
-            if (col < 2) label(cx + colW[col] * 0.5f, FY + 8.f, col ? "TYPE" : "STG");
-            cx += colW[col] + GAP;
-        }
-        const int adsr[5] = {DU::FLT_ATK_PARAM, DU::FLT_DEC_PARAM, DU::FLT_SUS_PARAM, DU::FLT_REL_PARAM, DU::FLT_AMP_PARAM};
-        const char* an[5] = {"A", "D", "S", "R", "V"};
-        const float AY = 66.f;
-        for (int i = 0; i < 5; i++) {
-            float x = RX + 7.f + i * 9.f;
-            addParam(createParamCentered<Trimpot>(mm2px(Vec(x, AY)), module, adsr[i]));
-            label(x - 4.6f, AY, an[i]);
-            if (i < 4) addChild(createLightCentered<TinyLight<DUAmberLight>>(mm2px(Vec(x, AY + 4.6f)), module, DU::ADSR_LIGHT + i));
-        }
-        const float IY = 79.f;
-        knob(RX + 15.f, IY, DU::FLT_IN_PARAM, NULL); label(RX + 15.f, IY + 7.f, "INPUT");
-        ringKnob(RX + 35.f, IY, DU::FLT_DRYWET_PARAM); label(RX + 35.f, IY + 7.f, "DRY / WET");
-        // knobs: BPM, LEN, MIX (LEAD <-> BASS), MASTER (the JAM knob on MST / CUE)
-        const float KY = 95.f;
-        const char* KN[4] = {"BPM", "LEN", "MIX", "MASTER"};
-        const int KP[4] = {DU::BPM_PARAM, DU::LEN_PARAM, DU::MIX_PARAM, DU::MASTER_PARAM};
+        const int F2[4] = {DU::FLT_CUT_PARAM, DU::FLT_RES_PARAM, DU::FLT_ENV_PARAM, DU::FLT_MODE_PARAM};
+        const char* F2N[4] = {"CUTOFF", "RES", "ENV", "MODE"};
+        const int EV[4] = {DU::FLT_ATK_PARAM, DU::FLT_DEC_PARAM, DU::FLT_SUS_PARAM, DU::FLT_REL_PARAM};
+        const char* EVN[4] = {"ATK", "DEC", "SUS", "REL"};
         for (int i = 0; i < 4; i++) {
-            float x = RX + RW * (i + 0.5f) / 4.f;
-            ringKnob(x, KY, KP[i]);
-            label(x, KY + 7.5f, KN[i]);
+            smallKnob(col4(i), 46.5f, F2[i], F2N[i]);
+            smallKnob(col4(i), 61.5f, EV[i], EVN[i]);
         }
-        // jacks, like the LEAD / BASS bottom rows: CLK / RST / RUN in, KNOB CV, OUT L / R
-        const char* JN[6] = {"CLK", "RST", "RUN", "KNOB", "OUT L", "OUT R"};
-        for (int i = 0; i < 6; i++) {
-            float x = RX + RW * (i + 0.5f) / 6.f;
-            label(x, 109.f, JN[i]);
-            if (i < 3) addInput(createInputCentered<SmallJack>(mm2px(Vec(x, 116.f)), module,
-                                                               i == 0 ? DU::CLOCK_INPUT : i == 1 ? DU::RESET_INPUT : DU::RUN_INPUT));
-            else addOutput(createOutputCentered<SmallJack>(mm2px(Vec(x, 116.f)), module,
-                                                           i == 3 ? DU::KNOB_OUTPUT : i == 4 ? DU::OUT_L_OUTPUT : DU::OUT_R_OUTPUT));
-        }
+        const float KY = 80.5f, RC = RX + RW * 0.5f;
+        smallKnob(col4(0), KY, DU::DELAY_PARAM, "DELAY");
+        smallKnob(col4(3), KY, DU::SPACE_PARAM, "SPACE");
+        addChild(KnobTicks::create(Vec(RC, KY), 19.f / 11.f));
+        DURing* mr = createWidget<DURing>(mm2px(Vec(RC - 9.5f, KY - 9.5f)));
+        mr->box.size = mm2px(Vec(19.f, 19.f)); mr->module = module; mr->param = DU::MASTER_PARAM;
+        addChild(mr);
+        addParam(createParamCentered<RoundLargeBlackKnob>(mm2px(Vec(RC, KY)), module, DU::MASTER_PARAM));
+        label(RC, KY + 12.f, "MASTER");
+        // jacks: IN L / R, OPEN, GLITCH, GATE, KNOB; CLK, RST, RUN, OUT L / R
+        struct JackDef { const char* name; int id; bool out; };
+        const JackDef jk[2][6] = {
+            {{"IN L", DU::IN_L_INPUT, false}, {"IN R", DU::IN_R_INPUT, false}, {"OPEN", DU::OPEN_INPUT, false},
+             {"GLITCH", DU::GLITCH_INPUT, false}, {"GATE", DU::GATE_INPUT, false}, {"KNOB", DU::KNOB_OUTPUT, true}},
+            {{"CLK", DU::CLOCK_INPUT, false}, {"RST", DU::RESET_INPUT, false}, {"RUN", DU::RUN_INPUT, false},
+             {NULL, -1, false}, {"OUT L", DU::OUT_L_OUTPUT, true}, {"OUT R", DU::OUT_R_OUTPUT, true}}};
+        for (int r = 0; r < 2; r++)
+            for (int i = 0; i < 6; i++) {
+                const JackDef& d = jk[r][i];
+                if (!d.name) continue;
+                float x = RX + RW * (i + 0.5f) / 6.f, y = 104.f + 13.f * r;
+                label(x, y - 5.5f, d.name);
+                if (d.out) addOutput(createOutputCentered<SmallJack>(mm2px(Vec(x, y)), module, d.id));
+                else addInput(createInputCentered<SmallJack>(mm2px(Vec(x, y)), module, d.id));
+            }
 
         forgeFxAddPanel(this, module ? &module->fx : NULL, module, DU::FX_ON_PARAM, 179.6f);
     }
@@ -1518,6 +1530,26 @@ struct SynTHBloKDuoWidget : ModuleWidget {
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuItem("Copy pattern to the next one", "", [=]() { m->copyToNext(); }));
         menu->addChild(createMenuItem("Clear every pattern", "", [=]() { m->clearAll(); }));
+        menu->addChild(createIndexSubmenuItem("Pattern length", {"1 step", "2 steps", "3 steps", "4 steps", "5 steps", "6 steps", "7 steps", "8 steps"},
+            [=]() { return (size_t)(m->params[DU::LEN_PARAM].getValue() - 1.f); },
+            [=](size_t i) { m->params[DU::LEN_PARAM].setValue((float)i + 1.f); }));
+        // off the panel since the FINAL stage matches MATRIX FORGE's
+        auto slider = [&](int id) {
+            ui::Slider* s = new ui::Slider;
+            s->quantity = m->paramQuantities[id];
+            s->box.size.x = 220.f;
+            menu->addChild(s);
+        };
+        for (int id : {DU::BPM_PARAM, DU::MIX_PARAM}) slider(id);
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuLabel("Master filter"));
+        menu->addChild(createIndexSubmenuItem("Filter stages", {"1 stage (12 dB)", "2 stages (24 dB)", "3 stages (36 dB)"},
+            [=]() { return (size_t)m->params[DU::FLT_STAGES_PARAM].getValue(); },
+            [=](size_t i) { m->params[DU::FLT_STAGES_PARAM].setValue((float)i); }));
+        menu->addChild(createBoolMenuItem("Envelope bypass (the ADSR off the filter)", "",
+            [=]() { return m->params[DU::FLT_BYPASS_PARAM].getValue() > 0.5f; },
+            [=](bool on) { m->params[DU::FLT_BYPASS_PARAM].setValue(on ? 1.f : 0.f); }));
+        for (int id : {DU::FLT_IN_PARAM, DU::FLT_DRYWET_PARAM, DU::FLT_AMP_PARAM}) slider(id);
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Maschine JAM (Template 4 Rack, ch 1)"));
         menu->addChild(createIndexSubmenuItem("JAM matrix page", {"1", "2", "3", "4", "5", "6"},
