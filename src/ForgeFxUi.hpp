@@ -357,7 +357,10 @@ static void forgeFxAddPanel(ModuleWidget* mw, SynTHBloKGrainForge* fm, Module* o
         fxKnob(M0 + 36.5f, 71.5f, FXG::FLT_AMP_PARAM, "AMP");
         const int fxAdsr[4] = {FXG::FLT_ATK_PARAM, FXG::FLT_DEC_PARAM, FXG::FLT_SUS_PARAM, FXG::FLT_REL_PARAM};
         const char* fxAn[4] = {"ATK", "DEC", "SUS", "REL"};
-        for (int i = 0; i < 4; i++) fxKnob(M0 + 6.f + 10.f * i, 94.2f, fxAdsr[i], fxAn[i]);
+        for (int i = 0; i < 4; i++) {   // each with its stage LED under the name, as on GRAIN-FORGE
+            fxKnob(M0 + 6.f + 10.f * i, 94.2f, fxAdsr[i], fxAn[i]);
+            mw->addChild(createLightCentered<GFMicroLight<RedGreenBlueLight>>(mm2px(Vec(M0 + 6.f + 10.f * i, 102.4f)), fm, FXG::ADSR_LED + i * 3));
+        }
         fxKnob(M0 + 7.f, 116.f, FXG::IN_GAIN_PARAM, "INPUT");
         fxBigKnob(M0 + 21.f, 116.f, FXG::DRYWET_PARAM, "DRY / WET");
         fxKnob(M0 + 35.f, 116.f, FXG::OUT_GAIN_PARAM, "OUTPUT");
