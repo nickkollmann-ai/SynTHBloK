@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <string>
 
+#include "JamOwner.hpp"
 namespace {
 
 // JAM Indexed-palette values matching the panel's yellow -> deep dark red colours
@@ -54,6 +55,7 @@ struct SynTHBloKJam : Module {
 
     midi::InputQueue midiIn;
     midi::Output midiOut;
+    jamown::Link jam;   // the JAM follows the last clicked module (JamOwner.hpp)
 
     bool pat[8][8][8];
     float val[8][8];
@@ -168,10 +170,10 @@ struct SynTHBloKJam : Module {
         for (auto& n : kBtnNote) if (n[0] > padNote(0, 7)) sendNote(n[0], 0);
         for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
     }
-    void onRemove(const RemoveEvent& e) override { clearLeds(); }
-    void onBypass(const BypassEvent& e) override { clearLeds(); }
+    void onRemove(const RemoveEvent& e) override { if (jam.active) clearLeds(); jamown::release(id); }
+    void onBypass(const BypassEvent& e) override { if (jam.active) clearLeds(); jamown::release(id); jam.active = false; }
     void onUnBypass(const UnBypassEvent& e) override { for (int i = 0; i < kNumLed; i++) lastLed[i] = -1; resync = 0.f; }
-    ~SynTHBloKJam() { clearLeds(); }
+    ~SynTHBloKJam() { if (jam.active) clearLeds(); jamown::release(id); }
 
     int desiredLed(int idx, bool running) {
         if (idx == kKnobLed) return (int)std::round(params[KNOB_PARAM].getValue() * 127.f);
@@ -217,6 +219,7 @@ struct SynTHBloKJam : Module {
     }
 
     void sendLed(int idx, int d) {
+        if (!jam.active) return;
         if (idx < 64) sendNote(padNote(idx / 8, idx % 8), d);
         else if (idx < 72) sendCC(idx - 64, d);
         else if (idx < 80) sendCC(48 + 8 * stripPage + (idx - 72), d);
@@ -232,8 +235,12 @@ struct SynTHBloKJam : Module {
     }
 
     void process(const ProcessArgs& args) override {
+        int own = jam.update(id, true);   // losing the JAM goes dark, gaining it resends all
+        if (own > 0) for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
+        else if (own < 0) clearLeds();
         midi::Message msg;
         while (midiIn.tryPop(&msg, args.frame)) {
+            if (!jam.active) continue;
             if (msg.bytes.size() < 3) continue;
             int st = msg.bytes[0] & 0xf0, a = msg.bytes[1], b = msg.bytes[2];
             if (st == 0x90 && b > 0) {
@@ -740,6 +747,11 @@ struct JKnobRing : TransparentWidget {
 };
 
 struct SynTHBloKJamWidget : ModuleWidget {
+    void onButton(const ButtonEvent& e) override {   // clicking the module hands it the JAM
+        SynTHBloKJam* m = getModule<SynTHBloKJam>();
+        if (m && e.action == GLFW_PRESS && m->jam.wasEnabled) jamown::claim(m->id);
+        ModuleWidget::onButton(e);
+    }
     SynTHBloKJamWidget(SynTHBloKJam* module) {
         setModule(module);
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKJam.svg")));

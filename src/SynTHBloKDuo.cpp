@@ -17,6 +17,8 @@
 #include "DualOsc_dsp.hpp"
 #include "KnobTicks.hpp"
 #include "OledUi.hpp"
+#include "JamOwner.hpp"
+#include "ForgeFxUi.hpp"
 // FORGE FX runs GRAIN-FORGE's module as an embedded engine; its own panel builder isn't used here.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
@@ -111,7 +113,7 @@ struct SynTHBloKDuo : Module {
                     // master filter (as on GRAIN-FORGE), FLT_CUT .. FLT_DRYWET smoothed together
                     FLT_CUT_PARAM, FLT_RES_PARAM, FLT_ENV_PARAM, FLT_STAGES_PARAM, FLT_MODE_PARAM, FLT_ATK_PARAM, FLT_DEC_PARAM,
                     FLT_SUS_PARAM, FLT_REL_PARAM, FLT_AMP_PARAM, FLT_BYPASS_PARAM, FLT_IN_PARAM, FLT_DRYWET_PARAM, FLT_TRIG_PARAM,
-                    FX_ON_PARAM,
+                    FX_ON_PARAM, MIDI_ON_PARAM,
                     NUM_PARAMS };
     enum InputIds { CLOCK_INPUT, RESET_INPUT, RUN_INPUT, NUM_INPUTS };
     enum OutputIds { OUT_L_OUTPUT, OUT_R_OUTPUT, LEAD_OUTPUT, BASS_OUTPUT, LEAD_CV_OUTPUT, LEAD_GATE_OUTPUT, BASS_CV_OUTPUT, BASS_GATE_OUTPUT,
@@ -126,6 +128,11 @@ struct SynTHBloKDuo : Module {
     int curNote[2] = {-1, -1};    // MIDI note each synth last played, the chord's lowest (CV out, display)
     bool tied[2] = {};
     float chordGain[2] = {1.f, 1.f}, chordGainSm[2] = {1.f, 1.f};
+    // header OLED views: each synth's audio, every 4th sample (SCOPE / SPEC), and which view it shows
+    static const int kScopeN = 256;
+    float scope[2][kScopeN] = {};
+    int scopePos = 0, scopeDiv = 0;
+    int hdrView[2] = {0, 0};          // 0 SCOPE, 1 SPEC, 2 ENV
 
     int step = -1;
     bool running = true, pendingReset = false;
@@ -138,6 +145,7 @@ struct SynTHBloKDuo : Module {
     midi::Output midiOut;
     bool jamReset = false, solo[2] = {};
     bool clearHeld = false, clearAllDone = false;
+    jamown::Link jam;
     float clearHeldT = 0.f;
     int knobCC = kKnobFirstCC;    // knob page the JAM last sent from, for the value sent back
     int lastLed[kNumLed];
@@ -193,6 +201,7 @@ struct SynTHBloKDuo : Module {
         configParam(FLT_DRYWET_PARAM, 0.f, 1.f, 1.f, "Filter dry / wet", "%", 0.f, 100.f);
         configSwitch(FLT_TRIG_PARAM, 0.f, 4.f, 0.f, "Filter env trigger", {"Any note", "LEAD notes", "BASS notes", "Every beat", "Every step"});
         configSwitch(FX_ON_PARAM, 0.f, 1.f, 1.f, "FORGE FX (off = OUT L / R dry)", {"Off", "On"});
+        configSwitch(MIDI_ON_PARAM, 0.f, 1.f, 1.f, "JAM MIDI (off = ignore the JAM, its lights dark)", {"Off", "On"});
         // FX knobs set the engine's values straight away (it smooths them itself); Rack's drag smoothing
         // would point the engine at a module it doesn't know
         for (ParamQuantity* q : fx.paramQuantities) q->smoothEnabled = false;
@@ -449,10 +458,10 @@ struct SynTHBloKDuo : Module {
         sendCC(knobCC, 0);
         for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
     }
-    void onRemove(const RemoveEvent& e) override { clearLeds(); }
-    void onBypass(const BypassEvent& e) override { clearLeds(); }
+    void onRemove(const RemoveEvent& e) override { if (jam.active) clearLeds(); jamown::release(id); }
+    void onBypass(const BypassEvent& e) override { if (jam.active) clearLeds(); jamown::release(id); jam.active = false; }
     void onUnBypass(const UnBypassEvent& e) override { for (int i = 0; i < kNumLed; i++) lastLed[i] = -1; resync = 0.f; }
-    ~SynTHBloKDuo() { clearLeds(); }
+    ~SynTHBloKDuo() { if (jam.active) clearLeds(); jamown::release(id); }
 
     // JAM light idx (layout in Matrix8_ui.hpp): pads = the shown synth's notes in the pattern's colour,
     // the root rows dim, the playhead column white. Scenes = patterns, strips = their knobs,
@@ -605,7 +614,13 @@ struct SynTHBloKDuo : Module {
     }
 
     void process(const ProcessArgs& args) override {
-        processJamIn(args);
+        // the JAM follows the last clicked module (JamOwner.hpp): losing it goes dark, gaining it resends all
+        int own = jam.update(id, params[MIDI_ON_PARAM].getValue() > 0.5f);
+        if (own > 0) { for (int i = 0; i < kNumLed; i++) lastLed[i] = -1; for (int& l : lastOledLed) l = -1; }
+        else if (own < 0) clearLeds();
+        bool midiOn = jam.active;
+        if (midiOn) processJamIn(args);
+        else { midi::Message m; while (midiIn.tryPop(&m, args.frame)) {} }
         processJamCtl(args);
         // ---- clock: the CLOCK jack, or the BPM knob when unpatched ----
         bool edge = false;
@@ -665,11 +680,14 @@ struct SynTHBloKDuo : Module {
             for (int k = 0; k < kVoices; k++)
                 if (k == 0 || eng[e][k].stage != 0 || std::fabs(eng[e][k].adsr) > 1e-5f) s += eng[e][k].process(args.sampleRate, p);
             s *= chordGainSm[e];
+            if (scopeDiv == 0) scope[e][scopePos] = s;
             mix += s * mixGain[e];
             outputs[e ? BASS_OUTPUT : LEAD_OUTPUT].setVoltage(5.f * s);
             outputs[e ? BASS_CV_OUTPUT : LEAD_CV_OUTPUT].setVoltage(curNote[e] < 0 ? 0.f : (curNote[e] - 60) / 12.f);
             outputs[e ? BASS_GATE_OUTPUT : LEAD_GATE_OUTPUT].setVoltage(gateOn(e) ? 10.f : 0.f);
         }
+        if (scopeDiv == 0) scopePos = (scopePos + 1) % kScopeN;
+        scopeDiv = (scopeDiv + 1) % 4;
         // ---- master filter (GRAIN-FORGE's): cutoff + ADSR sweep, resonance, stages, LP / BP / HP ----
         float sr = args.sampleRate;
         for (int i = 0; i < kFltSm; i++) {
@@ -708,7 +726,7 @@ struct SynTHBloKDuo : Module {
         masterVol += (params[MASTER_PARAM].getValue() - masterVol) * (1.f - std::exp(-args.sampleTime * 1000.f));
         outputs[OUT_L_OUTPUT].setVoltage((dry + (5.f * fxL - dry) * fxOnSm) * masterVol);
         outputs[OUT_R_OUTPUT].setVoltage((dry + (5.f * fxR - dry) * fxOnSm) * masterVol);
-        processJamLeds(args);
+        if (midiOn) processJamLeds(args);
     }
 
     json_t* dataToJson() override {
@@ -735,6 +753,7 @@ struct SynTHBloKDuo : Module {
         for (int e = 0; e < 2; e++) ss += solo[e] ? '1' : '0';
         json_object_set_new(root, "solo", json_string(ss.c_str()));
         json_object_set_new(root, "matchColors", json_boolean(matchColors));
+        json_object_set_new(root, "views", json_string((std::to_string(hdrView[0]) + std::to_string(hdrView[1])).c_str()));
         json_t* va = json_array();
         for (int b = 0; b < 3; b++) for (int i = 0; i < 8; i++) json_array_append_new(va, json_real(cvVal[b][i]));
         json_object_set_new(root, "cv", va);
@@ -784,6 +803,8 @@ struct SynTHBloKDuo : Module {
         const char* ss = json_string_value(json_object_get(r, "solo"));
         for (int e = 0; e < 2; e++) solo[e] = ss && strlen(ss) >= 2 && ss[e] == '1';
         if (json_t* j = json_object_get(r, "matchColors")) matchColors = json_boolean_value(j);
+        if (const char* vs = json_string_value(json_object_get(r, "views")))
+            for (int e = 0; e < 2 && vs[e]; e++) hdrView[e] = clamp(vs[e] - '0', 0, 2);
         if (json_t* va = json_object_get(r, "cv"))
             for (int i = 0; i < 24; i++)
                 if (json_t* j = json_array_get(va, i)) cvVal[i / 8][i % 8] = clamp((float)json_number_value(j), 0.f, 1.f);
@@ -925,63 +946,170 @@ struct DUTitle : TransparentWidget {
     }
 };
 
-// LEAD / BASS header: name, ON / MUTE, the last note, sync. Click toggles mute;
-// brighter outline while the grid shows this synth.
+// LEAD / BASS header OLED. Top line: name, the last note, SYNC (click), ON / MUTE (click the rest of the line).
+// Below, the synth's audio as SCOPE (waveform, steadied on a rising zero crossing), SPEC (spectrum) or ENV
+// (its amp / filter ADSR, the dot = where it is now), picked by the tabs along the bottom.
+// Brighter outline while the grid shows this synth.
 struct DUHeader : TransparentWidget {
     DU* module = NULL;
     int e = 0;
+    static constexpr float kTabH = 3.6f;   // mm
+    float syncX0() { return box.size.x * 0.52f; }
+    float syncX1() { return box.size.x * 0.72f; }
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
-        float W = box.size.x, H = box.size.y;
+        float W = box.size.x, H = box.size.y, rowY = mm2px(oled::kRow);
         bool on = !module || !module->mute[e];
         bool shown = module ? module->view() == e : e == 0;
         oled::box(args, W, H, shown ? nvgRGBA(255, 112, 15, 255) : nvgRGBA(255, 180, 90, on ? 160 : 60), shown ? 1.2f : 0.8f);
         std::shared_ptr<window::Font> font = APP->window->uiFont;
         if (!font) return;
         nvgFontFaceId(args.vg, font->handle);
+        // top line
+        float yc = rowY * 0.55f;
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
         nvgFontSize(args.vg, 7.5f);
         nvgFillColor(args.vg, nvgRGBA(255, 190, 90, on ? 220 : 90));
-        nvgText(args.vg, 5.f, H * 0.3f, e ? "BASS" : "LEAD", NULL);
-        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-        nvgFillColor(args.vg, on ? nvgRGBA(120, 230, 90, 255) : nvgRGBA(255, 190, 90, 90));
-        nvgText(args.vg, W - 5.f, H * 0.3f, on ? "ON" : "MUTE", NULL);
+        nvgText(args.vg, 4.f, yc, e ? "BASS" : "LEAD", NULL);
         std::string s = noteName(module ? module->curNote[e] : (e ? 36 : 60));
         bool gate = module && module->gateOn(e);
-        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgFontSize(args.vg, 9.5f);
+        nvgFontSize(args.vg, 8.5f);
         nvgFillColor(args.vg, nvgRGBA(255, 190, 90, gate ? 255 : 130));
-        nvgText(args.vg, 5.f, H * 0.7f, s.c_str(), NULL);
-        // SYNC: its own box in the lower right, lit when on.
+        nvgText(args.vg, W * 0.27f, yc, s.c_str(), NULL);
         bool sync = module && module->params[module->engParam(e, DO_SYNC)].getValue() > 0.5f;
-        float sx = W * 0.62f, sy = H * 0.52f, sw = W * 0.38f - 4.f, sh = H * 0.48f - 3.f;
+        float sx = syncX0(), sw = syncX1() - sx, sh = rowY - 4.f;
         nvgBeginPath(args.vg);
-        nvgRoundedRect(args.vg, sx, sy, sw, sh, 1.2f);
-        nvgFillColor(args.vg, sync ? nvgRGBA(255, 112, 15, 235) : nvgRGBA(40, 25, 8, 255));
+        nvgRoundedRect(args.vg, sx, 2.f, sw, sh, 1.f);
+        nvgFillColor(args.vg, sync ? oled::litFill() : oled::offFill());
         nvgFill(args.vg);
-        nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, sync ? 255 : 110));
-        nvgStrokeWidth(args.vg, 0.7f);
+        nvgStrokeColor(args.vg, oled::outline(sync ? 255 : 110));
+        nvgStrokeWidth(args.vg, 0.6f);
         nvgStroke(args.vg);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFontSize(args.vg, 7.f);
-        nvgFillColor(args.vg, sync ? nvgRGBA(20, 10, 2, 255) : nvgRGBA(255, 190, 90, 200));
-        nvgText(args.vg, sx + sw * 0.5f, sy + sh * 0.5f, "SYNC", NULL);
-    }
-    // Click the SYNC box to toggle hard sync, anywhere else to mute / unmute.
-    void onButton(const ButtonEvent& ev) override {
-        if (ev.button == GLFW_MOUSE_BUTTON_LEFT && ev.action == GLFW_PRESS) {
-            if (module) {
-                if (ev.pos.x > box.size.x * 0.6f && ev.pos.y > box.size.y * 0.5f) {
-                    Param& p = module->params[module->engParam(e, DO_SYNC)];
-                    p.setValue(p.getValue() > 0.5f ? 0.f : 1.f);
-                }
-                else module->mute[e] = !module->mute[e];
-            }
-            ev.consume(this);
+        nvgFontSize(args.vg, 5.5f);
+        nvgFillColor(args.vg, sync ? oled::ink() : oled::amber(200));
+        nvgText(args.vg, sx + sw * 0.5f, 2.f + sh * 0.5f, "SYNC", NULL);
+        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+        nvgFontSize(args.vg, 6.5f);
+        nvgFillColor(args.vg, on ? oled::green() : nvgRGBA(255, 190, 90, 90));
+        nvgText(args.vg, W - 4.f, yc, on ? "ON" : "MUTE", NULL);
+        nvgBeginPath(args.vg);
+        oled::divider(args, 4.f, rowY, W - 4.f, rowY);
+        oled::dividerStroke(args);
+        // view
+        int view = module ? module->hdrView[e] : 0;
+        float gx = 4.f, gw = W - 8.f, gy = rowY + 2.f, gh = H - mm2px(kTabH) - 3.f - gy;
+        nvgSave(args.vg);
+        nvgScissor(args.vg, gx, gy, gw, gh);
+        NVGcolor line = nvgRGBA(255, 150, 50, on ? 235 : 110);
+        if (view == 0) drawScope(args, gx, gy, gw, gh, line);
+        else if (view == 1) drawSpec(args, gx, gy, gw, gh, line);
+        else drawEnv(args, gx, gy, gw, gh, line);
+        nvgRestore(args.vg);
+        // tabs
+        static const char* tab[3] = {"SCOPE", "SPEC", "ENV"};
+        float th = mm2px(kTabH), ty = H - th - 1.5f, tw = (W - 8.f - 2.f * 2.f) / 3.f;
+        for (int i = 0; i < 3; i++) {
+            float tx = 4.f + i * (tw + 2.f);
+            nvgBeginPath(args.vg);
+            nvgRoundedRect(args.vg, tx, ty, tw, th, 1.f);
+            nvgFillColor(args.vg, i == view ? oled::litFill() : oled::offFill());
+            nvgFill(args.vg);
+            nvgStrokeColor(args.vg, oled::outline(i == view ? 255 : 100));
+            nvgStrokeWidth(args.vg, 0.6f);
+            nvgStroke(args.vg);
+            nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+            nvgFontSize(args.vg, 5.5f);
+            nvgFillColor(args.vg, i == view ? oled::ink() : oled::amber(200));
+            nvgText(args.vg, tx + tw * 0.5f, ty + th * 0.5f, tab[i], NULL);
         }
     }
+    // the last kScopeN samples, oldest first
+    void history(float* x) {
+        int n = DU::kScopeN, p = module ? module->scopePos : 0;
+        for (int i = 0; i < n; i++) x[i] = module ? module->scope[e][(p + i) % n] : 0.6f * std::sin(i * 0.15f);
+    }
+    void drawScope(const DrawArgs& args, float x, float y, float w, float h, NVGcolor col) {
+        const int n = DU::kScopeN, show = n / 2;
+        float s[n];
+        history(s);
+        int start = 0;   // the first rising zero crossing that still leaves a full window
+        for (int i = 1; i < n - show; i++) if (s[i - 1] < 0.f && s[i] >= 0.f) { start = i; break; }
+        nvgBeginPath(args.vg);
+        oled::divider(args, x, y + h * 0.5f, x + w, y + h * 0.5f);
+        oled::dividerStroke(args);
+        nvgBeginPath(args.vg);
+        for (int i = 0; i < show; i++) {
+            float px = x + w * i / (show - 1), py = y + h * 0.5f - clamp(s[start + i], -1.f, 1.f) * h * 0.46f;
+            if (i) nvgLineTo(args.vg, px, py); else nvgMoveTo(args.vg, px, py);
+        }
+        nvgStrokeColor(args.vg, col);
+        nvgStrokeWidth(args.vg, 1.f);
+        nvgStroke(args.vg);
+    }
+    void drawSpec(const DrawArgs& args, float x, float y, float w, float h, NVGcolor col) {
+        const int n = DU::kScopeN, bars = 32;
+        float s[n];
+        history(s);
+        float sr = APP->engine->getSampleRate() / 4.f, lo = 40.f, hi = std::min(8000.f, sr * 0.48f);
+        float bw = w / bars;
+        for (int b = 0; b < bars; b++) {
+            float f = lo * std::pow(hi / lo, (b + 0.5f) / bars), k = 2.f * float(M_PI) * f / sr, re = 0.f, im = 0.f;
+            for (int i = 0; i < n; i++) {
+                float win = 0.5f - 0.5f * std::cos(2.f * float(M_PI) * i / (n - 1));
+                re += s[i] * win * std::cos(k * i); im += s[i] * win * std::sin(k * i);
+            }
+            float db = 20.f * std::log10(std::sqrt(re * re + im * im) * 4.f / n + 1e-6f);
+            float v = clamp((db + 60.f) / 60.f, 0.f, 1.f);
+            nvgBeginPath(args.vg);
+            nvgRect(args.vg, x + b * bw + 0.5f, y + h * (1.f - v), bw - 1.f, h * v);
+            nvgFillColor(args.vg, col);
+            nvgFill(args.vg);
+        }
+    }
+    void drawEnv(const DrawArgs& args, float x, float y, float w, float h, NVGcolor col) {
+        auto P = [&](int id, float d) { return module ? module->params[module->engParam(e, id)].getValue() : d; };
+        float a = 0.08f + 0.25f * P(DO_ATK, 0.1f), d = 0.08f + 0.25f * P(DO_DEC, 0.4f), r = 0.08f + 0.25f * P(DO_REL, 0.4f);
+        float sus = P(DO_SUS, 0.6f), hold = 1.f - a - d - r;
+        float xs[5] = {0.f, a, a + d, a + d + hold, 1.f}, ys[5] = {0.f, 1.f, sus, sus, 0.f};
+        nvgBeginPath(args.vg);
+        for (int i = 0; i < 5; i++) {
+            float px = x + w * xs[i], py = y + h - 1.f - (h - 2.f) * ys[i];
+            if (i) nvgLineTo(args.vg, px, py); else nvgMoveTo(args.vg, px, py);
+        }
+        nvgStrokeColor(args.vg, col);
+        nvgStrokeWidth(args.vg, 1.f);
+        nvgStroke(args.vg);
+        // where the envelope is now: its level, on the stage it is in
+        if (!module) return;
+        const DualOscVoice& v = module->eng[e][0];
+        float lv = clamp(v.adsr, 0.f, 1.f), px;
+        if (v.stage == 1) px = a * lv;
+        else if (v.stage == 2) px = a + d * 0.5f;
+        else if (v.stage == 3) px = a + d + hold + r * (1.f - (sus > 0.01f ? clamp(lv / sus, 0.f, 1.f) : 0.f));
+        else return;
+        nvgBeginPath(args.vg);
+        nvgCircle(args.vg, x + w * px, y + h - 1.f - (h - 2.f) * lv, 2.f);
+        nvgFillColor(args.vg, nvgRGB(255, 255, 255));
+        nvgFill(args.vg);
+    }
+    // SYNC box: hard sync; tabs: the view; the rest of the top line: mute
+    void onButton(const ButtonEvent& ev) override {
+        if (ev.button != GLFW_MOUSE_BUTTON_LEFT || ev.action != GLFW_PRESS) return;
+        ev.consume(this);
+        if (!module) return;
+        float W = box.size.x, H = box.size.y;
+        if (ev.pos.y < mm2px(oled::kRow)) {
+            if (ev.pos.x >= syncX0() && ev.pos.x <= syncX1()) {
+                Param& p = module->params[module->engParam(e, DO_SYNC)];
+                p.setValue(p.getValue() > 0.5f ? 0.f : 1.f);
+            }
+            else module->mute[e] = !module->mute[e];
+        }
+        else if (ev.pos.y > H - mm2px(kTabH) - 2.f) module->hdrView[e] = clamp((int)((ev.pos.x - 4.f) / ((W - 8.f) / 3.f)), 0, 2);
+        else module->hdrView[e] = (module->hdrView[e] + 1) % 3;   // click the graph: next view
+    }
 };
-
 // The master OLED (OledUi.hpp look), one line each: MIDI IN, MIDI OUT (click = port menu); BPM, run,
 // step, strip bank; KEY | SCALE | filter env TRIG (click or scroll steps it forward, right-click back).
 // The button cells (oled::Cell) sit on its lower part. Rows in mm from the top:
@@ -1130,242 +1258,12 @@ struct DUBankSq : OpaqueWidget {
     }
 };
 
-// ---------------------------------------------------------------- FORGE FX ----------------
-// GRAIN-FORGE's FX chain in one OLED (OledUi.hpp look). Rows (mm from the OLED's top): one per stage
-// (ON cell with its name, live status, RND; PULSE also LP | BP | HP), THROW steps + their RND,
-// PRESET | CYCLE | GLIDE | FREEZE, the filter env TRIG + SEQ (two rows tall) with BYP, and FILTER:
-// STG | TYPE, the env stages, the output meter and FX ON. Click / scroll a value to step it,
-// right-click steps back (PRESET: the list).
-typedef SynTHBloKGrainForge FXG;
-static const float kFxW = 99.68f, kFxPad = 2.f, kFxCol = 19.f, kFxRndW = 8.f, kFxRndX = kFxW - kFxPad - kFxRndW,
-                   kFxPitch = oled::kCellH + 0.9f, kFxTop = 1.2f, kFxSeqY = kFxTop + 7.f * kFxPitch,
-                   kFxSeqH = 2.f * oled::kCellH, kFxFltY = kFxSeqY + kFxSeqH + 0.9f, kFxH = kFxFltY + oled::kCellH + kFxTop;
-static const float kFxModeX = kFxRndX - 1.f - 3.f * 6.f - 2.f * 0.5f;   // PULSE's LP | BP | HP
-static const float kFxPreSeg[2] = {44.5f, 66.75f};                     // PRESET | CYCLE | GLIDE
-static const float kFxStgX = kFxCol, kFxTypeX = 36.5f, kFxEnvX = 57.f, kFxMeterX = 71.5f;
-static float fxRowY(int i) { return kFxTop + i * kFxPitch; }
-struct FxStage { const char* name; int on, sel, count; };
-static const FxStage kFxStage[5] = {
-    {"SHUFFLE", FXG::SH_ON_PARAM, FXG::SH_PATTERN_PARAM, kShufCount}, {"GLITCH", FXG::GL_ON_PARAM, FXG::GL_ROLL_PARAM, kRollCount},
-    {"ROBOT", FXG::RB_ON_PARAM, FXG::RB_CHORD_PARAM, 8}, {"PULSE", FXG::PU_ON_PARAM, FXG::PU_PATTERN_PARAM, kPulseCount},
-    {"WARP DLY", FXG::DL_ON_PARAM, FXG::DL_TIME_PARAM, kDelayCount}};
-
-// A stage's live status, as on GRAIN-FORGE's stage headers (PULSE's mode is on its cells).
-static std::string fxStatus(FXG* m, int s) {
-    char b[32];
-    switch (s) {
-        case 0: {
-            int p = m ? clamp(m->slot(FXG::SH_PATTERN_PARAM), 0, kShufCount - 1) : 6, src = m ? m->shuffle.src : -1;
-            if (src < 0) snprintf(b, sizeof b, "%s  LIVE", kShufName[p]); else snprintf(b, sizeof b, "%s  >%02d", kShufName[p], src + 1);
-            return b;
-        }
-        case 1: return m ? m->glitchEvent : "ROLL 1/16";
-        case 2: {
-            int root = m ? m->slot(FXG::RB_ROOT_PARAM) : 12, ch = m ? clamp(m->slot(FXG::RB_CHORD_PARAM), 0, 7) : 3;
-            return std::string(kNote[root % 12]) + std::to_string(1 + (root + 9) / 12) + " " + kChordName[ch];
-        }
-        case 3:
-            if (m && m->inputs[FXG::OPEN_INPUT].getVoltage() > 1.f) return "OPEN";
-            return kPulseName[m ? clamp(m->slot(FXG::PU_PATTERN_PARAM), 0, kPulseCount - 1) : 3];
-        default: {
-            int t = m ? clamp(m->slot(FXG::DL_TIME_PARAM), 0, kDelayCount - 1) : 8;
-            snprintf(b, sizeof b, "%s  %+.0f st", kDelayName[t], m ? m->params[FXG::DL_WARP_PARAM].getValue() : 0.f);
-            return b;
-        }
-    }
-}
-
-struct FXDisplay : TransparentWidget {
-    FXG* module = NULL;
-    float peak[2] = {};
-    void text(const DrawArgs& args, float x, float yMm, const char* s, NVGcolor c, float size, int align = NVG_ALIGN_LEFT) {
-        nvgFontSize(args.vg, size);
-        nvgFillColor(args.vg, c);
-        nvgTextAlign(args.vg, align | NVG_ALIGN_MIDDLE);
-        nvgText(args.vg, x, mm2px(yMm + oled::kCellH * 0.5f), s, NULL);
-    }
-    // thin dBFS bar, -48..+6 dB in 16 segments (amber, orange above -9, red above -1), with a falling peak
-    void meter(const DrawArgs& args, float x, float y, float w, float h, float lvl, float& pk) {
-        const int N = 16;
-        auto pos = [](float v) { return clamp((GFStatus::toDb(v) + 48.f) / 54.f, 0.f, 1.f); };
-        pk = std::max(lvl, pk * 0.9975f);
-        float p = pos(lvl), pp = pos(pk), sw = w / N;
-        for (int i = 0; i < N; i++) {
-            float sp = (i + 1.f) / N, db = -48.f + 54.f * sp;
-            bool lit = sp <= p + 1e-4f, pkSeg = (int)std::ceil(pp * N) == i + 1 && pp > 0.02f;
-            NVGcolor c = db > -1.f ? nvgRGBA(255, 40, 30, 255) : db > -9.f ? nvgRGBA(255, 112, 15, 255) : nvgRGBA(255, 176, 60, 255);
-            if (!lit && !pkSeg) c = nvgRGBA(46, 29, 10, 255);
-            else if (!lit) c.a = 0.5f;
-            nvgBeginPath(args.vg);
-            nvgRect(args.vg, x + i * sw + 0.3f, y, sw - 0.6f, h);
-            nvgFillColor(args.vg, c);
-            nvgFill(args.vg);
-        }
-    }
-    void drawLayer(const DrawArgs& args, int layer) override {
-        if (layer != 1) return;
-        FXG* m = module;
-        float W = box.size.x, H = box.size.y;
-        oled::box(args, W, H);
-        nvgBeginPath(args.vg);
-        for (float y : {fxRowY(1), fxRowY(2), fxRowY(3), fxRowY(4), fxRowY(5), fxRowY(6), kFxSeqY, kFxFltY})
-            oled::divider(args, 4.f, mm2px(y - 0.45f), W - 4.f, mm2px(y - 0.45f));
-        for (float x : kFxPreSeg) oled::divider(args, mm2px(x), mm2px(fxRowY(6)) + 2.f, mm2px(x), mm2px(fxRowY(6) + oled::kCellH) - 2.f);
-        oled::dividerStroke(args);
-        std::shared_ptr<window::Font> font = APP->window->uiFont;
-        if (!font) return;
-        nvgFontFaceId(args.vg, font->handle);
-        nvgScissor(args.vg, 0, 0, W, H);
-        NVGcolor amb = oled::amber(), dim = oled::dim();
-        // stage status, dim while the stage is off
-        for (int s = 0; s < 5; s++) {
-            bool on = !m || m->on(kFxStage[s].on);
-            text(args, mm2px(kFxCol + 0.5f), fxRowY(s), fxStatus(m, s).c_str(), oled::amber(on ? 255 : 90), 7.5f);
-        }
-        text(args, 4.f, fxRowY(5), "THROW", dim, 6.f);
-        // PRESET (the name in its preset-bar colour) | CYCLE | GLIDE
-        int pr = m ? clamp(m->slot(FXG::PRESET_PARAM), 0, kPresetCount) : 0;
-        text(args, 4.f, fxRowY(6), "PRESET", dim, 6.f);
-        text(args, mm2px(kFxCol + 0.5f), fxRowY(6), GFPresetBar::nameOf(pr), GFPresetBar::cellColor(pr, 255), 7.5f);
-        int dv = m ? clamp(m->slot(FXG::RND_DIV_PARAM), 0, kRndDivCount - 1) : 2;
-        int gl = m ? clamp(m->slot(FXG::RND_GLIDE_PARAM), 0, kRndGlideCount - 1) : 2;
-        const char* top[2] = {"CYCLE", "GLIDE"};
-        const char* val[2] = {kRndDivName[dv], kRndGlideName[gl]};
-        const float x0[2] = {kFxPreSeg[0], kFxPreSeg[1]}, x1[2] = {kFxPreSeg[1], kFxRndX - 1.f};
-        for (int i = 0; i < 2; i++) {
-            text(args, mm2px(x0[i]) + 4.f, fxRowY(6), top[i], dim, 6.f);
-            text(args, mm2px(x1[i]) - 4.f, fxRowY(6), val[i], amb, 7.5f, NVG_ALIGN_RIGHT);
-        }
-        // FILTER: env stages lit as they run, then the output meter (L over R)
-        text(args, 4.f, kFxFltY, "FILTER", dim, 6.f);
-        static const char* an[4] = {"A", "D", "S", "R"};
-        const float ew = (kFxMeterX - 1.5f - kFxEnvX - 3.f * 0.4f) / 4.f;
-        for (int k = 0; k < 4; k++) {
-            float lv = m ? clamp(m->stageLvl[k], 0.f, 1.f) : 0.f, ex = mm2px(kFxEnvX + k * (ew + 0.4f));
-            nvgBeginPath(args.vg);
-            nvgRoundedRect(args.vg, ex, mm2px(kFxFltY), mm2px(ew), mm2px(oled::kCellH), 1.f);
-            nvgFillColor(args.vg, nvgLerpRGBA(oled::offFill(), oled::litFill(), lv));
-            nvgFill(args.vg);
-            text(args, ex + mm2px(ew) * 0.5f, kFxFltY, an[k], lv > 0.5f ? oled::ink() : dim, 6.f, NVG_ALIGN_CENTER);
-        }
-        float mx = mm2px(kFxMeterX), mw = mm2px(kFxRndX - 1.f - kFxMeterX), mh = mm2px(1.5f);
-        meter(args, mx, mm2px(kFxFltY + 0.5f), mw, mh, m ? m->meterL : 0.5f, peak[0]);
-        meter(args, mx, mm2px(kFxFltY + oled::kCellH - 0.5f) - mh, mw, mh, m ? m->meterR : 0.4f, peak[1]);
-        nvgResetScissor(args.vg);
-    }
-    // what a click / scroll at p (mm) steps by d; false = nothing there
-    bool stepAt(Vec p, int d) {
-        FXG* m = module;
-        for (int s = 0; s < 5; s++) {
-            float y = fxRowY(s), xe = s == 3 ? kFxModeX : kFxRndX;
-            if (p.y < y || p.y >= y + oled::kCellH || p.x < kFxCol || p.x >= xe) continue;
-            const FxStage& st = kFxStage[s];
-            m->params[st.sel].setValue((float)((m->slot(st.sel) + d + st.count) % st.count));
-            return true;
-        }
-        float y = fxRowY(6);
-        if (p.y < y || p.y >= y + oled::kCellH || p.x < kFxCol || p.x >= kFxRndX) return false;
-        int id = p.x < kFxPreSeg[0] ? FXG::PRESET_PARAM : p.x < kFxPreSeg[1] ? FXG::RND_DIV_PARAM : FXG::RND_GLIDE_PARAM;
-        int n = id == FXG::PRESET_PARAM ? kPresetCount + 1 : id == FXG::RND_DIV_PARAM ? kRndDivCount : kRndGlideCount;
-        m->params[id].setValue((float)((m->slot(id) + d + n) % n));
-        return true;
-    }
-    void presetMenu() {
-        FXG* m = module;
-        ui::Menu* menu = createMenu();
-        menu->addChild(createMenuLabel("Preset"));
-        for (int i = 0; i <= kPresetCount; i++)
-            menu->addChild(createCheckMenuItem(GFPresetBar::nameOf(i), "", [=]() { return m->slot(FXG::PRESET_PARAM) == i; }, [=]() {
-                if (m->slot(FXG::PRESET_PARAM) == i) m->presetRequest.store(i);   // same one again: reload / re-roll
-                else m->params[FXG::PRESET_PARAM].setValue((float)i);
-            }));
-    }
-    void onButton(const ButtonEvent& e) override {
-        if (!module || e.action != GLFW_PRESS || (e.button != GLFW_MOUSE_BUTTON_LEFT && e.button != GLFW_MOUSE_BUTTON_RIGHT)) return;
-        Vec p = e.pos.div(mm2px(1.f));
-        bool right = e.button == GLFW_MOUSE_BUTTON_RIGHT;
-        if (right && p.y >= fxRowY(6) && p.y < fxRowY(6) + oled::kCellH && p.x >= kFxCol && p.x < kFxPreSeg[0]) {
-            presetMenu();
-            e.consume(this);
-            return;
-        }
-        if (stepAt(p, right ? -1 : 1)) e.consume(this);
-    }
-    void onHoverScroll(const HoverScrollEvent& e) override {
-        if (!module || e.scrollDelta.y == 0.f) return;
-        if (stepAt(e.pos.div(mm2px(1.f)), e.scrollDelta.y > 0.f ? 1 : -1)) e.consume(this);
-    }
-};
-
-// Throw step cell: white outline while its step plays.
-struct FXThrowCell : oled::Cell {
-    FXG* gf = NULL;
-    int idx = 0;
-    void drawLayer(const DrawArgs& args, int layer) override {
-        oled::Cell::drawLayer(args, layer);
-        if (layer != 1 || !gf || gf->step != idx) return;
-        nvgBeginPath(args.vg);
-        nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.2f);
-        nvgStrokeColor(args.vg, nvgRGB(0xff, 0xff, 0xff));
-        nvgStrokeWidth(args.vg, 1.1f);
-        nvgStroke(args.vg);
-    }
-};
-
-// THROW's RND: GRAIN-FORGE's random-pattern button, drawn in the lit layer.
-struct FXThrowRoll : GFThrowRoll {
-    void draw(const DrawArgs& args) override {}
-    void drawLayer(const DrawArgs& args, int layer) override { if (layer == 1) GFThrowRoll::draw(args); }
-};
-
-// GRAIN-FORGE's filter SEQ screen (same clicks and painting) without its own box, the TRIG name and value
-// on the left at the OLED's label column (labelX, px from this widget's left).
-struct FXSeq : GFSeqScreen {
-    float labelX = 4.f;
-    void drawLayer(const DrawArgs& args, int layer) override {
-        if (layer != 1) return;
-        FXG* m = module;
-        float W = box.size.x, H = box.size.y, x0 = barX0();
-        int trig = m ? clamp(m->slot(FXG::FLT_TRIG_PARAM), 0, kTrigCount - 1) : TRIG_SEQ;
-        bool seqMode = trig == TRIG_SEQ;
-        float ev = m ? clamp(m->fltEnvOut, 0.f, 1.f) : 0.f;   // envelope level as a glow strip under TRIG
-        nvgBeginPath(args.vg);
-        nvgRect(args.vg, labelX, H - 3.f, (x0 - 3.f - labelX) * ev, 1.5f);
-        nvgFillColor(args.vg, oled::litFill());
-        nvgFill(args.vg);
-        if (std::shared_ptr<window::Font> font = APP->window->uiFont) {
-            nvgFontFaceId(args.vg, font->handle);
-            nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-            nvgFontSize(args.vg, 6.f);
-            nvgFillColor(args.vg, oled::dim());
-            nvgText(args.vg, labelX, H * 0.25f, "TRIG", NULL);
-            nvgFontSize(args.vg, 7.5f);
-            nvgFillColor(args.vg, oled::amber());
-            nvgText(args.vg, labelX, H * 0.6f, kTrigName[trig], NULL);
-        }
-        float bw = (W - x0 - 2.f) / FXG::kSeqMax;
-        int len = m ? m->seqLen : 16, pos = m ? m->seqPos : -1;
-        for (int i = 0; i < FXG::kSeqMax; i++) {
-            bool on = m ? m->seqOn[i] : i % 2 == 0;
-            float lv = m ? m->seqLvl[i] : 0.5f;
-            float bx = x0 + i * bw + 0.6f, bh = 1.5f + lv * (H - 4.5f);
-            int a = i >= len ? 40 : seqMode ? 255 : 110;   // dim when SEQ isn't the trigger, dimmer past LENGTH
-            nvgBeginPath(args.vg);
-            nvgRect(args.vg, bx, H - 1.5f - bh, bw - 1.2f, bh);
-            if (on) nvgFillColor(args.vg, i == pos && seqMode ? nvgRGBA(255, 240, 200, a) : nvgRGBA(255, 112, 15, a * 9 / 10));
-            else nvgFillColor(args.vg, nvgRGBA(255, 180, 90, a / 5));
-            nvgFill(args.vg);
-            if (i % 4 == 0) {   // beat ticks
-                nvgBeginPath(args.vg);
-                nvgRect(args.vg, bx, H - 1.2f, bw - 1.2f, 0.6f);
-                nvgFillColor(args.vg, nvgRGBA(255, 180, 90, 90));
-                nvgFill(args.vg);
-            }
-        }
-    }
-};
-
 struct SynTHBloKDuoWidget : ModuleWidget {
+    void onButton(const ButtonEvent& e) override {   // clicking the module hands it the JAM
+        DU* m = getModule<DU>();
+        if (m && e.action == GLFW_PRESS && m->params[DU::MIDI_ON_PARAM].getValue() > 0.5f) jamown::claim(m->id);
+        ModuleWidget::onButton(e);
+    }
     SynTHBloKDuoWidget(DU* module) {
         setModule(module);
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKDuo.svg")));
@@ -1435,7 +1333,7 @@ struct SynTHBloKDuoWidget : ModuleWidget {
             float x0 = 77.6f + 51.f * e, w = 50.f;
             auto cx = [&](int i) { return x0 + w * (i + 0.5f) / 4.f; };
             DUHeader* h = createWidget<DUHeader>(mm2px(Vec(x0 + 1.5f, 10.5f)));
-            h->box.size = mm2px(Vec(w - 3.f, 12.f)); h->module = module; h->e = e;
+            h->box.size = mm2px(Vec(w - 3.f, 28.f)); h->module = module; h->e = e;
             addChild(h);
             int b = e ? DU::BASS_PARAM : DU::LEAD_PARAM;
             // sound knobs: 4 rows of 4, the last row GLIDE / GATE / OCT spread over the width
@@ -1443,8 +1341,20 @@ struct SynTHBloKDuoWidget : ModuleWidget {
                                DO_ATK, DO_DEC, DO_SUS, DO_REL, DO_GLIDE, DO_GATE, DO_OCT};
             const char* N[15] = {"WAVE 1", "WAVE 2", "FM", "SUB", "CUTOFF", "RES", "ENV", "DRIVE",
                                  "ATK", "DEC", "SUS", "REL", "GLIDE", "GATE", "OCT"};
-            for (int i = 0; i < 12; i++) knob(cx(i % 4), 31.f + 17.f * (i / 4), b + P[i], N[i]);
-            for (int i = 0; i < 3; i++) knob(x0 + w * (i + 0.5f) / 3.f, 82.f, b + P[12 + i], N[12 + i]);
+            // sound knobs, under the OLED: small black knobs with rings, CUTOFF a size up
+            auto synthKnob = [&](float x, float y, int param, const char* name) {
+                bool big = param == b + DO_CUTOFF;
+                float d = big ? 13.f : 11.f;
+                addChild(KnobTicks::create(Vec(x, y), d / 11.f));
+                DURing* r = createWidget<DURing>(mm2px(Vec(x - d * 0.5f, y - d * 0.5f)));
+                r->box.size = mm2px(Vec(d, d)); r->module = module; r->param = param;
+                addChild(r);
+                if (big) addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x, y)), module, param));
+                else addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(x, y)), module, param));
+                label(x, y + d * 0.5f + 2.2f, name);
+            };
+            for (int i = 0; i < 12; i++) synthKnob(cx(i % 4), 47.f + 16.f * (i / 4), b + P[i], N[i]);
+            for (int i = 0; i < 3; i++) synthKnob(x0 + w * (i + 0.5f) / 3.f, 95.f, b + P[12 + i], N[12 + i]);
             // bottom row: TUNE, LEVEL, then this synth's audio, pitch CV and gate
             auto bx = [&](int i) { return x0 + w * (i + 0.5f) / 5.f; };
             knob(bx(0), 116.f, b + DO_TUNE, NULL); label(bx(0), 109.f, "TUNE");
@@ -1464,6 +1374,11 @@ struct SynTHBloKDuoWidget : ModuleWidget {
         DUMasterDisplay* md = createWidget<DUMasterDisplay>(mm2px(Vec(OX, OY)));
         md->box.size = mm2px(Vec(OW, kMoBtn + 2.f * kMoBtnH + kMoBtnGap + 1.f)); md->module = module;
         addChild(md);
+        // MIDI on / off, right of the IN / OUT lines
+        oled::Cell* mc = createParam<oled::Cell>(mm2px(Vec(OX + OW - 10.5f, OY + 0.7f)), module, DU::MIDI_ON_PARAM);
+        mc->box.size = mm2px(Vec(9.f, 2.f * kMoRow - 1.4f));
+        mc->module = module; mc->label = "MIDI"; mc->latch = true; mc->green = true;
+        addParam(mc);
         struct CellDef { const char* label; int param, setTo; bool latch, green; int jack; };
         const CellDef cells[7] = {
             {"LEAD", DU::VIEW_PARAM, 0, false, false, -1},
@@ -1553,97 +1468,7 @@ struct SynTHBloKDuoWidget : ModuleWidget {
                                                            i == 3 ? DU::KNOB_OUTPUT : i == 4 ? DU::OUT_L_OUTPUT : DU::OUT_R_OUTPUT));
         }
 
-        // ---------------- right of BASS: FORGE FX ----------------
-        // the OLED, then the stage knobs (a row per stage, in the OLED's order, MIX last) and, right of
-        // them, the master filter, its ADSR and the levels
-        FXG* fm = module ? &module->fx : NULL;
-        const float FX0 = 179.6f, FOX = FX0 + 1.5f, FOY = 10.5f;
-        FXDisplay* fd = createWidget<FXDisplay>(mm2px(Vec(FOX, FOY)));
-        fd->box.size = mm2px(Vec(kFxW, kFxH)); fd->module = fm;
-        addChild(fd);
-        auto cell = [&](float x, float y, float w, float h, Module* mod, int param, const char* lab) -> oled::Cell* {
-            oled::Cell* c = createParam<oled::Cell>(mm2px(Vec(FOX + x, FOY + y)), mod, param);
-            c->box.size = mm2px(Vec(w, h)); c->module = mod; c->label = lab;
-            addParam(c);
-            return c;
-        };
-        const float CH = oled::kCellH;
-        for (int s = 0; s < 5; s++) {
-            cell(kFxPad, fxRowY(s), kFxCol - kFxPad - 1.f, CH, fm, kFxStage[s].on, kFxStage[s].name)->latch = true;
-            cell(kFxRndX, fxRowY(s), kFxRndW, CH, fm, FXG::RND_PARAM + s, "RND")->latch = true;
-        }
-        for (int k = 0; k < 3; k++) cell(kFxModeX + k * 6.5f, fxRowY(3), 6.f, CH, fm, FXG::PU_MODE_PARAM, kModeName[k])->setTo = k;
-        // throw steps in beats of four
-        const float tw = (kFxRndX - 1.f - kFxCol - 15.f * 0.4f - 3.f * 0.8f) / 16.f;
-        for (int i = 0; i < FXG::kThrowSteps; i++) {
-            FXThrowCell* c = createParam<FXThrowCell>(mm2px(Vec(FOX + kFxCol + i * (tw + 0.4f) + (i / 4) * 0.8f, FOY + fxRowY(5))),
-                                                      fm, FXG::throwParam(i));
-            c->box.size = mm2px(Vec(tw, CH)); c->module = fm; c->latch = true; c->gf = fm; c->idx = i;
-            addParam(c);
-        }
-        FXThrowRoll* roll = createWidget<FXThrowRoll>(mm2px(Vec(FOX + kFxRndX, FOY + fxRowY(5))));
-        roll->box.size = mm2px(Vec(kFxRndW, CH)); roll->module = fm;
-        addChild(roll);
-        oled::Cell* frz = cell(kFxRndX, fxRowY(6), kFxRndW, CH, fm, FXG::RND_FREEZE_PARAM, "FREEZE");
-        frz->latch = true; frz->fontSize = 5.5f;
-        // SEQ bars start at the value column, like the throw steps
-        const float sw = (kFxRndX - 1.f - kFxCol) / (1.f - GFSeqScreen::kTrigW), sx = kFxRndX - 1.f - sw;
-        FXSeq* sq = createWidget<FXSeq>(mm2px(Vec(FOX + sx, FOY + kFxSeqY)));
-        sq->box.size = mm2px(Vec(sw, kFxSeqH)); sq->module = fm; sq->labelX = 4.f - mm2px(sx);
-        addChild(sq);
-        cell(kFxRndX, kFxSeqY, kFxRndW, kFxSeqH, fm, FXG::FLT_BYPASS_PARAM, "BYP")->latch = true;
-        static const char* const stgName[3] = {"1", "2", "3"};
-        for (int k = 0; k < 3; k++) {
-            cell(kFxStgX + k * 5.5f, kFxFltY, 5.f, CH, fm, FXG::FLT_STAGES_PARAM, stgName[k])->setTo = k;
-            cell(kFxTypeX + k * 6.5f, kFxFltY, 6.f, CH, fm, FXG::FLT_MODE_PARAM, kModeName[k])->setTo = k;
-        }
-        oled::Cell* fxOn = cell(kFxRndX, kFxFltY, kFxRndW, CH, module, DU::FX_ON_PARAM, "FX");
-        fxOn->latch = true; fxOn->green = true;
-
-        auto fxLabel = [&](float cx, float cy, const char* text) {
-            GFLabel* l = createWidget<GFLabel>(mm2px(Vec(cx - 6.f, cy - 2.f)));
-            l->box.size = mm2px(Vec(12.f, 4.f)); l->text = text; l->size = 5.5f;
-            addChild(l);
-        };
-        auto fxKnob = [&](float x, float y, int param, const char* name) {
-            addChild(KnobTicks::create(Vec(x, y), 0.72f));
-            DURing* r = createWidget<DURing>(mm2px(Vec(x - 4.f, y - 4.f)));
-            r->box.size = mm2px(Vec(8.f, 8.f)); r->module = fm; r->param = param;
-            addChild(r);
-            addParam(createParamCentered<Trimpot>(mm2px(Vec(x, y)), fm, param));
-            fxLabel(x, y + 5.4f, name);
-        };
-        auto fxBigKnob = [&](float x, float y, int param, const char* name) {
-            addChild(KnobTicks::create(Vec(x, y)));
-            DURing* r = createWidget<DURing>(mm2px(Vec(x - 5.5f, y - 5.5f)));
-            r->box.size = mm2px(Vec(11.f, 11.f)); r->module = fm; r->param = param;
-            addChild(r);
-            addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(x, y)), fm, param));
-            fxLabel(x, y + 7.4f, name);
-        };
-        static const int SP[5][6] = {
-            {FXG::SH_PATTERN_PARAM, FXG::SH_AMOUNT_PARAM, FXG::SH_REV_PARAM, FXG::SH_PITCH_PARAM, FXG::SH_LEN_PARAM, FXG::SH_MIX_PARAM},
-            {FXG::GL_CHANCE_PARAM, FXG::GL_ROLL_PARAM, FXG::GL_REV_PARAM, FXG::GL_STOP_PARAM, FXG::GL_CRUSH_PARAM, FXG::GL_MIX_PARAM},
-            {FXG::RB_ROOT_PARAM, FXG::RB_CHORD_PARAM, FXG::RB_VOWEL_PARAM, FXG::RB_RING_PARAM, FXG::RB_Q_PARAM, FXG::RB_MIX_PARAM},
-            {FXG::PU_CUTOFF_PARAM, FXG::PU_RES_PARAM, FXG::PU_DEPTH_PARAM, FXG::PU_PATTERN_PARAM, FXG::PU_DECAY_PARAM, FXG::PU_MIX_PARAM},
-            {FXG::DL_TIME_PARAM, FXG::DL_FDBK_PARAM, FXG::DL_WARP_PARAM, FXG::DL_ROUTE_PARAM, FXG::DL_TONE_PARAM, FXG::DL_MIX_PARAM}};
-        static const char* const SN[5][6] = {
-            {"PATTERN", "AMOUNT", "REVERSE", "OCTAVE", "LENGTH", "MIX"}, {"CHANCE", "ROLL", "REVERSE", "STOP", "CRUSH", "MIX"},
-            {"ROOT", "CHORD", "VOWEL", "RING", "RES", "MIX"}, {"CUTOFF", "RES", "DEPTH", "PATTERN", "DECAY", "MIX"},
-            {"TIME", "FDBK", "WARP", "ROUTE", "TONE", "ECHO"}};
-        for (int s = 0; s < 5; s++)
-            for (int k = 0; k < 6; k++) fxKnob(FX0 + 1.2f + 9.6f * (k + 0.5f), 70.8f + 11.7f * s, SP[s][k], SN[s][k]);
-        const float M0 = FX0 + 59.6f;
-        fxBigKnob(M0 + 7.f, 71.5f, FXG::FILTER_PARAM, "FILTER");
-        fxKnob(M0 + 18.5f, 71.5f, FXG::FLT_RES_PARAM, "RES");
-        fxKnob(M0 + 27.5f, 71.5f, FXG::FLT_ENV_PARAM, "ENV");
-        fxKnob(M0 + 36.5f, 71.5f, FXG::FLT_AMP_PARAM, "AMP");
-        const int fxAdsr[4] = {FXG::FLT_ATK_PARAM, FXG::FLT_DEC_PARAM, FXG::FLT_SUS_PARAM, FXG::FLT_REL_PARAM};
-        const char* fxAn[4] = {"ATK", "DEC", "SUS", "REL"};
-        for (int i = 0; i < 4; i++) fxKnob(M0 + 6.f + 10.f * i, 94.2f, fxAdsr[i], fxAn[i]);
-        fxKnob(M0 + 7.f, 116.f, FXG::IN_GAIN_PARAM, "INPUT");
-        fxBigKnob(M0 + 21.f, 116.f, FXG::DRYWET_PARAM, "DRY / WET");
-        fxKnob(M0 + 35.f, 116.f, FXG::OUT_GAIN_PARAM, "OUTPUT");
+        forgeFxAddPanel(this, module ? &module->fx : NULL, module, DU::FX_ON_PARAM, 179.6f);
     }
 
     void appendContextMenu(Menu* menu) override {
