@@ -21,14 +21,15 @@ static float CX(int c) { return 9.5f + 14.5f * c; }
 static const float KY[7] = {20.f, 31.f, 42.f, 53.f, 64.f, 75.f, 86.f};
 static const float MB_Y = 98.f, MB_DX = 3.7f;
 static const float LJ_Y = 111.4f, RJ_Y = 120.2f;
-static const float MCOL = 180.f, MCOL_W = 56.4f;
-static const float MKX[5] = {186.8f, 197.4f, 208.0f, 218.6f, 229.2f};
+// the FX column sits next to the strips, MASTER at the right edge
+static const float MCOL = 220.5f, MCOL_W = 56.4f;
+static const float MKX[5] = {MCOL + 6.8f, MCOL + 17.4f, MCOL + 28.0f, MCOL + 38.6f, MCOL + 49.2f};
 static const float MKY = 21.f;
-static const float D1[4] = {181.5f, 35.6f, 53.4f, 56.f};       // levels OLED
-static const float JX[4] = {191.1f, 202.5f, 213.9f, 225.3f};
+static const float D1[4] = {MCOL + 1.5f, 35.6f, 53.4f, 56.f};       // levels OLED
+static const float JX[4] = {MCOL + 11.1f, MCOL + 22.5f, MCOL + 33.9f, MCOL + 45.3f};
 static const float JY[2] = {104.4f, 115.6f};
-static const float FCOL = 238.8f, FCOL_W = 38.1f, FC = FCOL + FCOL_W * 0.5f;
-static const float D2[4] = {240.3f, 16.2f, 35.1f, 30.f};        // FX OLED
+static const float FCOL = 180.f, FCOL_W = 38.1f, FC = FCOL + FCOL_W * 0.5f;
+static const float D2[4] = {FCOL + 1.5f, 16.2f, FCOL_W - 3.f, 30.f};   // FX OLED
 // FX knobs as on MATRIX-DUO's FINAL stage: small knobs with an 11 mm ring + ticks, the big RETURN with a 19 mm one
 static const float PX[3] = {FC - 12.f, FC, FC + 12.f};
 static const float PY = 54.5f;
@@ -340,29 +341,18 @@ struct M12ArcKnob : K {
     }
 };
 
-// Amber value arc around an FX knob (0..1 of the knob's range), as on MATRIX-DUO.
-struct M12Ring : TransparentWidget {
-    Module* module = NULL;
-    int param = 0;
-    void drawLayer(const DrawArgs& args, int layer) override {
-        if (layer != 1) return;
-        float v = module ? module->paramQuantities[param]->getScaledValue() : 0.5f;
-        float cx = box.size.x * 0.5f, cy = box.size.y * 0.5f, rr = box.size.x * 0.5f - 1.5f;
-        float a0 = M_PI * 0.75f, a1 = M_PI * 2.25f;
-        nvgBeginPath(args.vg);
-        nvgArc(args.vg, cx, cy, rr, a0, a1, NVG_CW);
-        nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, 40));
-        nvgStrokeWidth(args.vg, 1.8f);
-        nvgStroke(args.vg);
-        if (v > 0.001f) {
-            nvgBeginPath(args.vg);
-            nvgArc(args.vg, cx, cy, rr, a0, a0 + (a1 - a0) * v, NVG_CW);
-            nvgStrokeColor(args.vg, nvgRGBA(255, 112, 15, 235));
-            nvgStrokeWidth(args.vg, 1.8f);
-            nvgStroke(args.vg);
-        }
-    }
-};
+// FX knob: the strips' fire arc on a bigger knob, inside MATRIX-DUO style dash marks. d = the mark ring's size
+// class (11 mm small, 19 mm big); the travel matches the marks' 270 deg. Returns the knob (e.g. to set snap).
+template <class K>
+static M12ArcKnob<K>* m12FxKnob(ModuleWidget* w, Module* m, float x, float y, float d, int param) {
+    w->addChild(KnobTicks::create(Vec(x, y), d / 11.f));
+    auto* k = createParamCentered<M12ArcKnob<K>>(mm2px(Vec(x, y)), m, param);
+    k->arcR = d * 0.5f - 0.5f;
+    k->minAngle = -0.75f * float(M_PI);
+    k->maxAngle = 0.75f * float(M_PI);
+    w->addParam(k);
+    return k;
+}
 
 // effective 0..1 value of channel knob k (0..5) / master knob i, for the arcs
 static float m12EffCh(M12* m, int c, int k) {
@@ -837,28 +827,16 @@ struct SynTHBloKMix12Widget : ModuleWidget {
         fd->box.size = mm(M12L::D2[2], M12L::D2[3]);
         fd->module = module;
         addChild(fd);
-        auto ring = [&](float x, float y, float d, int param) {   // ticks + value ring, d = ring diameter (mm)
-            addChild(KnobTicks::create(Vec(x, y), d / 11.f));
-            M12Ring* r = createWidget<M12Ring>(mm(x - d * 0.5f, y - d * 0.5f));
-            r->box.size = mm(d, d); r->module = module; r->param = param;
-            addChild(r);
-        };
-        for (int i = 0; i < 3; i++) {
-            ring(M12L::PX[i], M12L::PY, 11.f, M12::FX_P1_PARAM + i);
-            addParam(createParamCentered<RoundSmallBlackKnob>(mm(M12L::PX[i], M12L::PY), module, M12::FX_P1_PARAM + i));
-        }
-        ring(M12L::FC, M12L::RET_Y, 19.f, M12::FX_RET_PARAM);
-        addParam(createParamCentered<RoundLargeBlackKnob>(mm(M12L::FC, M12L::RET_Y), module, M12::FX_RET_PARAM));
+        for (int i = 0; i < 3; i++)
+            m12FxKnob<RoundSmallBlackKnob>(this, module, M12L::PX[i], M12L::PY, 11.f, M12::FX_P1_PARAM + i);
+        m12FxKnob<RoundLargeBlackKnob>(this, module, M12L::FC, M12L::RET_Y, 19.f, M12::FX_RET_PARAM);
         addOutput(createOutputCentered<SmallJack>(mm(M12L::FXJ_X[0], M12L::FXJ_Y), module, M12::FX_SEND_L_OUTPUT));
         addOutput(createOutputCentered<SmallJack>(mm(M12L::FXJ_X[1], M12L::FXJ_Y), module, M12::FX_SEND_R_OUTPUT));
         addInput(createInputCentered<SmallJack>(mm(M12L::FXJ_X[2], M12L::FXJ_Y), module, M12::FX_RTN_L_INPUT));
         addInput(createInputCentered<SmallJack>(mm(M12L::FXJ_X[3], M12L::FXJ_Y), module, M12::FX_RTN_R_INPUT));
         addChild(JackLed::create(Vec(M12L::FXJ_X[0] + 3.6f, M12L::FXJ_Y), module, M12::FX_SEND_L_OUTPUT, true));
         addChild(JackLed::create(Vec(M12L::FXJ_X[1] + 3.6f, M12L::FXJ_Y), module, M12::FX_SEND_R_OUTPUT, true));
-        ring(M12L::FC, M12L::SEL_Y, 11.f, M12::FX_SEL_PARAM);
-        auto* sel = createParamCentered<RoundSmallBlackKnob>(mm(M12L::FC, M12L::SEL_Y), module, M12::FX_SEL_PARAM);
-        sel->snap = true;
-        addParam(sel);
+        m12FxKnob<RoundSmallBlackKnob>(this, module, M12L::FC, M12L::SEL_Y, 11.f, M12::FX_SEL_PARAM)->snap = true;
     }
 
     void appendContextMenu(Menu* menu) override {

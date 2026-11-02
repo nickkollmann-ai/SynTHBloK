@@ -1193,29 +1193,18 @@ struct MixFxDisplay : TransparentWidget {
     }
 };
 
-// Amber value arc around an FX knob (0..1 of the knob's range), as on MATRIX-DUO.
-struct MixRing : TransparentWidget {
-    Module* module = nullptr;
-    int param = 0;
-    void drawLayer(const DrawArgs& args, int layer) override {
-        if (layer != 1) return;
-        float v = module ? module->paramQuantities[param]->getScaledValue() : 0.5f;
-        float cx = box.size.x * 0.5f, cy = box.size.y * 0.5f, rr = box.size.x * 0.5f - 1.5f;
-        float a0 = M_PI * 0.75f, a1 = M_PI * 2.25f;
-        nvgBeginPath(args.vg);
-        nvgArc(args.vg, cx, cy, rr, a0, a1, NVG_CW);
-        nvgStrokeColor(args.vg, nvgRGBA(255, 180, 90, 40));
-        nvgStrokeWidth(args.vg, 1.8f);
-        nvgStroke(args.vg);
-        if (v > 0.001f) {
-            nvgBeginPath(args.vg);
-            nvgArc(args.vg, cx, cy, rr, a0, a0 + (a1 - a0) * v, NVG_CW);
-            nvgStrokeColor(args.vg, nvgRGBA(255, 112, 15, 235));
-            nvgStrokeWidth(args.vg, 1.8f);
-            nvgStroke(args.vg);
-        }
-    }
-};
+// FX knob: the strips' fire arc on a bigger knob, inside MATRIX-DUO style dash marks. d = the mark ring's size
+// class (11 mm small, 19 mm big); the travel matches the marks' 270 deg. Returns the knob (e.g. to set snap).
+template <class K>
+static ArcKnob<K>* mixFxKnob(ModuleWidget* w, Module* m, float x, float y, float d, int param) {
+    w->addChild(KnobTicks::create(Vec(x, y), d / 11.f));
+    auto* k = createParamCentered<ArcKnob<K>>(mm2px(Vec(x, y)), m, param);
+    k->arcR = d * 0.5f - 0.5f;
+    k->minAngle = -0.75f * float(M_PI);
+    k->maxAngle = 0.75f * float(M_PI);
+    w->addParam(k);
+    return k;
+}
 
 // Title + every static label on the panel, as on MIX-12 / MIX-8 (the SVG carries no text).
 struct MixPanelText : TransparentWidget {
@@ -1330,23 +1319,11 @@ SynTHBloKMix24Widget::SynTHBloKMix24Widget(SynTHBloKMix24* module) {
 
     // onboard FX, as on MIX-12 / MIX-8: P1..P3 small ring knobs, the big RETURN, program selector (detented)
     {
-        auto ring = [&](float x, float y, float d, int param) {   // ticks + value ring, d = ring diameter (mm)
-            addChild(KnobTicks::create(Vec(x, y), d / 11.f));
-            MixRing* r = createWidget<MixRing>(mm(x - d * 0.5f, y - d * 0.5f));
-            r->box.size = mm(d, d); r->module = module; r->param = param;
-            addChild(r);
-        };
-        ring(MXL::FXC[0], MXL::FXC[1], 11.f, SynTHBloKMix24::OB_FX_SEL_PARAM);
-        auto* sel = createParamCentered<RoundSmallBlackKnob>(mm(MXL::FXC[0], MXL::FXC[1]), module, SynTHBloKMix24::OB_FX_SEL_PARAM);
-        sel->snap = true;
-        addParam(sel);
+        mixFxKnob<RoundSmallBlackKnob>(this, module, MXL::FXC[0], MXL::FXC[1], 11.f, SynTHBloKMix24::OB_FX_SEL_PARAM)->snap = true;
         static const int pp[3] = {SynTHBloKMix24::OB_FX_P1_PARAM, SynTHBloKMix24::OB_FX_P2_PARAM, SynTHBloKMix24::OB_FX_P3_PARAM};
-        for (int i = 0; i < 3; i++) {
-            ring(MXL::PX[i], MXL::PY, 11.f, pp[i]);
-            addParam(createParamCentered<RoundSmallBlackKnob>(mm(MXL::PX[i], MXL::PY), module, pp[i]));
-        }
-        ring(MXL::RET[0], MXL::RET[1], 19.f, SynTHBloKMix24::OB_FX_RET_PARAM);
-        addParam(createParamCentered<RoundLargeBlackKnob>(mm(MXL::RET[0], MXL::RET[1]), module, SynTHBloKMix24::OB_FX_RET_PARAM));
+        for (int i = 0; i < 3; i++)
+            mixFxKnob<RoundSmallBlackKnob>(this, module, MXL::PX[i], MXL::PY, 11.f, pp[i]);
+        mixFxKnob<RoundLargeBlackKnob>(this, module, MXL::RET[0], MXL::RET[1], 19.f, SynTHBloKMix24::OB_FX_RET_PARAM);
         auto* fd = new MixFxDisplay();
         fd->module = module;
         fd->box.pos = mm2px(Vec(MXL::D2[0], MXL::D2[1]));
