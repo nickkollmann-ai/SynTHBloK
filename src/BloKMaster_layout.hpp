@@ -6,6 +6,7 @@ static const float KX[7] = {10.600f, 23.600f, 36.600f, 49.600f, 62.600f, 75.600f
 static const float KY[4] = {21.800f, 43.400f, 65.000f, 86.600f};
 static const float BTN_X[4] = {10.600f, 23.600f, 36.600f, 49.600f};
 static const float BTN_Y = 108.00f;
+// by hand: row 1 = TRIM, LO CUT, LOW, MID, MID CUT, HIGH, HIGH CUT; AIR at KX[6] row 3, TILT at KX[6] row 4
 static const float CV_X[3] = {67.000f, 78.500f, 90.000f};
 static const float CV_Y = 108.00f;
 static const float IN_X[3] = {107.000f, 118.500f, 130.000f};
@@ -13,9 +14,11 @@ static const float OUT_X[2] = {145.000f, 154.500f};
 static const float IO_Y = 108.00f;
 static const float D1[4] = {102.000f, 15.600f, 56.560f, 36.000f};
 static const float D2[4] = {102.000f, 60.800f, 56.560f, 34.000f};
-// third column (added by hand): dynamics tracker + its view buttons
+// third column (added by hand): dynamics tracker (its view cells sit inside it) + the leveler band knobs
 static const float D3[4] = {163.500f, 60.800f, 56.000f, 34.000f};     // same row and height as D2 (METERS)
-static const float VIEW_X[4] = {170.500f, 184.500f, 198.500f, 212.500f};
+static const float MBK_X[4] = {170.500f, 184.500f, 198.500f, 212.500f};   // LOW, MID LO, MID HI, HIGH
 static const float D4[4] = {163.500f, 15.600f, 56.000f, 36.000f};     // TONE display, same row and size as D1
-static const float VIEW_Y = 108.00f;
+static const float MBK_Y = 108.00f;
+static const float MBK_LABEL_Y = 113.9f;                              // knob names (drawn by the widget)
+static const float MBK_HEAD[2] = {191.5f, 99.0f};                     // section heading centre
 }

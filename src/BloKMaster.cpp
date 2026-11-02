@@ -1,7 +1,7 @@
 // ============================================================================
 // BLOKMASTER - mastering strip (rebuilt)
 //
-//  IN -> trim -> low cut -> tone EQ (low / tilt / high / air) -> M-S gain
+//  IN -> trim -> low / high cut -> tone EQ (low / tilt / high / air) -> M-S gain
 //     -> glue compressor (soft knee, sidechain HPF, external SC, auto makeup)
 //     -> 3-band leveler (MULTI) -> saturator (2x oversampled) -> punch
 //     -> width + mono bass -> look-ahead brick-wall limiter -> output gain
@@ -13,6 +13,7 @@
 
 #include "plugin.hpp"
 #include "BloKMaster_layout.hpp"
+#include "OledUi.hpp"
 #include <cmath>
 #include <algorithm>
 #include <atomic>
@@ -70,6 +71,10 @@ struct Biquad {
         raw(A * ((A + 1.f) + (A - 1.f) * cw + tsa), -2.f * A * ((A - 1.f) + (A + 1.f) * cw), A * ((A + 1.f) + (A - 1.f) * cw - tsa),
             (A + 1.f) - (A - 1.f) * cw + tsa, 2.f * ((A - 1.f) - (A + 1.f) * cw), (A + 1.f) - (A - 1.f) * cw - tsa);
     }
+    void peak(float f, float q, float gdb, float sr) {
+        float A = std::pow(10.f, gdb / 40.f), w = 2.f * (float) M_PI * fc(f, sr) / sr, cw = std::cos(w), al = std::sin(w) / (2.f * q);
+        raw(1.f + al * A, -2.f * cw, 1.f - al * A, 1.f + al / A, -2.f * cw, 1.f - al / A);
+    }
 };
 
 // two channels sharing one set of coefficients
@@ -122,6 +127,10 @@ struct BlokMaster : Module {
         DRIVE_PARAM, SATMIX_PARAM, MB_PARAM, MID_PARAM, SIDE_PARAM,
         BYPASS_PARAM, AUTO_PARAM, MONO_PARAM, SIDESOLO_PARAM,
         VIEW_LIM_PARAM, VIEW_COMP_PARAM, VIEW_MULTI_PARAM, VIEW_LOUD_PARAM,
+        EQ_MID_PARAM, MIDCUT_PARAM,
+        // leveler bands (the knobs under the DYNAMICS display)
+        MB_LOW_PARAM, MB_MIDLO_PARAM, MB_MIDHI_PARAM, MB_HIGH_PARAM, MB_SPEED_PARAM, MB_RANGE_PARAM,
+        HICUT_PARAM,
         NUM_PARAMS
     };
     enum InputIds { IN_L_INPUT, IN_R_INPUT, SIDECHAIN_INPUT, THR_CV_INPUT, DRIVE_CV_INPUT, WIDTH_CV_INPUT, NUM_INPUTS };
@@ -130,6 +139,7 @@ struct BlokMaster : Module {
         COMP_GR_LIGHT, LIMIT_GR_LIGHT, CORRELATION_LIGHT,
         BYPASS_LIGHT, AUTO_LIGHT, MONO_LIGHT, SIDESOLO_LIGHT,
         VIEW_LIM_LIGHT, VIEW_COMP_LIGHT, VIEW_MULTI_LIGHT, VIEW_LOUD_LIGHT,
+        MIDCUT_LIGHT,
         NUM_LIGHTS
     };
 
@@ -154,13 +164,15 @@ struct BlokMaster : Module {
     float compThrDb = -12.f;                 // effective threshold incl. CV, for the COMP view
     int view = VIEW_LIM;                     // tracker view, saved with the patch
     dsp::BooleanTrigger viewTrig[NUM_VIEWS];
+    float viewOn[NUM_VIEWS] = {1.f};         // 1 = the shown view, lights its cell in the DYNAMICS display
 
     // ---- DSP state ----
     float sr = 48000.f;
     int ctrlCount = 0;
 
     float trimLin = 1.f, outLin = 1.f, byp = 0.f;
-    BiquadPair lowCut, lowSh, highSh, tiltLo, tiltHi, airSh;
+    BiquadPair lowCut, hiCut, lowSh, highSh, tiltLo, tiltHi, airSh, midPk, midCut;
+    float midCutSm = 0.f;                    // smoothed MID CUT amount, no zipper on the knob
 
     // compressor
     BiquadPair scHp;
@@ -168,9 +180,13 @@ struct BlokMaster : Module {
     float cThr = -12.f, cRatio = 2.f, cKnee = 6.f, cAtk = 0.01f, cRel = 0.001f, cMix = 1.f;
 
     // 3-band leveler
-    LR4 lp1[2], hp1[2], lp2[2], hp2[2], apLo[2], apHi[2];
+    // three bands with their own edges (LOW, MID LO .. MID HI, HIGH), so they can overlap or leave gaps
+    LR4 bLo[2], bMidHp[2], bMidLp[2], bHi[2];
     float mbFast[3] = {}, mbSlow[3] = {}, mbGain[3] = {};
     float mbMixSm = 0.f;
+    float bandF[4] = {};                     // the edges the band filters are set to (Hz)
+    // MB_LOW .. MB_HIGH knob (0..1) -> Hz, 30 Hz .. 16 kHz on a log scale (the TONE display's range)
+    static float edgeHz(float v) { return 30.f * std::pow(16000.f / 30.f, v); }
 
     // saturator (2x oversampled)
     Biquad osLp1[2], osLp2[2];
@@ -208,6 +224,10 @@ struct BlokMaster : Module {
         configParam(TILT_PARAM, -1.f, 1.f, 0.f, "Tilt (dark to bright)");
         configParam(LOW_PARAM, -12.f, 12.f, 0.f, "Low shelf (120 Hz)", " dB");
         configParam(HIGH_PARAM, -12.f, 12.f, 0.f, "High shelf (6 kHz)", " dB");
+        configParam(EQ_MID_PARAM, -12.f, 12.f, 0.f, "Mid bell (1 kHz)", " dB");
+        // a knob now (was an on/off button: old patches load as off / full)
+        configParam(MIDCUT_PARAM, 0.f, 1.f, 0.f, "Mid cut (scoop the mids, full = -24 dB at 1 kHz)", "%", 0.f, 100.f);
+        configParam(HICUT_PARAM, 2000.f, 20000.f, 20000.f, "High cut (20 kHz = off)", " Hz");
 
         configParam(COMP_THRESH_PARAM, -40.f, 0.f, -12.f, "Compressor threshold", " dB");
         configParam(COMP_RATIO_PARAM, 1.f, 20.f, 2.f, "Compressor ratio", ":1");
@@ -235,6 +255,14 @@ struct BlokMaster : Module {
         configParam(MB_PARAM, 0.f, 1.f, 0.f, "Multiband leveler amount", "%", 0.f, 100.f);
         configParam(MID_PARAM, -6.f, 6.f, 0.f, "Mid gain", " dB");
         configParam(SIDE_PARAM, -6.f, 6.f, 0.f, "Side gain", " dB");
+        // band edges, defaults where the old fixed crossovers were (180 Hz, 3.2 kHz)
+        const float v180 = std::log(180.f / 30.f) / std::log(16000.f / 30.f), v3k2 = std::log(3200.f / 30.f) / std::log(16000.f / 30.f);
+        configParam(MB_LOW_PARAM, 0.f, 1.f, v180, "Leveler low band: up to", " Hz", 16000.f / 30.f, 30.f);
+        configParam(MB_MIDLO_PARAM, 0.f, 1.f, v180, "Leveler mid band: from", " Hz", 16000.f / 30.f, 30.f);
+        configParam(MB_MIDHI_PARAM, 0.f, 1.f, v3k2, "Leveler mid band: up to", " Hz", 16000.f / 30.f, 30.f);
+        configParam(MB_HIGH_PARAM, 0.f, 1.f, v3k2, "Leveler high band: from", " Hz", 16000.f / 30.f, 30.f);
+        configParam(MB_SPEED_PARAM, 0.f, 1.f, 0.5f, "Leveler speed (slow -> fast)", "%", 0.f, 100.f);
+        configParam(MB_RANGE_PARAM, 1.f, 18.f, 9.f, "Leveler range (most cut; boost is 5/9 of it)", " dB");
 
         configSwitch(BYPASS_PARAM, 0.f, 1.f, 0.f, "Bypass", {"Active", "Bypassed"});
         configSwitch(AUTO_PARAM, 0.f, 1.f, 0.f, "Compressor auto makeup gain", {"Off", "On"});
@@ -272,11 +300,10 @@ struct BlokMaster : Module {
     // ------------------------------------------------------------------
     void onSampleRateChange() override {
         sr = APP->engine->getSampleRate();
+        for (float& f : bandF) f = 0.f;
+        setBands();
         for (int ch = 0; ch < 2; ch++) {
-            lp1[ch].setLP(180.f, sr); hp1[ch].setHP(180.f, sr);
-            lp2[ch].setLP(3200.f, sr); hp2[ch].setHP(3200.f, sr);
-            apLo[ch].setLP(3200.f, sr); apHi[ch].setHP(3200.f, sr);
-            lp1[ch].reset(); hp1[ch].reset(); lp2[ch].reset(); hp2[ch].reset(); apLo[ch].reset(); apHi[ch].reset();
+            bLo[ch].reset(); bMidHp[ch].reset(); bMidLp[ch].reset(); bHi[ch].reset();
             osLp1[ch].lowpass(0.45f * sr, 0.70710678f, 2.f * sr); osLp2[ch].copyCoefs(osLp1[ch]);
             osLp1[ch].reset(); osLp2[ch].reset();
         }
@@ -295,14 +322,33 @@ struct BlokMaster : Module {
         trkLen = std::max(1, (int) std::round(0.01f * sr));
     }
 
+    // leveler band edges (LOW, MID LO, MID HI, HIGH knobs), recomputed only when a knob moved
+    void setBands() {
+        for (int i = 0; i < 4; i++) {
+            float f = edgeHz(params[MB_LOW_PARAM + i].getValue());
+            if (f == bandF[i]) continue;
+            bandF[i] = f;
+            for (int ch = 0; ch < 2; ch++) {
+                if (i == 0) bLo[ch].setLP(f, sr);
+                else if (i == 1) bMidHp[ch].setHP(f, sr);
+                else if (i == 2) bMidLp[ch].setLP(f, sr);
+                else bHi[ch].setHP(f, sr);
+            }
+        }
+    }
+
     // ------------------------------------------------------------------
     // knob-dependent filters, refreshed every 32 samples
     // ------------------------------------------------------------------
     void updateControlRate() {
+        setBands();
         float lc = params[LOWCUT_PARAM].getValue();
         lowCut.c[0].highpass(lc, 0.70710678f, sr); lowCut.sync();
+        hiCut.c[0].lowpass(params[HICUT_PARAM].getValue(), 0.70710678f, sr); hiCut.sync();
         lowSh.c[0].lowShelf(120.f, params[LOW_PARAM].getValue(), sr); lowSh.sync();
         highSh.c[0].highShelf(6000.f, params[HIGH_PARAM].getValue(), sr); highSh.sync();
+        midPk.c[0].peak(1000.f, 0.7f, params[EQ_MID_PARAM].getValue(), sr); midPk.sync();
+        midCut.c[0].peak(1000.f, 0.6f, -24.f, sr); midCut.sync();
         float t = params[TILT_PARAM].getValue();
         tiltLo.c[0].lowShelf(650.f, -t * 5.f, sr); tiltLo.sync();
         tiltHi.c[0].highShelf(650.f, t * 5.f, sr); tiltHi.sync();
@@ -334,8 +380,12 @@ struct BlokMaster : Module {
         l *= trimLin; r *= trimLin;
 
         if (params[LOWCUT_PARAM].getValue() > 20.5f) { l = lowCut.c[0].process(l); r = lowCut.c[1].process(r); }
+        if (params[HICUT_PARAM].getValue() < 19950.f) { l = hiCut.c[0].process(l); r = hiCut.c[1].process(r); }
         l = airSh.c[0].process(highSh.c[0].process(lowSh.c[0].process(tiltHi.c[0].process(tiltLo.c[0].process(l)))));
         r = airSh.c[1].process(highSh.c[1].process(lowSh.c[1].process(tiltHi.c[1].process(tiltLo.c[1].process(r)))));
+        l = midPk.c[0].process(l); r = midPk.c[1].process(r);
+        midCutSm += (params[MIDCUT_PARAM].getValue() - midCutSm) * 0.002f;
+        { float cl = midCut.c[0].process(l), cr = midCut.c[1].process(r); l += (cl - l) * midCutSm; r += (cr - r) * midCutSm; }
 
         // ---------------- mid / side gain ----------------
         float midDb = params[MID_PARAM].getValue(), sideDb = params[SIDE_PARAM].getValue();
@@ -381,28 +431,30 @@ struct BlokMaster : Module {
         mbMixSm += (mbT - mbMixSm) * 0.002f;
         float mbGrNow = 0.f;
         if (mbMixSm > 0.0005f) {
+            // each band filtered out on its own (LR4 edges); its gain is applied as a change added to the
+            // dry signal, so at 0 dB the leveler is transparent however the bands overlap or gap
             float bl[3], br[3];
-            float lowL = lp1[0].process(l), restL = hp1[0].process(l);
-            float lowR = lp1[1].process(r), restR = hp1[1].process(r);
-            bl[0] = apLo[0].process(lowL) + apHi[0].process(lowL);
-            br[0] = apLo[1].process(lowR) + apHi[1].process(lowR);
-            bl[1] = lp2[0].process(restL); br[1] = lp2[1].process(restR);
-            bl[2] = hp2[0].process(restL); br[2] = hp2[1].process(restR);
-            float fastC = onePole(12.f, sr), slowC = onePole(900.f, sr), gC = onePole(25.f, sr);
+            bl[0] = bLo[0].process(l); br[0] = bLo[1].process(r);
+            bl[1] = bMidLp[0].process(bMidHp[0].process(l)); br[1] = bMidLp[1].process(bMidHp[1].process(r));
+            bl[2] = bHi[0].process(l); br[2] = bHi[1].process(r);
+            // SPEED: the slow average 3 s .. 300 ms (about 900 ms in the middle); RANGE: cut up to R dB, boost 5/9 R
+            float slowMs = 300.f * std::pow(10.f, 1.f - params[MB_SPEED_PARAM].getValue());
+            float rng = params[MB_RANGE_PARAM].getValue();
+            float fastC = onePole(12.f, sr), slowC = onePole(slowMs, sr), gC = onePole(25.f, sr);
             float sumL = 0.f, sumR = 0.f;
             for (int b = 0; b < 3; b++) {
                 float lv = 0.5f * (std::fabs(bl[b]) + std::fabs(br[b])) / FS_V;
                 mbFast[b] += (lv - mbFast[b]) * fastC;
                 mbSlow[b] += (lv - mbSlow[b]) * slowC;
                 float tg = 0.f;
-                if (mbSlow[b] > 1e-4f) tg = fclamp((lin2db(mbSlow[b]) - lin2db(mbFast[b])) * mbAmt * 0.75f, -9.f, 5.f);
+                if (mbSlow[b] > 1e-4f) tg = fclamp((lin2db(mbSlow[b]) - lin2db(mbFast[b])) * mbAmt * 0.75f, -rng, rng * 5.f / 9.f);
                 mbGain[b] += (tg - mbGain[b]) * gC;
-                float g = db2lin(mbGain[b]);
+                float g = db2lin(mbGain[b]) - 1.f;
                 sumL += bl[b] * g; sumR += br[b] * g;
                 mbGrNow = std::max(mbGrNow, -mbGain[b]);
             }
-            l = l * (1.f - mbMixSm) + sumL * mbMixSm;
-            r = r * (1.f - mbMixSm) + sumR * mbMixSm;
+            l += sumL * mbMixSm;
+            r += sumR * mbMixSm;
         }
 
         // ---------------- saturation (2x oversampled) ----------------
@@ -565,7 +617,8 @@ struct BlokMaster : Module {
         lights[AUTO_LIGHT].setBrightness(params[AUTO_PARAM].getValue());
         lights[MONO_LIGHT].setBrightness(params[MONO_PARAM].getValue());
         lights[SIDESOLO_LIGHT].setBrightness(params[SIDESOLO_PARAM].getValue());
-        for (int i = 0; i < NUM_VIEWS; i++) lights[VIEW_LIM_LIGHT + i].setBrightness(view == i ? 1.f : 0.f);
+        lights[MIDCUT_LIGHT].setBrightness(params[MIDCUT_PARAM].getValue());
+        for (int i = 0; i < NUM_VIEWS; i++) { viewOn[i] = view == i ? 1.f : 0.f; lights[VIEW_LIM_LIGHT + i].setBrightness(viewOn[i]); }
     }
 
     void resetIntegrated() { intSum = 0.0; intCount = 0.0; disp.lufsI = -70.f; }
@@ -587,6 +640,33 @@ struct BlokMaster : Module {
 namespace {
 NVGcolor AMB(int a = 255) { return nvgRGBA(255, 190, 90, a); }
 NVGcolor ORG(int a = 255) { return nvgRGBA(255, 122, 0, a); }
+// leveler band colours: LOW, MID, HIGH (TONE display, LEVELER view, the band icons under the knobs)
+const NVGcolor kBandCol[3] = {nvgRGBA(255, 122, 0, 255), nvgRGBA(255, 190, 90, 255), nvgRGBA(255, 240, 200, 255)};
+
+// The band shape under the MULTIBAND knobs, as on a multiband compressor: low-pass (LOW), band-pass spanning
+// MID LO .. MID HI, high-pass (HIGH). Drawn in the lit layer like the displays.
+struct BandIcon : TransparentWidget {
+    int band = 0;
+    static BandIcon* create(float x0Mm, float x1Mm, float yMm, int band) {
+        BandIcon* w = new BandIcon;
+        w->band = band;
+        w->box.pos = mm2px(Vec(x0Mm, yMm));
+        w->box.size = mm2px(Vec(x1Mm - x0Mm, 1.8f));
+        return w;
+    }
+    void drawLayer(const DrawArgs& a, int layer) override {
+        if (layer != 1) return;
+        float W = box.size.x, H = box.size.y, s = H;     // slope width = height
+        nvgBeginPath(a.vg);
+        if (band == 0) { nvgMoveTo(a.vg, 0.f, 0.f); nvgLineTo(a.vg, W - s, 0.f); nvgLineTo(a.vg, W, H); }
+        else if (band == 2) { nvgMoveTo(a.vg, 0.f, H); nvgLineTo(a.vg, s, 0.f); nvgLineTo(a.vg, W, 0.f); }
+        else { nvgMoveTo(a.vg, 0.f, H); nvgLineTo(a.vg, s, 0.f); nvgLineTo(a.vg, W - s, 0.f); nvgLineTo(a.vg, W, H); }
+        nvgStrokeWidth(a.vg, 1.4f);
+        nvgLineJoin(a.vg, NVG_ROUND);
+        nvgStrokeColor(a.vg, kBandCol[band]);
+        nvgStroke(a.vg);
+    }
+};
 
 struct MasterDisplayBase : TransparentWidget {
     BlokMaster* module = nullptr;
@@ -617,6 +697,30 @@ struct MasterDisplayBase : TransparentWidget {
         nvgText(a.vg, x, y, s, nullptr);
     }
     void draw(const DrawArgs& a) override { bg(a); }
+};
+
+// Panel lettering drawn at run time, sized and coloured like the SVG's: white knob names,
+// grey letter-spaced section headings.
+struct PanelText : TransparentWidget {
+    std::string s;
+    bool heading = false;
+    static PanelText* create(Vec centreMm, const char* s, bool heading) {
+        PanelText* t = new PanelText;
+        t->s = s; t->heading = heading;
+        t->box.size = mm2px(Vec(30.f, 4.f));
+        t->box.pos = mm2px(centreMm).minus(t->box.size.div(2.f));
+        return t;
+    }
+    void draw(const DrawArgs& a) override {
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(a.vg, font->handle);
+        nvgFontSize(a.vg, heading ? 6.8f : 6.2f);
+        nvgTextLetterSpacing(a.vg, heading ? 1.6f : 0.4f);
+        nvgTextAlign(a.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(a.vg, heading ? nvgRGB(0xbb, 0xbb, 0xbb) : nvgRGB(0xff, 0xff, 0xff));
+        nvgText(a.vg, box.size.x * 0.5f, box.size.y * 0.5f, s.c_str(), NULL);
+    }
 };
 
 // ---- ANALYZER: spectrum + loudness -----------------------------------------
@@ -747,6 +851,8 @@ struct MeterDisplay : MasterDisplayBase {
 };
 
 // ---- DYNAMICS: scrolling history - limiter / compressor / leveler / loudness ----
+// The view cells sit inside it along the top (oled::Cell, added by the widget), kCellTop mm down.
+const float kCellTop = 1.5f;
 struct DynamicsTracker : MasterDisplayBase {
     typedef float TrackFrame::*Field;
     TrackFrame buf[NVIEW];
@@ -937,17 +1043,17 @@ struct DynamicsTracker : MasterDisplayBase {
 
     void drawLayer(const DrawArgs& a, int layer) override {
         if (layer != 1) return;
-        sw = box.size.x - 8.f; sh = box.size.y - 30.f;
+        // the plot starts under the view cells (LIM / COMP / MULTI / LOUD, laid over the top of the display)
+        sy = mm2px(kCellTop + oled::kCellH) + 3.f;
+        sw = box.size.x - 8.f; sh = box.size.y - 26.f - sy;
         fetch();
         int v = module ? module->view : VIEW_LIM;
-        static const char* title[NUM_VIEWS] = {"LIMITER", "COMPRESSOR", "LEVELER", "LOUDNESS"};
         nvgSave(a.vg);
         nvgScissor(a.vg, sx, sy, sw, sh);
         if (v == VIEW_COMP) drawComp(a);
         else if (v == VIEW_MULTI) drawMulti(a);
         else if (v == VIEW_LOUD) drawLoud(a);
         else drawLimiter(a);
-        text(a, sx + sw * 0.5f, sy + 1.f, title[v], 6.f, AMB(90), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
         nvgResetScissor(a.vg);
         nvgRestore(a.vg);
         frame(a);
@@ -984,7 +1090,13 @@ struct ToneDisplay : MasterDisplayBase {
         float sr = module ? module->sr : 48000.f;
         float lcF = param(BlokMaster::LOWCUT_PARAM, 40.f), lowDb = param(BlokMaster::LOW_PARAM, 3.f), tilt = param(BlokMaster::TILT_PARAM, 0.2f);
         float highDb = param(BlokMaster::HIGH_PARAM, -2.f), airAmt = param(BlokMaster::AIR_PARAM, 0.4f);
-        Biquad lc, ls, hs, tl, th, air;
+        float midDb = param(BlokMaster::EQ_MID_PARAM, 0.f);
+        float cutAmt = module ? module->midCutSm : 0.f;
+        float hcF = param(BlokMaster::HICUT_PARAM, 20000.f);
+        Biquad lc, hc, ls, hs, tl, th, air, mp, mc;
+        hc.lowpass(hcF, 0.70710678f, sr);
+        mp.peak(1000.f, 0.7f, midDb, sr);
+        mc.peak(1000.f, 0.6f, -24.f, sr);
         lc.highpass(lcF, 0.70710678f, sr);
         ls.lowShelf(120.f, lowDb, sr);
         hs.highShelf(6000.f, highDb, sr);
@@ -1001,19 +1113,43 @@ struct ToneDisplay : MasterDisplayBase {
         text(a, sx + 1.f, gy(12.f) + 1.f, "+12", 6.f, nvgRGBA(255, 180, 90, 90), NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
         text(a, sx + 1.f, gy(-12.f) - 1.f, "-12", 6.f, nvgRGBA(255, 180, 90, 90), NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
 
-        // leveler bands: crossover lines + live band gain bars
-        const float bf[4] = {F0, 180.f, 3200.f, F1};
-        const NVGcolor bc[3] = {nvgRGBA(255, 122, 0, 255), nvgRGBA(255, 190, 90, 255), nvgRGBA(255, 240, 200, 255)};
-        for (int i = 1; i <= 2; i++) {
-            nvgBeginPath(a.vg);
-            for (float y = sy; y < sy + sh; y += 4.f) { nvgMoveTo(a.vg, fx(bf[i]), y); nvgLineTo(a.vg, fx(bf[i]), std::min(y + 2.f, sy + sh)); }
-            nvgStrokeColor(a.vg, AMB(110)); nvgStroke(a.vg);
-            text(a, fx(bf[i]) + 1.5f, sy + 1.f, i == 1 ? "X 180" : "X 3.2k", 6.f, AMB(150), NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-        }
-        for (int b = 0; b < 3; b++) {
-            float g = module ? module->mbGain[b] * module->mbMixSm : (b == 0 ? 2.f : b == 1 ? -1.5f : 1.f);
-            nvgBeginPath(a.vg); nvgRect(a.vg, fx(bf[b]) + 1.f, gy(g) - 0.8f, fx(bf[b + 1]) - fx(bf[b]) - 2.f, 1.6f);
-            nvgFillColor(a.vg, nvgTransRGBA(bc[b], 170)); nvgFill(a.vg);
+        // leveler bands, drawn like a multiband compressor's: each band's response (LR4: low-pass at LOW,
+        // band-pass MID LO .. MID HI, high-pass at HIGH) as a trapezoid, its flat top riding the band's live gain
+        const float dflt[4] = {0.285f, 0.285f, 0.743f, 0.743f};
+        float ef[4];
+        for (int i = 0; i < 4; i++) ef[i] = BlokMaster::edgeHz(param(BlokMaster::MB_LOW_PARAM + i, dflt[i]));
+        {
+            Biquad lpLo, hpLo, lpHi, hpHi;
+            lpLo.lowpass(ef[0], 0.70710678f, sr); hpLo.highpass(ef[1], 0.70710678f, sr);
+            lpHi.lowpass(ef[2], 0.70710678f, sr); hpHi.highpass(ef[3], 0.70710678f, sr);
+            const float top = sy + sh * 0.14f, floorDb = 36.f;      // a band's 0 dB, and the depth shown below it
+            const int NB = 48;
+            nvgSave(a.vg);
+            nvgScissor(a.vg, sx, sy, sw, sh);
+            for (int b = 0; b < 3; b++) {
+                float g = module ? module->mbGain[b] * module->mbMixSm : (b == 0 ? 2.f : b == 1 ? -1.5f : 1.f);
+                float lift = g / R * sh * 0.5f;
+                nvgBeginPath(a.vg);
+                nvgMoveTo(a.vg, fx(F0), sy + sh);
+                for (int i = 0; i <= NB; i++) {
+                    float f = F0 * std::pow(F1 / F0, (float) i / NB);
+                    float db = b == 0 ? magDb(lpLo, f, sr) : b == 1 ? magDb(hpLo, f, sr) + magDb(lpHi, f, sr) : magDb(hpHi, f, sr);
+                    db *= 2.f;                                              // LR4 = each Butterworth stage twice
+                    nvgLineTo(a.vg, fx(f), top - lift + std::min(-db, floorDb) / floorDb * (sy + sh - top));
+                }
+                nvgLineTo(a.vg, fx(F1), sy + sh);
+                nvgClosePath(a.vg);
+                nvgFillColor(a.vg, nvgTransRGBA(kBandCol[b], 22)); nvgFill(a.vg);
+                nvgStrokeWidth(a.vg, 1.f); nvgStrokeColor(a.vg, nvgTransRGBA(kBandCol[b], 150)); nvgStroke(a.vg);
+            }
+            nvgRestore(a.vg);
+            // the four edges in their band's colour: LOW / HIGH on the top line, MID LO / MID HI under them
+            for (int i = 0; i < 4; i++) {
+                char eb[16];
+                if (ef[i] >= 1000.f) snprintf(eb, sizeof eb, "%.1fk", ef[i] / 1000.f); else snprintf(eb, sizeof eb, "%d", (int) std::round(ef[i]));
+                float x = fclamp(fx(ef[i]), sx + 8.f, sx + sw - 8.f);
+                text(a, x, sy + (i == 1 || i == 2 ? 8.f : 1.f), eb, 6.f, nvgTransRGBA(kBandCol[i == 0 ? 0 : i == 3 ? 2 : 1], 190), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+            }
         }
 
         // EQ curve with a soft fill to the 0 dB line
@@ -1023,6 +1159,9 @@ struct ToneDisplay : MasterDisplayBase {
             float f = F0 * std::pow(F1 / F0, (float) i / NP);
             float db = magDb(ls, f, sr) + magDb(hs, f, sr) + magDb(tl, f, sr) + magDb(th, f, sr) + magDb(air, f, sr);
             if (lcF > 20.5f) db += magDb(lc, f, sr);
+            if (hcF < 19950.f) db += magDb(hc, f, sr);
+            db += magDb(mp, f, sr);
+            if (cutAmt > 0.001f) db += lin2db(1.f + (db2lin(magDb(mc, f, sr)) - 1.f) * cutAmt);
             px[i] = fx(f); py[i] = gy(db);
         }
         nvgBeginPath(a.vg);
@@ -1041,15 +1180,17 @@ struct ToneDisplay : MasterDisplayBase {
         for (int k = 0; k < 5; k++) text(a, fx(ff[k]), sy + sh + 2.f, fl[k], 6.f, nvgRGBA(255, 180, 90, 100), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
 
         // readout: the tone knobs
-        char b[5][16];
+        char b[6][16];
         if (lcF > 20.5f) snprintf(b[0], 16, "%d", (int) lcF); else snprintf(b[0], 16, "OFF");
         snprintf(b[1], 16, "%+.1f", lowDb);
-        snprintf(b[2], 16, "%+.1f", tilt * 5.f);
-        snprintf(b[3], 16, "%+.1f", highDb);
-        snprintf(b[4], 16, "%d%%", (int) std::round(airAmt * 100.f));
-        const char* nm[5] = {"LO CUT", "LOW", "TILT", "HIGH", "AIR"};
-        float y0 = H - 17.f, colW = (W - 8.f) / 5.f;
-        for (int k = 0; k < 5; k++) {
+        if (param(BlokMaster::MIDCUT_PARAM, 0.f) > 0.005f) snprintf(b[2], 16, "CUT%d", (int) std::round(param(BlokMaster::MIDCUT_PARAM, 0.f) * 100.f));
+        else snprintf(b[2], 16, "%+.1f", midDb);
+        snprintf(b[3], 16, "%+.1f", tilt * 5.f);
+        snprintf(b[4], 16, "%+.1f", highDb);
+        snprintf(b[5], 16, "%d%%", (int) std::round(airAmt * 100.f));
+        const char* nm[6] = {"LO CUT", "LOW", "MID", "TILT", "HIGH", "AIR"};
+        float y0 = H - 17.f, colW = (W - 8.f) / 6.f;
+        for (int k = 0; k < 6; k++) {
             float x = 4.f + colW * (k + 0.5f);
             text(a, x, y0, nm[k], 6.f, dim, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
             text(a, x, y0 + 6.5f, b[k], 8.f, AMB(), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
@@ -1079,7 +1220,8 @@ struct BlokMasterWidget : ModuleWidget {
         };
         // row 1: tone
         knob(0, 0, BlokMaster::TRIM_PARAM);     knob(1, 0, BlokMaster::LOWCUT_PARAM);   knob(2, 0, BlokMaster::LOW_PARAM);
-        knob(3, 0, BlokMaster::TILT_PARAM);     knob(4, 0, BlokMaster::HIGH_PARAM);     knob(5, 0, BlokMaster::AIR_PARAM);
+        knob(3, 0, BlokMaster::EQ_MID_PARAM);   knob(4, 0, BlokMaster::MIDCUT_PARAM);   knob(5, 0, BlokMaster::HIGH_PARAM);
+        knob(6, 0, BlokMaster::HICUT_PARAM);
         // row 2: glue compressor
         knob(0, 1, BlokMaster::COMP_THRESH_PARAM); knob(1, 1, BlokMaster::COMP_RATIO_PARAM); knob(2, 1, BlokMaster::COMP_ATTACK_PARAM);
         knob(3, 1, BlokMaster::COMP_RELEASE_PARAM); knob(4, 1, BlokMaster::COMP_KNEE_PARAM); knob(5, 1, BlokMaster::COMP_SCHPF_PARAM);
@@ -1087,9 +1229,11 @@ struct BlokMasterWidget : ModuleWidget {
         // row 3: color / dynamics / mid-side
         knob(0, 2, BlokMaster::DRIVE_PARAM);    knob(1, 2, BlokMaster::SATMIX_PARAM);   knob(2, 2, BlokMaster::PUNCH_PARAM);
         knob(3, 2, BlokMaster::MB_PARAM);       knob(4, 2, BlokMaster::MID_PARAM);      knob(5, 2, BlokMaster::SIDE_PARAM);
+        knob(6, 2, BlokMaster::AIR_PARAM);
         // row 4: stereo / limiter / out
         knob(0, 3, BlokMaster::WIDTH_PARAM);    knob(1, 3, BlokMaster::MONO_BASS_PARAM); knob(2, 3, BlokMaster::LIMIT_THRESH_PARAM);
         knob(3, 3, BlokMaster::LIMIT_CEILING_PARAM); knob(4, 3, BlokMaster::LIMIT_RELEASE_PARAM); knob(5, 3, BlokMaster::OUT_GAIN_PARAM);
+        knob(6, 3, BlokMaster::TILT_PARAM);
 
         // monitor buttons (round TL1105 with the light under the cap, like the other modules)
         const int btnParam[4] = {BlokMaster::BYPASS_PARAM, BlokMaster::AUTO_PARAM, BlokMaster::MONO_PARAM, BlokMaster::SIDESOLO_PARAM};
@@ -1146,12 +1290,29 @@ struct BlokMasterWidget : ModuleWidget {
         td->box.size = mm2px(Vec(BML::D4[2], BML::D4[3]));
         addChild(td);
 
-        // tracker view buttons (light under the cap shows the active view)
+        // tracker view cells, inside the DYNAMICS display along its top (lit = the shown view)
+        static const char* const viewName[NUM_VIEWS] = {"LIM", "COMP", "MULTI", "LOUD"};
+        const float CG = 1.f, CW = (BML::D3[2] - 4.f - CG * (NUM_VIEWS - 1)) / NUM_VIEWS;
         for (int i = 0; i < NUM_VIEWS; i++) {
-            Vec p = mm2px(Vec(BML::VIEW_X[i], BML::VIEW_Y));
-            addChild(createLightCentered<SmallLight<YellowLight>>(p, module, BlokMaster::VIEW_LIM_LIGHT + i));
-            addParam(createParamCentered<TL1105>(p, module, BlokMaster::VIEW_LIM_PARAM + i));
+            oled::Cell* c = createParam<oled::Cell>(mm2px(Vec(BML::D3[0] + 2.f + i * (CW + CG), BML::D3[1] + kCellTop)), module,
+                                                    BlokMaster::VIEW_LIM_PARAM + i);
+            c->box.size = mm2px(Vec(CW, oled::kCellH));
+            c->module = module; c->label = viewName[i];
+            if (module) c->flash = &module->viewOn[i];
+            addParam(c);
         }
+
+        // leveler band edges where the view buttons were: LOW, MID LO, MID HI, HIGH, with the band shapes under them
+        static const char* const mbName[4] = {"LOW", "MID LO", "MID HI", "HIGH"};
+        for (int i = 0; i < 4; i++) {
+            addParam(createParamCentered<Trimpot>(mm2px(Vec(BML::MBK_X[i], BML::MBK_Y)), module, BlokMaster::MB_LOW_PARAM + i));
+            addChild(PanelText::create(Vec(BML::MBK_X[i], BML::MBK_LABEL_Y), mbName[i], false));
+        }
+        const float iy = BML::MBK_LABEL_Y + 2.6f, ih = 3.5f;   // icon half width under a single knob
+        addChild(BandIcon::create(BML::MBK_X[0] - ih, BML::MBK_X[0] + ih, iy, 0));
+        addChild(BandIcon::create(BML::MBK_X[1] - ih, BML::MBK_X[2] + ih, iy, 1));
+        addChild(BandIcon::create(BML::MBK_X[3] - ih, BML::MBK_X[3] + ih, iy, 2));
+        addChild(PanelText::create(Vec(BML::MBK_HEAD[0], BML::MBK_HEAD[1]), "MULTIBAND", true));
     }
 
     void appendContextMenu(Menu* menu) override {
@@ -1159,6 +1320,13 @@ struct BlokMasterWidget : ModuleWidget {
         if (!m) return;
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuItem("Restart integrated loudness", "", [=]() { m->resetIntegrated(); }));
+        menu->addChild(createMenuLabel("Multiband leveler"));
+        for (int id : {BlokMaster::MB_SPEED_PARAM, BlokMaster::MB_RANGE_PARAM}) {
+            ui::Slider* s = new ui::Slider;
+            s->quantity = m->paramQuantities[id];
+            s->box.size.x = 220.f;
+            menu->addChild(s);
+        }
     }
 };
 
