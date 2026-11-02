@@ -235,6 +235,17 @@
         "Oscillator",
         "Sequencer"
       ]
+    },
+    {
+      "slug": "SynTHBloKEcho",
+      "name": "SynTHBloK MATRIX-ECHO",
+      "description": "Stereo delay and looper: 12 delay types (MATRIX ping-pong, clean digital, chorused, analog, tape, lo-fi, ducking, reverse, ping-pong, slap, octave shimmer, multi-head space echo), tap tempo and clock with 11 subdivisions incl. dual, freeze, kill dry, trails, reverb, 6 presets, 60 s stereo looper with overdub, play once and undo",
+      "tags": [
+        "Effect",
+        "Delay",
+        "Reverb",
+        "Sampler"
+      ]
     }
   ],
   "authorEmail": "support@liquidnick.com",

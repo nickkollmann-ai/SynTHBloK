@@ -1,6 +1,7 @@
 #pragma once
-// Shared DSP for SynTHBloK MATRIX-8 and MATRIX FORGE: the 8 row voices, ping-pong delay and reverb.
+// Shared DSP for SynTHBloK MATRIX-8 and MATRIX FORGE: the 8 row voices (delay and reverb: Echo_dsp.hpp).
 #include "plugin.hpp"
+#include "Echo_dsp.hpp"   // M8Delay / M8Reverb
 #include <cmath>
 #include <vector>
 
@@ -134,55 +135,6 @@ struct M8Voice {
     }
 };
 
-// Stereo ping-pong delay: left feeds right and back, a low-pass in the loop darkens each repeat.
-struct M8Delay {
-    std::vector<float> bl, br;
-    int pos = 0;
-    float lpL = 0.f, lpR = 0.f, time = 0.375f;
-    void init(float sr) { bl.assign((size_t)(sr * 2.1f), 0.f); br.assign(bl.size(), 0.f); pos = 0; }
-    void process(float inL, float inR, float sr, float targetTime, float& outL, float& outR) {
-        if (bl.empty()) init(sr);
-        time += (clamp(targetTime, 0.02f, 2.f) - time) * 0.0002f;   // glide when the tempo changes
-        int n = (int)bl.size();
-        float d = time * sr;
-        int i0 = (int)d; float f = d - i0;
-        auto tap = [&](std::vector<float>& b) {
-            int a = (pos - i0 + n) % n, c = (pos - i0 - 1 + n) % n;
-            return b[a] + (b[c] - b[a]) * f;
-        };
-        float dl = tap(bl), dr = tap(br);
-        lpL += (dl - lpL) * 0.35f;
-        lpR += (dr - lpR) * 0.35f;
-        bl[pos] = inL + lpR * 0.5f;          // ping-pong: each side feeds the other
-        br[pos] = inR + lpL * 0.5f;
-        pos = (pos + 1) % n;
-        outL = dl; outR = dr;
-    }
-};
-
-// Small stereo reverb (Freeverb-style: 4 damped combs + 2 allpasses per side).
-struct M8Reverb {
-    struct Comb { std::vector<float> b; int i = 0; float lp = 0.f;
-        float process(float x, float fb, float damp) { float y = b[i]; lp = y + (lp - y) * damp; b[i] = x + lp * fb; i = (i + 1) % (int)b.size(); return y; } };
-    struct AllPass { std::vector<float> b; int i = 0;
-        float process(float x) { float y = b[i]; b[i] = x + y * 0.5f; i = (i + 1) % (int)b.size(); return y - x; } };
-    Comb cl[4], cr[4];
-    AllPass al[2], ar[2];
-    bool ready = false;
-    void init(float sr) {
-        static const int combs[4] = {1116, 1188, 1277, 1356}, aps[2] = {556, 441};
-        float s = sr / 44100.f;
-        for (int k = 0; k < 4; k++) { cl[k].b.assign((size_t)(combs[k] * s), 0.f); cr[k].b.assign((size_t)((combs[k] + 23) * s), 0.f); }
-        for (int k = 0; k < 2; k++) { al[k].b.assign((size_t)(aps[k] * s), 0.f); ar[k].b.assign((size_t)((aps[k] + 23) * s), 0.f); }
-        ready = true;
-    }
-    void process(float inL, float inR, float sr, float& outL, float& outR) {
-        if (!ready) init(sr);
-        float in = (inL + inR) * 0.15f, l = 0.f, r = 0.f;
-        for (int k = 0; k < 4; k++) { l += cl[k].process(in, 0.84f, 0.3f); r += cr[k].process(in, 0.84f, 0.3f); }
-        for (int k = 0; k < 2; k++) { l = al[k].process(l); r = ar[k].process(r); }
-        outL = l; outR = r;
-    }
-};
+// The ping-pong delay (M8Delay) and reverb (M8Reverb) live in Echo_dsp.hpp, shared with MATRIX-ECHO.
 
 } // namespace
