@@ -13,6 +13,8 @@
 #include <string>
 
 #include "JamOwner.hpp"
+#include <thread>
+#include <chrono>
 namespace {
 
 // JAM Indexed-palette values matching the panel's yellow -> deep dark red colours
@@ -55,6 +57,7 @@ struct SynTHBloKJam : Module {
 
     midi::InputQueue midiIn;
     midi::Output midiOut;
+    bool slowSend = false;
     jamown::Link jam;   // the JAM follows the last clicked module (JamOwner.hpp)
 
     bool pat[8][8][8];
@@ -160,8 +163,8 @@ struct SynTHBloKJam : Module {
 
     void onReset() override { step = -1; }
 
-    void sendNote(int note, int vel) { midi::Message m; m.bytes = {0x90, (uint8_t)note, (uint8_t)clamp(vel, 0, 127)}; midiOut.sendMessage(m); }
-    void sendCC(int cc, int v) { midi::Message m; m.bytes = {0xB0, (uint8_t)cc, (uint8_t)clamp(v, 0, 127)}; midiOut.sendMessage(m); }
+    void sendNote(int note, int vel) { midi::Message m; m.bytes = {0x90, (uint8_t)note, (uint8_t)clamp(vel, 0, 127)}; if (slowSend) std::this_thread::sleep_for(std::chrono::microseconds(400)); midiOut.sendMessage(m); }
+    void sendCC(int cc, int v) { midi::Message m; m.bytes = {0xB0, (uint8_t)cc, (uint8_t)clamp(v, 0, 127)}; if (slowSend) std::this_thread::sleep_for(std::chrono::microseconds(400)); midiOut.sendMessage(m); }
 
     void clearLeds() {
         for (int r = 0; r < 8; r++) for (int c = 0; c < 8; c++) sendNote(padNote(r, c), 0);
@@ -173,7 +176,8 @@ struct SynTHBloKJam : Module {
     void onRemove(const RemoveEvent& e) override { if (jam.active) clearLeds(); jamown::release(id); }
     void onBypass(const BypassEvent& e) override { if (jam.active) clearLeds(); jamown::release(id); jam.active = false; }
     void onUnBypass(const UnBypassEvent& e) override { for (int i = 0; i < kNumLed; i++) lastLed[i] = -1; resync = 0.f; }
-    ~SynTHBloKJam() { if (jam.active) clearLeds(); jamown::release(id); }
+    // Rack closing / the module deleted: lights off, paced so the JAM takes every message
+    ~SynTHBloKJam() { if (jam.active) { slowSend = true; clearLeds(); } jamown::release(id); }
 
     int desiredLed(int idx, bool running) {
         if (idx == kKnobLed) return (int)std::round(params[KNOB_PARAM].getValue() * 127.f);

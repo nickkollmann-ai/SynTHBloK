@@ -27,6 +27,8 @@
 #include <cstdio>
 #include <string>
 
+#include <thread>
+#include <chrono>
 namespace {
 
 static const char* kKeyName[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
@@ -143,6 +145,7 @@ struct SynTHBloKDuo : Module {
     // Maschine JAM ("JAM Template 4 Rack", MIDI channel 1): its 8x8 pads are the note grid.
     midi::InputQueue midiIn;
     midi::Output midiOut;
+    bool slowSend = false;
     bool jamReset = false, solo[2] = {};
     bool clearHeld = false, clearAllDone = false;
     jamown::Link jam;
@@ -447,8 +450,8 @@ struct SynTHBloKDuo : Module {
         }
     }
 
-    void sendNote(int n, int vel) { midi::Message m; m.bytes = {0x90, (uint8_t)n, (uint8_t)clamp(vel, 0, 127)}; midiOut.sendMessage(m); }
-    void sendCC(int cc, int v) { midi::Message m; m.bytes = {0xB0, (uint8_t)cc, (uint8_t)clamp(v, 0, 127)}; midiOut.sendMessage(m); }
+    void sendNote(int n, int vel) { midi::Message m; m.bytes = {0x90, (uint8_t)n, (uint8_t)clamp(vel, 0, 127)}; if (slowSend) std::this_thread::sleep_for(std::chrono::microseconds(400)); midiOut.sendMessage(m); }
+    void sendCC(int cc, int v) { midi::Message m; m.bytes = {0xB0, (uint8_t)cc, (uint8_t)clamp(v, 0, 127)}; if (slowSend) std::this_thread::sleep_for(std::chrono::microseconds(400)); midiOut.sendMessage(m); }
     void clearLeds() {
         for (int r = 0; r < 8; r++) for (int c = 0; c < 8; c++) sendNote(padNote(r, c), 0);
         for (int i = 0; i < 8; i++) { sendCC(i, 0); sendCC(8 + i, 0); sendCC(48 + 8 * stripPage + i, 0); }
@@ -461,7 +464,8 @@ struct SynTHBloKDuo : Module {
     void onRemove(const RemoveEvent& e) override { if (jam.active) clearLeds(); jamown::release(id); }
     void onBypass(const BypassEvent& e) override { if (jam.active) clearLeds(); jamown::release(id); jam.active = false; }
     void onUnBypass(const UnBypassEvent& e) override { for (int i = 0; i < kNumLed; i++) lastLed[i] = -1; resync = 0.f; }
-    ~SynTHBloKDuo() { if (jam.active) clearLeds(); jamown::release(id); }
+    // Rack closing / the module deleted: lights off, paced so the JAM takes every message
+    ~SynTHBloKDuo() { if (jam.active) { slowSend = true; clearLeds(); } jamown::release(id); }
 
     // JAM light idx (layout in Matrix8_ui.hpp): pads = the shown synth's notes in the pattern's colour,
     // the root rows dim, the playhead column white. Scenes = patterns, strips = their knobs,
@@ -946,16 +950,24 @@ struct DUTitle : TransparentWidget {
     }
 };
 
-// LEAD / BASS header OLED. Top line: name, the last note, SYNC (click), ON / MUTE (click the rest of the line).
-// Below, the synth's audio as SCOPE (waveform, steadied on a rising zero crossing), SPEC (spectrum) or ENV
-// (its amp / filter ADSR, the dot = where it is now), picked by the tabs along the bottom.
+// LEAD / BASS header OLED. Top line: name, the last note, the buttons (SYNC; SCOPE | SPEC | ENV pick the
+// view), ON / MUTE (click it, or the name, to mute). Below, the synth's audio as SCOPE (waveform, steadied on a
+// rising zero crossing), SPEC (spectrum) or ENV (its ADSR, the dot = where it is now). In ENV, drag the peak
+// for ATK, the decay corner for DEC (sideways) and SUS (up / down), the release corner for REL; the knobs follow.
 // Brighter outline while the grid shows this synth.
 struct DUHeader : TransparentWidget {
     DU* module = NULL;
     int e = 0;
-    static constexpr float kTabH = 3.6f;   // mm
-    float syncX0() { return box.size.x * 0.52f; }
-    float syncX1() { return box.size.x * 0.72f; }
+    int dragPt = -1;                  // ENV handle being dragged: 0 ATK, 1 DEC / SUS, 2 REL
+    // top-line buttons, as fractions of the width: SYNC, SCOPE, SPEC, ENV
+    const float kBtnX[5] = {0.30f, 0.43f, 0.58f, 0.71f, 0.82f};
+    int btnAt(float x) {
+        for (int i = 0; i < 4; i++) if (x >= box.size.x * kBtnX[i] && x < box.size.x * kBtnX[i + 1]) return i;
+        return -1;
+    }
+    void graph(float& x, float& y, float& w, float& h) {
+        x = 4.f; w = box.size.x - 8.f; y = mm2px(oled::kRow) + 2.f; h = box.size.y - y - 3.f;
+    }
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
         float W = box.size.x, H = box.size.y, rowY = mm2px(oled::kRow);
@@ -965,64 +977,50 @@ struct DUHeader : TransparentWidget {
         std::shared_ptr<window::Font> font = APP->window->uiFont;
         if (!font) return;
         nvgFontFaceId(args.vg, font->handle);
-        // top line
         float yc = rowY * 0.55f;
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgFontSize(args.vg, 7.5f);
+        nvgFontSize(args.vg, 7.f);
         nvgFillColor(args.vg, nvgRGBA(255, 190, 90, on ? 220 : 90));
         nvgText(args.vg, 4.f, yc, e ? "BASS" : "LEAD", NULL);
         std::string s = noteName(module ? module->curNote[e] : (e ? 36 : 60));
         bool gate = module && module->gateOn(e);
-        nvgFontSize(args.vg, 8.5f);
+        nvgFontSize(args.vg, 7.f);
         nvgFillColor(args.vg, nvgRGBA(255, 190, 90, gate ? 255 : 130));
-        nvgText(args.vg, W * 0.27f, yc, s.c_str(), NULL);
-        bool sync = module && module->params[module->engParam(e, DO_SYNC)].getValue() > 0.5f;
-        float sx = syncX0(), sw = syncX1() - sx, sh = rowY - 4.f;
-        nvgBeginPath(args.vg);
-        nvgRoundedRect(args.vg, sx, 2.f, sw, sh, 1.f);
-        nvgFillColor(args.vg, sync ? oled::litFill() : oled::offFill());
-        nvgFill(args.vg);
-        nvgStrokeColor(args.vg, oled::outline(sync ? 255 : 110));
-        nvgStrokeWidth(args.vg, 0.6f);
-        nvgStroke(args.vg);
-        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFontSize(args.vg, 5.5f);
-        nvgFillColor(args.vg, sync ? oled::ink() : oled::amber(200));
-        nvgText(args.vg, sx + sw * 0.5f, 2.f + sh * 0.5f, "SYNC", NULL);
+        nvgText(args.vg, W * 0.165f, yc, s.c_str(), NULL);
+        // SYNC, then the view buttons
+        static const char* name[4] = {"SYNC", "SCOPE", "SPEC", "ENV"};
+        int view = module ? module->hdrView[e] : 0;
+        for (int i = 0; i < 4; i++) {
+            bool lit = i == 0 ? module && module->params[module->engParam(e, DO_SYNC)].getValue() > 0.5f : view == i - 1;
+            float bx = W * kBtnX[i] + 0.5f, bw = W * (kBtnX[i + 1] - kBtnX[i]) - 1.f, by = 2.f, bh = rowY - 4.f;
+            nvgBeginPath(args.vg);
+            nvgRoundedRect(args.vg, bx, by, bw, bh, 1.f);
+            nvgFillColor(args.vg, lit ? oled::litFill() : oled::offFill());
+            nvgFill(args.vg);
+            nvgStrokeColor(args.vg, oled::outline(lit ? 255 : 110));
+            nvgStrokeWidth(args.vg, 0.6f);
+            nvgStroke(args.vg);
+            nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+            nvgFontSize(args.vg, 5.f);
+            nvgFillColor(args.vg, lit ? oled::ink() : oled::amber(200));
+            nvgText(args.vg, bx + bw * 0.5f, by + bh * 0.5f, name[i], NULL);
+        }
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-        nvgFontSize(args.vg, 6.5f);
+        nvgFontSize(args.vg, 6.f);
         nvgFillColor(args.vg, on ? oled::green() : nvgRGBA(255, 190, 90, 90));
         nvgText(args.vg, W - 4.f, yc, on ? "ON" : "MUTE", NULL);
         nvgBeginPath(args.vg);
         oled::divider(args, 4.f, rowY, W - 4.f, rowY);
         oled::dividerStroke(args);
-        // view
-        int view = module ? module->hdrView[e] : 0;
-        float gx = 4.f, gw = W - 8.f, gy = rowY + 2.f, gh = H - mm2px(kTabH) - 3.f - gy;
+        float gx, gy, gw, gh;
+        graph(gx, gy, gw, gh);
         nvgSave(args.vg);
-        nvgScissor(args.vg, gx, gy, gw, gh);
+        nvgScissor(args.vg, gx - 3.f, gy - 1.f, gw + 6.f, gh + 2.f);
         NVGcolor line = nvgRGBA(255, 150, 50, on ? 235 : 110);
         if (view == 0) drawScope(args, gx, gy, gw, gh, line);
         else if (view == 1) drawSpec(args, gx, gy, gw, gh, line);
         else drawEnv(args, gx, gy, gw, gh, line);
         nvgRestore(args.vg);
-        // tabs
-        static const char* tab[3] = {"SCOPE", "SPEC", "ENV"};
-        float th = mm2px(kTabH), ty = H - th - 1.5f, tw = (W - 8.f - 2.f * 2.f) / 3.f;
-        for (int i = 0; i < 3; i++) {
-            float tx = 4.f + i * (tw + 2.f);
-            nvgBeginPath(args.vg);
-            nvgRoundedRect(args.vg, tx, ty, tw, th, 1.f);
-            nvgFillColor(args.vg, i == view ? oled::litFill() : oled::offFill());
-            nvgFill(args.vg);
-            nvgStrokeColor(args.vg, oled::outline(i == view ? 255 : 100));
-            nvgStrokeWidth(args.vg, 0.6f);
-            nvgStroke(args.vg);
-            nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-            nvgFontSize(args.vg, 5.5f);
-            nvgFillColor(args.vg, i == view ? oled::ink() : oled::amber(200));
-            nvgText(args.vg, tx + tw * 0.5f, ty + th * 0.5f, tab[i], NULL);
-        }
     }
     // the last kScopeN samples, oldest first
     void history(float* x) {
@@ -1067,19 +1065,31 @@ struct DUHeader : TransparentWidget {
             nvgFill(args.vg);
         }
     }
+    float P(int id, float d) { return module ? module->params[module->engParam(e, id)].getValue() : d; }
+    // ADSR corners (fractions of the graph): x of the peak, decay end, release start; and the sustain level
+    void envShape(float& a, float& d, float& r, float& sus) {
+        a = 0.08f + 0.25f * P(DO_ATK, 0.1f); d = 0.08f + 0.25f * P(DO_DEC, 0.4f); r = 0.08f + 0.25f * P(DO_REL, 0.4f);
+        sus = P(DO_SUS, 0.6f);
+    }
     void drawEnv(const DrawArgs& args, float x, float y, float w, float h, NVGcolor col) {
-        auto P = [&](int id, float d) { return module ? module->params[module->engParam(e, id)].getValue() : d; };
-        float a = 0.08f + 0.25f * P(DO_ATK, 0.1f), d = 0.08f + 0.25f * P(DO_DEC, 0.4f), r = 0.08f + 0.25f * P(DO_REL, 0.4f);
-        float sus = P(DO_SUS, 0.6f), hold = 1.f - a - d - r;
+        float a, d, r, sus;
+        envShape(a, d, r, sus);
+        float hold = 1.f - a - d - r;
         float xs[5] = {0.f, a, a + d, a + d + hold, 1.f}, ys[5] = {0.f, 1.f, sus, sus, 0.f};
+        auto X = [&](float f) { return x + w * f; };
+        auto Y = [&](float v) { return y + h - 1.f - (h - 2.f) * v; };
         nvgBeginPath(args.vg);
-        for (int i = 0; i < 5; i++) {
-            float px = x + w * xs[i], py = y + h - 1.f - (h - 2.f) * ys[i];
-            if (i) nvgLineTo(args.vg, px, py); else nvgMoveTo(args.vg, px, py);
-        }
+        for (int i = 0; i < 5; i++) { if (i) nvgLineTo(args.vg, X(xs[i]), Y(ys[i])); else nvgMoveTo(args.vg, X(xs[i]), Y(ys[i])); }
         nvgStrokeColor(args.vg, col);
         nvgStrokeWidth(args.vg, 1.f);
         nvgStroke(args.vg);
+        // the drag handles
+        for (int i = 1; i <= 3; i++) {
+            nvgBeginPath(args.vg);
+            nvgRect(args.vg, X(xs[i]) - 1.8f, Y(ys[i]) - 1.8f, 3.6f, 3.6f);
+            nvgFillColor(args.vg, dragPt == i - 1 ? nvgRGB(255, 255, 255) : col);
+            nvgFill(args.vg);
+        }
         // where the envelope is now: its level, on the stage it is in
         if (!module) return;
         const DualOscVoice& v = module->eng[e][0];
@@ -1089,28 +1099,53 @@ struct DUHeader : TransparentWidget {
         else if (v.stage == 3) px = a + d + hold + r * (1.f - (sus > 0.01f ? clamp(lv / sus, 0.f, 1.f) : 0.f));
         else return;
         nvgBeginPath(args.vg);
-        nvgCircle(args.vg, x + w * px, y + h - 1.f - (h - 2.f) * lv, 2.f);
+        nvgCircle(args.vg, X(px), Y(lv), 2.f);
         nvgFillColor(args.vg, nvgRGB(255, 255, 255));
         nvgFill(args.vg);
     }
-    // SYNC box: hard sync; tabs: the view; the rest of the top line: mute
+    // top line: SYNC toggles hard sync, SCOPE / SPEC / ENV pick the view, the rest mutes. The graph only
+    // reacts in ENV, where a press grabs the nearest handle for dragging.
     void onButton(const ButtonEvent& ev) override {
         if (ev.button != GLFW_MOUSE_BUTTON_LEFT || ev.action != GLFW_PRESS) return;
         ev.consume(this);
+        dragPt = -1;
         if (!module) return;
-        float W = box.size.x, H = box.size.y;
         if (ev.pos.y < mm2px(oled::kRow)) {
-            if (ev.pos.x >= syncX0() && ev.pos.x <= syncX1()) {
+            int b = btnAt(ev.pos.x);
+            if (b == 0) {
                 Param& p = module->params[module->engParam(e, DO_SYNC)];
                 p.setValue(p.getValue() > 0.5f ? 0.f : 1.f);
             }
+            else if (b > 0) module->hdrView[e] = b - 1;
             else module->mute[e] = !module->mute[e];
+            return;
         }
-        else if (ev.pos.y > H - mm2px(kTabH) - 2.f) module->hdrView[e] = clamp((int)((ev.pos.x - 4.f) / ((W - 8.f) / 3.f)), 0, 2);
-        else module->hdrView[e] = (module->hdrView[e] + 1) % 3;   // click the graph: next view
+        if (module->hdrView[e] != 2) return;
+        float gx, gy, gw, gh, a, d, r, sus;
+        graph(gx, gy, gw, gh);
+        envShape(a, d, r, sus);
+        float hx[3] = {a, a + d, 1.f - r}, hy[3] = {1.f, sus, sus}, best = 1e9f;
+        for (int i = 0; i < 3; i++) {
+            float dx = gx + gw * hx[i] - ev.pos.x, dy = gy + gh - 1.f - (gh - 2.f) * hy[i] - ev.pos.y, dd = dx * dx + dy * dy;
+            if (dd < best) { best = dd; dragPt = i; }
+        }
     }
-};
-// The master OLED (OledUi.hpp look), one line each: MIDI IN, MIDI OUT (click = port menu); BPM, run,
+    void nudge(int id, float delta) {
+        ParamQuantity* q = module->paramQuantities[module->engParam(e, id)];
+        q->setValue(clamp(q->getValue() + delta, q->getMinValue(), q->getMaxValue()));
+    }
+    void onDragMove(const DragMoveEvent& ev) override {
+        if (!module || dragPt < 0) return;
+        float gx, gy, gw, gh;
+        graph(gx, gy, gw, gh);
+        float z = APP->scene->rackScroll->getZoom();
+        float dx = ev.mouseDelta.x / z / gw / 0.25f, dy = -ev.mouseDelta.y / z / (gh - 2.f);
+        if (dragPt == 0) nudge(DO_ATK, dx);
+        else if (dragPt == 1) { nudge(DO_DEC, dx); nudge(DO_SUS, dy); }
+        else nudge(DO_REL, -dx);
+    }
+    void onDragEnd(const DragEndEvent& ev) override { dragPt = -1; }
+};// The master OLED (OledUi.hpp look), one line each: MIDI IN, MIDI OUT (click = port menu); BPM, run,
 // step, strip bank; KEY | SCALE | filter env TRIG (click or scroll steps it forward, right-click back).
 // The button cells (oled::Cell) sit on its lower part. Rows in mm from the top:
 static const float kMoRow = oled::kRow, kMoInfo = 2.f * kMoRow, kMoKey = 3.f * kMoRow, kMoBtn = 4.f * kMoRow + 1.f,
@@ -1333,7 +1368,7 @@ struct SynTHBloKDuoWidget : ModuleWidget {
             float x0 = 77.6f + 51.f * e, w = 50.f;
             auto cx = [&](int i) { return x0 + w * (i + 0.5f) / 4.f; };
             DUHeader* h = createWidget<DUHeader>(mm2px(Vec(x0 + 1.5f, 10.5f)));
-            h->box.size = mm2px(Vec(w - 3.f, 28.f)); h->module = module; h->e = e;
+            h->box.size = mm2px(Vec(w - 3.f, 20.f)); h->module = module; h->e = e;
             addChild(h);
             int b = e ? DU::BASS_PARAM : DU::LEAD_PARAM;
             // sound knobs: 4 rows of 4, the last row GLIDE / GATE / OCT spread over the width
@@ -1353,8 +1388,8 @@ struct SynTHBloKDuoWidget : ModuleWidget {
                 else addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(x, y)), module, param));
                 label(x, y + d * 0.5f + 2.2f, name);
             };
-            for (int i = 0; i < 12; i++) synthKnob(cx(i % 4), 47.f + 16.f * (i / 4), b + P[i], N[i]);
-            for (int i = 0; i < 3; i++) synthKnob(x0 + w * (i + 0.5f) / 3.f, 95.f, b + P[12 + i], N[12 + i]);
+            for (int i = 0; i < 12; i++) synthKnob(cx(i % 4), 40.f + 16.5f * (i / 4), b + P[i], N[i]);
+            for (int i = 0; i < 3; i++) synthKnob(x0 + w * (i + 0.5f) / 3.f, 90.f, b + P[12 + i], N[12 + i]);
             // bottom row: TUNE, LEVEL, then this synth's audio, pitch CV and gate
             auto bx = [&](int i) { return x0 + w * (i + 0.5f) / 5.f; };
             knob(bx(0), 116.f, b + DO_TUNE, NULL); label(bx(0), 109.f, "TUNE");
