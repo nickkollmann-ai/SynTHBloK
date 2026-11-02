@@ -1328,6 +1328,9 @@ struct SynTHBloKDuoWidget : ModuleWidget {
 
         // ---------------- left: the JAM matrix, laid out like MATRIX FORGE ----------------
         auto colX = [](int c) { return 4.9f + 7.4f * c; };
+        // sequencer jack LEDs: row triggers in the pattern page's colour, strip CVs in the strip bank's (like the strips)
+        auto pageLed = [=](JackLed* l) { l->color = [=]() { return kPatOnColor[module ? module->curPat() : 0]; }; return l; };
+        auto bankLed = [=](JackLed* l) { l->color = [=]() { return kPatOnColor[module ? module->bank() : 0]; }; return l; };
         for (int p = 0; p < 8; p++) {
             DUPatBtn* pb = createWidget<DUPatBtn>(mm2px(Vec(colX(p), 10.5f)));
             pb->box.size = mm2px(Vec(6.6f, 6.6f)); pb->module = module; pb->p = p;
@@ -1343,11 +1346,11 @@ struct SynTHBloKDuoWidget : ModuleWidget {
         label(69.6f, 13.8f, "OUT");
         for (int r = 0; r < 8; r++)
             { addOutput(createOutputCentered<SmallJack>(mm2px(Vec(69.6f, 22.8f + 7.4f * r)), module, DU::TRIG_OUTPUT + r));
-              addChild(JackLed::create(Vec(73.5f, 22.8f + 7.4f * r), module, DU::TRIG_OUTPUT + r, true)); }
+              addChild(pageLed(JackLed::create(Vec(73.5f, 22.8f + 7.4f * r), module, DU::TRIG_OUTPUT + r, true))); }
         // strip CV jacks, banks A..H, touch strips
         for (int i = 0; i < 8; i++) {
             addOutput(createOutputCentered<SmallJack>(mm2px(Vec(colX(i) + 3.3f, 81.6f)), module, DU::STRIP_OUTPUT + i));
-            addChild(JackLed::create(Vec(colX(i) + 7.f, 81.6f), module, DU::STRIP_OUTPUT + i, true));   // right of the jack
+            addChild(bankLed(JackLed::create(Vec(colX(i) + 7.f, 81.6f), module, DU::STRIP_OUTPUT + i, true)));   // right of the jack
             DUBankSq* q = createWidget<DUBankSq>(mm2px(Vec(colX(i), 85.5f)));
             q->box.size = mm2px(Vec(6.6f, 6.6f)); q->module = module; q->b = i;
             addChild(q);
