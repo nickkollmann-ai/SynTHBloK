@@ -1005,6 +1005,32 @@ struct LInBtn : OpaqueWidget {
     }
 };
 
+// Between the IN and GAIN titles: lit (amber, as MON) while MON is selected (the inputs heard), dark on LVL.
+struct LMonLed : TransparentWidget {
+    LP* module = NULL;
+    bool lit() { return !module || module->hearIn(); }
+    void dot(const DrawArgs& args, NVGcolor c) {
+        nvgBeginPath(args.vg);
+        nvgCircle(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, box.size.x * 0.5f);
+        nvgFillColor(args.vg, c);
+        nvgFill(args.vg);
+    }
+    void draw(const DrawArgs& args) override {
+        if (!lit()) dot(args, nvgRGB(0x3a, 0x2a, 0x18));
+    }
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer == 1 && lit()) {
+            nvgBeginPath(args.vg);
+            nvgCircle(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, box.size.x * 1.4f);
+            nvgFillPaint(args.vg, nvgRadialGradient(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, 0.f, box.size.x * 1.4f,
+                                                    nvgRGBA(0xff, 0xb0, 0x50, 0x70), nvgRGBA(0xff, 0xb0, 0x50, 0)));
+            nvgFill(args.vg);
+            dot(args, nvgRGB(0xff, 0xb0, 0x50));
+        }
+        Widget::drawLayer(args, layer);
+    }
+};
+
 // A-H: mute track 1-8 (lit: muted; it keeps playing and recording, silent at its output and the mix).
 struct LMuteBtn : OpaqueWidget {
     LP* module = NULL;
@@ -1227,6 +1253,8 @@ struct LScreen : TransparentWidget {
             nvgFillColor(args.vg, oled::green());
             nvgText(args.vg, mm2px(34.f), yc + 0.5f, "RAND", NULL);
         }
+        // MON | LVL at the right end; the state and length sit left of it
+        float xr = W - 4.f - drawHearTag(args, W - 4.f, yc) - mm2px(3.f);
 
         int st = lp ? (int)lp->st : (int)EchoLooper::PLAY;
         char info[40] = "x1  2.00 s";
@@ -1241,10 +1269,10 @@ struct LScreen : TransparentWidget {
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
         nvgFontSize(args.vg, 8.f);
         nvgFillColor(args.vg, oled::amber());
-        nvgText(args.vg, W - 4.f, yc, info, NULL);
+        nvgText(args.vg, xr, yc, info, NULL);
         float b[4];
         float iw = nvgTextBounds(args.vg, 0.f, 0.f, info, NULL, b);
-        float xs = W - 4.f - iw - mm2px(3.f);
+        float xs = xr - iw - mm2px(3.f);
         nvgFillColor(args.vg, stateColor(st));
         nvgText(args.vg, xs, yc, kStateName[st], NULL);
         // the count-in, or an armed action (blinking), left of the state
@@ -1259,6 +1287,28 @@ struct LScreen : TransparentWidget {
             nvgFillColor(args.vg, oled::litFill());
             nvgText(args.vg, xs - sw - mm2px(3.f), yc, arm, NULL);
         }
+    }
+
+    // MON | LVL (as the buttons), what is heard: the selected one lit, the other dim; right-aligned to xRight,
+    // returns its width
+    float drawHearTag(const DrawArgs& args, float xRight, float yc) {
+        bool mon = module ? module->hearIn() : false;
+        const float w = mm2px(7.f), h = mm2px(3.6f), y = yc - h * 0.5f + 0.3f, gap = mm2px(0.8f);
+        const float x = xRight - 2.f * w - gap;
+        nvgFontSize(args.vg, 5.5f);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        for (int i = 0; i < 2; i++) {   // i = 1: MON (left), 0: LVL (right)
+            bool on = (i == 1) == mon;
+            float xi = x + (1 - i) * (w + gap);
+            NVGcolor col = i == 1 ? nvgRGB(0xff, 0xb0, 0x50) : nvgRGB(0xff, 0x70, 0x0f);
+            nvgBeginPath(args.vg);
+            nvgRoundedRect(args.vg, xi, y, w, h, 1.f);
+            if (on) { nvgFillColor(args.vg, col); nvgFill(args.vg); }
+            else { nvgStrokeColor(args.vg, nvgTransRGBA(col, 90)); nvgStrokeWidth(args.vg, 0.6f); nvgStroke(args.vg); }
+            nvgFillColor(args.vg, on ? nvgRGB(0x10, 0x10, 0x10) : nvgTransRGBA(col, 110));
+            nvgText(args.vg, xi + w * 0.5f, y + h * 0.5f, i == 1 ? "MON" : "LVL", NULL);
+        }
+        return 2.f * w + gap;
     }
 
     // LEN | COUNT | IN level, the tempo at the right
@@ -1719,6 +1769,9 @@ struct SynTHBloKLoopWidget : ModuleWidget {
         const float xJ = 7.5f, xK = 18.f;
         label(xJ, 14.f, "IN");
         label(xK, 14.f, "GAIN");
+        LMonLed* led = createWidget<LMonLed>(mm2px(Vec(0.5f * (xJ + xK) - 0.8f, 14.f - 0.8f)));
+        led->box.size = mm2px(Vec(1.6f, 1.6f)); led->module = module;
+        addChild(led);
         for (int t = 0; t < kTracks; t++) {
             float y = 22.8f + 7.4f * t;
             addInput(createInputCentered<SmallJack>(mm2px(Vec(xJ, y)), module, LP::IN_INPUT + t));
@@ -1728,8 +1781,9 @@ struct SynTHBloKLoopWidget : ModuleWidget {
             addParam(createParamCentered<Trimpot>(mm2px(Vec(xK, y)), module, LP::GAIN_PARAM + t));
         }
         // LVL / MON: the strips and what is heard, on the A-H row (the plate reaches down to it)
+        // (MON under the inputs, LVL under the gains)
         for (int i = 0; i < 2; i++) {
-            LInBtn* b = createWidget<LInBtn>(mm2px(Vec((i == 0 ? xJ : xK) - 3.3f, 85.5f)));
+            LInBtn* b = createWidget<LInBtn>(mm2px(Vec((i == 0 ? xK : xJ) - 3.3f, 85.5f)));
             b->box.size = mm2px(Vec(6.6f, 6.6f)); b->module = module;
             b->param = LP::STRIP_PARAM; b->mute = i == 1;
             addChild(b);
