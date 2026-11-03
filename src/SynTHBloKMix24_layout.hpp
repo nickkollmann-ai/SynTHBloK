@@ -15,7 +15,7 @@ static const float MKX[5] = {MCOL + 6.8f, MCOL + 17.4f, MCOL + 28.0f, MCOL + 38.
 static const float MKY = 21.00f;
 static const float JX[4] = {MCOL + 11.1f, MCOL + 22.5f, MCOL + 33.9f, MCOL + 45.3f};
 static const float JY[2] = {104.400f, 115.600f};
-static const float D1[4] = {MCOL + 1.5f, 35.600f, 53.400f, 56.000f};
+static const float D1[4] = {MCOL + 1.5f, 31.900f, 53.400f, 56.000f};   // centred in its plate (29.2 .. 90.6)
 // FX column, as on MIX-12 / MIX-8 (MATRIX-DUO's final stage): P1-P3 small ring knobs, big RETURN, PROGRAM,
 // then the send / return jacks along the foot of the column
 static const float FCOL = 93.5f, FCOL_W = 38.1f, FC = FCOL + FCOL_W * 0.5f;

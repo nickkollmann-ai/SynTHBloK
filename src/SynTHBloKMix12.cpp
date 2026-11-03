@@ -25,7 +25,7 @@ static const float LJ_Y = 111.4f, RJ_Y = 120.2f;
 static const float MCOL = 220.5f, MCOL_W = 56.4f;
 static const float MKX[5] = {MCOL + 6.8f, MCOL + 17.4f, MCOL + 28.0f, MCOL + 38.6f, MCOL + 49.2f};
 static const float MKY = 21.f;
-static const float D1[4] = {MCOL + 1.5f, 35.6f, 53.4f, 56.f};       // levels OLED
+static const float D1[4] = {MCOL + 1.5f, 31.9f, 53.4f, 56.f};       // levels OLED, centred in its plate (29.2 .. 90.6)
 static const float JX[4] = {MCOL + 11.1f, MCOL + 22.5f, MCOL + 33.9f, MCOL + 45.3f};
 static const float JY[2] = {104.4f, 115.6f};
 static const float FCOL = 180.f, FCOL_W = 38.1f, FC = FCOL + FCOL_W * 0.5f;
