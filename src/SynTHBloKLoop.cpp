@@ -108,7 +108,8 @@ struct SynTHBloKLoop : Module {
     float beatNow = 0.f;
     int source = 0;   // 0 free, 1 the TEMPO knob, 2 clock
     float blink = 0.f, recFlash = 0.f, playFlash = 0.f, onceFlash = 0.f, allRecFlash = 0.f, allPlayFlash = 0.f;
-    // scenes U1-U8: which tracks play (bit t); a click asks the audio thread to switch
+    // scenes U1-U8: which tracks played as each was stored (bit t; kept, no longer recalled); a click asks the
+    // audio thread to switch
     int sceneMask[8] = {};
     bool sceneUsed[8] = {};
     int curScene = -1;
@@ -250,7 +251,7 @@ struct SynTHBloKLoop : Module {
             if (accent[r] & bit) gateOff[r] &= ~bit;
         }
     }
-    // the tracks playing (or armed to start) now: a scene stores these
+    // store to scene k: it is used (and selected) from now, with the tracks playing (or armed to start) noted
     void storeScene(int k) {
         int m = 0;
         for (int t = 0; t < kTracks; t++) {
@@ -280,18 +281,11 @@ struct SynTHBloKLoop : Module {
     }
     // a lane's effect changed (its box, its menu, a deal): the selected scene keeps it
     void randChanged() { saveRand(curScene); }
-    // start / stop the tracks to match a scene (on the grid, as PLAY does)
+    // select a scene (stored or not): its own RAND set (blank until one is dealt to it). It never starts or
+    // stops a track: what plays is left as it is.
     void recallScene(int k) {
-        // selected even with no tracks stored, with its own RAND set (blank until one is dealt to it)
         curScene = k;
         loadRand(k);
-        if (!sceneUsed[k]) return;
-        for (int t = 0; t < kTracks; t++) {
-            EchoLooper& lp = loop[t];
-            if (lp.len <= 0 || lp.st == EchoLooper::REC || lp.arm != EchoLooper::A_NONE) continue;
-            bool want = (sceneMask[k] >> t) & 1;
-            if (want != lp.playing()) lp.press(EchoLooper::B_PLAY);
-        }
     }
     // REC / PLAY / ONCE / UNDO / CLEAR on track t
     void act(int t, int b) {
@@ -1334,13 +1328,20 @@ struct LMonLed : TransparentWidget {
     }
 };
 
-// A-H: mute track 1-8 (lit: muted; it keeps playing and recording, silent at its output and the mix).
+// MUTE (the JAM's A-H), one under each column: mute track 1-8 (lit: muted; it keeps playing and recording, silent at its output and the mix).
 struct LMuteBtn : OpaqueWidget {
     LP* module = NULL;
     int t = 0;
     void draw(const DrawArgs& args) override {
         bool on = module ? module->params[LP::MUTE_PARAM + t].getValue() > 0.5f : false;
-        drawColorButton(args, box.size, t, on, (char)('A' + t), 9.f);
+        drawColorButton(args, box.size, t, on, 0, 9.f);
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, on ? nvgRGB(0x10, 0x10, 0x10) : kPatColor[t]);
+        nvgFontSize(args.vg, 5.5f);
+        nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, "MUTE", NULL);
     }
     void onButton(const ButtonEvent& e) override {
         if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
@@ -2194,8 +2195,8 @@ struct LTile : OpaqueWidget {
 
 // A scene cell U1-U8 (grey while empty, amber when stored; the selected one lit), or STORE (k == -1, blinks while
 // armed: the next scene clicked stores which tracks play now). While armed every scene blinks, the selected one
-// twice as fast; a scene just stored to blinks fast for a moment. A scene starts and stops tracks on the grid, as
-// PLAY does. Right-click a scene: store or clear it.
+// twice as fast; a scene just stored to blinks fast for a moment. A scene never starts or stops a track.
+// Right-click a scene: store or clear it.
 struct LSceneCell : OpaqueWidget {
     LP* module = NULL;
     int k = 0;
@@ -2465,7 +2466,7 @@ struct SynTHBloKLoopWidget : ModuleWidget {
             addParam(c);
             return c;
         };
-        // on the info row, after VIEW and RAND: COUNT, then the record length (blue; the selected track's: the
+        // on the info row, after VIEW and RAND: COUNT, then the record length (red; the selected track's: the
         // cells follow the selection)
         const float u9 = (inner - 8.f * CG) / 9.f;
         const float yIc = ls::yInfo + (oled::kRow - ls::kInfoCellH) * 0.5f;
@@ -2477,7 +2478,7 @@ struct SynTHBloKLoopWidget : ModuleWidget {
                                                   module, LP::LEN_PARAM);
             c->box.size = mm2px(Vec(ls::kLenW, ls::kInfoCellH)); c->module = module;
             c->label = kLenName[i]; c->setTo = kLenBeats[i]; c->fontSize = 6.f;
-            c->tint = nvgRGB(0x5a, 0xa0, 0xff);
+            c->tint = nvgRGB(0xf0, 0x50, 0x3c);
             addParam(c);
             lenCell[i] = c;
         }
