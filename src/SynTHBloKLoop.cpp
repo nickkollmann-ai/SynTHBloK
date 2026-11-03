@@ -107,6 +107,14 @@ struct SynTHBloKLoop : Module {
     bool takeClosed = false;  // a take closed: back to LVL once none is recording or waiting to
     bool replacing[kTracks] = {};   // a playing loop waits for its new take (a cancel lets it play on)
     int waveZoom = 1;   // the screen's lanes: x1 (whole loops) .. x32 (following the playhead); UI only
+    // the lanes' VIEW (UI only): 0 smooth wave, 1 static spectrum (the whole loop's, measured as a take closes),
+    // 2 live spectrum, 3 live scope
+    int laneView = 0;
+    // what leaves each track (mono), the last kScope samples, for the live views
+    enum { kScope = 2048 };
+    float scope[kTracks][kScope] = {};
+    std::atomic<int> scopeW{0};
+    int takeGen[kTracks] = {};   // counts each new loop (a take closes, a clear): the static spectrum is measured again
     bool autoMon = true;   // a closed take turns its track's input monitor off; REC turns it back on
     float listenSm[kTracks] = {};   // 1 = the inputs heard in place of the loops (MON selected)
     bool storeArm = false;
@@ -669,6 +677,7 @@ struct SynTHBloKLoop : Module {
         float mixL = 0.f, mixR = 0.f;
         const float pkFall = std::exp(-dt / 0.3f);
         const int chopN = clamp((int)std::round(params[CHOP_PARAM].getValue()), 1, 8);
+        const int sw = scopeW;
         for (int t = 0; t < kTracks; t++) {
             Input& in = inputs[IN_INPUT + t];
             const int ch = in.getChannels();
@@ -698,6 +707,8 @@ struct SynTHBloKLoop : Module {
                 params[MON_PARAM + t].setValue(0.f);
                 takeClosed = true;
             }
+            if ((wasRec && lp.st != EchoLooper::REC && lp.st != EchoLooper::DUB)
+                || (lp.st == EchoLooper::EMPTY && prevSt[t] != EchoLooper::EMPTY)) takeGen[t]++;
             prevSt[t] = lp.st;
             // the eighth now playing; RAND may move on from it as it starts
             int Lt = playLen(t);
@@ -722,6 +733,7 @@ struct SynTHBloKLoop : Module {
             else if (listenSm[t] > 0.f) { oL += iL * listenSm[t]; oR += iR * listenSm[t]; mon = true; }
             oL *= levelSm[t] * muteSm[t]; oR *= levelSm[t] * muteSm[t];
             outPk[t] = std::max(std::max(std::fabs(oL), std::fabs(oR)), outPk[t] * pkFall);
+            scope[t][sw] = 0.5f * (oL + oR);
             Output& o = outputs[OUT_OUTPUT + t];
             if (stereo[t] || (mon && ch > 1)) {
                 o.setChannels(2);
@@ -732,6 +744,7 @@ struct SynTHBloKLoop : Module {
             }
             mixL += oL; mixR += oR;
         }
+        scopeW = (sw + 1) & (kScope - 1);
         // auto monitor-off: once the last take (or replace) has closed, back from MON to LVL (the loops heard)
         if (takeClosed) {
             bool busy = false;
@@ -785,6 +798,7 @@ struct SynTHBloKLoop : Module {
         json_object_set_new(root, "curScene", json_integer(curScene));
         json_object_set_new(root, "clockDiv", json_integer(clockDiv));
         json_object_set_new(root, "zoom", json_integer(waveZoom));
+        json_object_set_new(root, "view", json_integer(laneView));
         std::string rs;
         for (int t = 0; t < kTracks; t++) rs += randOn[t] ? '1' : '0';
         json_object_set_new(root, "rand", json_string(rs.c_str()));
@@ -803,6 +817,7 @@ struct SynTHBloKLoop : Module {
         if (json_t* j = json_object_get(root, "curScene")) curScene = clamp((int)json_integer_value(j), -1, 7);
         if (json_t* j = json_object_get(root, "clockDiv")) clockDiv = clamp((int)json_integer_value(j), 0, 2);
         if (json_t* j = json_object_get(root, "zoom")) waveZoom = clamp((int)json_integer_value(j), 1, 32);
+        if (json_t* j = json_object_get(root, "view")) laneView = clamp((int)json_integer_value(j), 0, 3);
         const char* rs = json_string_value(json_object_get(root, "rand"));
         for (int t = 0; t < kTracks; t++) randOn[t] = rs && strlen(rs) >= (size_t)kTracks && rs[t] == '1';
         if (json_t* j = json_object_get(root, "autoMon")) autoMon = json_boolean_value(j);
@@ -1238,8 +1253,83 @@ struct LScreen : TransparentWidget {
     LP* module = NULL;
     // the readouts: amber on LVL, cyan on MON
     NVGcolor accent() { return module && module->hearIn() ? monCyan() : oled::amber(); }
+
+    // the spectrum views: kBands log-spaced bands, 30 Hz .. 16 kHz, each 0..1 on the screen
+    enum { kFft = LP::kScope, kBands = 48 };
+    dsp::RealFFT fft{kFft};
+    float win[kFft];
+    float statBand[kTracks][kBands] = {}, liveBand[kTracks][kBands] = {}, liveHold[kTracks][kBands] = {};
+    int statKey[kTracks][4];   // takeGen, len, layers, undone the static spectrum was measured at
+    float viewX0 = 0.f, viewX1 = 0.f;   // the VIEW tag in the header, for clicks
+    LScreen() {
+        for (int i = 0; i < kFft; i++) win[i] = 0.5f - 0.5f * std::cos(2.f * (float)M_PI * i / kFft);
+        for (int t = 0; t < kTracks; t++) statKey[t][0] = -1;
+    }
+    // a frame's band powers (a full-scale sine = 1), Hann windowed, added to pw
+    void bandPower(const float* x, float sr, float* pw) {
+        alignas(16) float in[kFft], sp[2 * kFft];
+        for (int i = 0; i < kFft; i++) in[i] = x[i] * win[i];
+        fft.rfft(in, sp);
+        const float binHz = sr / kFft, r = std::pow(16000.f / 30.f, 1.f / kBands);
+        auto amp2 = [&](int k) { k = clamp(k, 1, kFft / 2 - 1); return (sp[2 * k] * sp[2 * k] + sp[2 * k + 1] * sp[2 * k + 1]) * 16.f / ((float)kFft * kFft); };
+        for (int b = 0; b < kBands; b++) {
+            float fa = 30.f * std::pow(r, (float)b), fb = fa * r;
+            int ka = (int)std::ceil(fa / binHz), kb = (int)std::floor(fb / binHz);
+            float p = 0.f;
+            if (kb < ka) p = amp2((int)std::round(std::sqrt(fa * fb) / binHz));   // narrower than a bin
+            else for (int k = ka; k <= kb; k++) p += amp2(k);
+            pw[b] += p;
+        }
+    }
+    // band powers -> 0..1 (a +3 dB / octave tilt round 1 kHz, so music reads level; -72 .. -6 dB)
+    static float bandShow(float p, int b) {
+        float fc = 30.f * std::pow(16000.f / 30.f, (b + 0.5f) / kBands);
+        float db = 10.f * std::log10(p + 1e-12f) + 3.f * std::log2(fc / 1000.f);
+        return clamp((db + 72.f) / 66.f, 0.f, 1.f);
+    }
+    // the static spectrum: up to 48 frames across the whole loop, measured again when its audio changes
+    void updateStatic() {
+        for (int t = 0; t < kTracks; t++) {
+            const EchoLooper& lp = module->loop[t];
+            int key[4] = {module->takeGen[t], lp.len, lp.layers, lp.undone ? 1 : 0};
+            if (std::equal(key, key + 4, statKey[t])) continue;
+            std::copy(key, key + 4, statKey[t]);
+            float pw[kBands] = {};
+            const int len = lp.len;
+            if (len > 0 && (int)lp.l.size() >= len && (int)lp.r.size() >= len) {
+                int n = clamp(len / kFft, 1, 48);
+                float x[kFft];
+                for (int f = 0; f < n; f++) {
+                    int a = n > 1 ? (int)((int64_t)(len - kFft) * f / (n - 1)) : 0;
+                    for (int i = 0; i < kFft; i++) x[i] = a + i < len ? 0.5f * (lp.l[a + i] + lp.r[a + i]) : 0.f;
+                    bandPower(x, lp.sr, pw);
+                }
+                for (int b = 0; b < kBands; b++) pw[b] /= n;
+            }
+            for (int b = 0; b < kBands; b++) statBand[t][b] = len > 0 ? bandShow(pw[b], b) : 0.f;
+        }
+    }
+    // the live spectrum, from what leaves each track: quick up, slow down; a falling peak line
+    void updateLive() {
+        const int w = module->scopeW;
+        float x[kFft];
+        for (int t = 0; t < kTracks; t++) {
+            for (int i = 0; i < kFft; i++) x[i] = module->scope[t][(w + i) & (kFft - 1)];
+            float pw[kBands] = {};
+            bandPower(x, module->loop[t].sr, pw);
+            for (int b = 0; b < kBands; b++) {
+                float v = bandShow(pw[b], b), &lb = liveBand[t][b];
+                lb = v > lb ? lb + (v - lb) * 0.6f : std::max(v, lb - 0.03f);
+                liveHold[t][b] = std::max(lb, liveHold[t][b] - 0.006f);
+            }
+        }
+    }
+
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
+        int view = module ? module->laneView : 0;
+        if (module && view == 1) updateStatic();
+        if (module && (view == 1 || view == 2)) updateLive();
         float W = box.size.x, H = box.size.y;
         oled::box(args, W, H);
         nvgBeginPath(args.vg);
@@ -1256,7 +1346,7 @@ struct LScreen : TransparentWidget {
         drawHeader(args, W, s);
         drawInfo(args, W, s);
         for (int t = 0; t < kTracks; t++) drawLane(args, W, t, t == s);
-        if (module && module->waveZoom > 1) {   // the zoom, a tag at the lanes' top right
+        if (module && module->waveZoom > 1 && view == 0) {   // the zoom, a tag at the lanes' top right
             char z[12];
             snprintf(z, sizeof z, "ZOOM x%d", module->waveZoom);
             nvgFontSize(args.vg, 5.5f);
@@ -1292,6 +1382,7 @@ struct LScreen : TransparentWidget {
             nvgFillColor(args.vg, oled::green());
             nvgText(args.vg, mm2px(34.f), yc + 0.5f, "RAND", NULL);
         }
+        drawViewTag(args, mm2px(44.f), yc);
         // MON | LVL at the right end; the state and length sit left of it
         float xr = W - 4.f - drawHearTag(args, W - 4.f, yc) - mm2px(3.f);
 
@@ -1348,6 +1439,29 @@ struct LScreen : TransparentWidget {
             nvgText(args.vg, xi + w * 0.5f, y + h * 0.5f, i == 1 ? "MON" : "LVL", NULL);
         }
         return 2.f * w + gap;
+    }
+
+    // VIEW and the lanes' view (click: the next one), from x
+    void drawViewTag(const DrawArgs& args, float x, float yc) {
+        static const char* const kView[4] = {"SMOOTH", "STATIC SPECTRUM", "LIVE SPECTRUM", "LIVE SCOPE"};
+        const char* name = kView[module ? clamp(module->laneView, 0, 3) : 0];
+        nvgFontSize(args.vg, 5.5f);
+        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, oled::dim());
+        float b[4];
+        float vw = nvgTextBounds(args.vg, 0.f, 0.f, "VIEW", NULL, b);
+        nvgText(args.vg, x, yc + 0.3f, "VIEW", NULL);
+        const float h = mm2px(3.6f), y = yc - h * 0.5f + 0.3f, bx = x + vw + mm2px(1.f);
+        float bw = nvgTextBounds(args.vg, 0.f, 0.f, name, NULL, b) + mm2px(2.f);
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, bx, y, bw, h, 1.f);
+        nvgStrokeColor(args.vg, accent());
+        nvgStrokeWidth(args.vg, 0.6f);
+        nvgStroke(args.vg);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, accent());
+        nvgText(args.vg, bx + bw * 0.5f, y + h * 0.5f, name, NULL);
+        viewX0 = x; viewX1 = bx + bw;
     }
 
     // LEN | COUNT | IN level, the tempo at the right
@@ -1426,6 +1540,13 @@ struct LScreen : TransparentWidget {
                 nvgFill(args.vg);
             }
         }
+        // the live views: what leaves the track now, whatever its state
+        int view = module ? module->laneView : 0;
+        if (view == 2) {
+            drawSpectrum(args, liveBand[t], liveHold[t], nvgRGBA(255, 255, 255, muted ? 40 : 110), t, sel, muted, x0, x1, yT, yB);
+            return;
+        }
+        if (view == 3) { drawScope(args, t, sel, muted, x0, x1, yc, hh); return; }
 
         if (lp && lp->st == EchoLooper::REC) {   // recording: a red bar grows (to its length, else over 20 s)
             int target = lp->recTarget > 0 ? lp->recTarget : lp->recBeats > 0 && lp->curBeat > 0.f
@@ -1446,23 +1567,22 @@ struct LScreen : TransparentWidget {
             nvgStroke(args.vg);
             return;
         }
+        if (view == 1) {   // the whole loop's spectrum, still; the live one a faint line over it
+            drawSpectrum(args, statBand[t], liveBand[t], nvgRGBA(255, 255, 255, muted ? 30 : 90), t, sel, muted, x0, x1, yT, yB);
+            return;
+        }
         int zoom = module ? module->waveZoom : 1;
         if (lp && zoom > 1 && lp->len > 0) { drawZoomed(args, lp, t, sel, muted, zoom, x0, x1, yT, yB, yc, hh); return; }
         const int N = EchoLooper::kPeaks;
         float bw = (x1 - x0) / N;
         float lenF = lp ? (float)lp->len : 1.f, L = lp ? (float)module->playLen(t) : 1.f;
-        for (int pass = 0; pass < 2; pass++) {   // the playing part bright, the rest dim
-            nvgBeginPath(args.vg);
-            for (int c = 0; c < N; c++) {
-                bool in = (c + 0.5f) * lenF / N <= L;
-                if (in != (pass == 0)) continue;
-                float pk = lp ? lp->peak[c] : previewPeak(t, c);
-                float h = std::max(0.4f, std::min(1.f, pk) * hh);
-                nvgRect(args.vg, x0 + c * bw, yc - h, std::max(0.5f, bw - 0.35f), 2.f * h);
-            }
-            nvgFillColor(args.vg, trackCol(t, pass == 1 || muted ? 45 : sel ? 220 : 160));
-            nvgFill(args.vg);
+        float pk[N];
+        char in[N];
+        for (int c = 0; c < N; c++) {
+            in[c] = (c + 0.5f) * lenF / N <= L;
+            pk[c] = lp ? lp->peak[c] : previewPeak(t, c);
         }
+        smoothWave(args, pk, in, N, x0, bw, yc, hh, t, sel, muted);
         if (lp && lp->beats > 1 && lp->beatLen > 0.0 && lp->beats <= 64) {   // beat ticks (bars longer)
             nvgBeginPath(args.vg);
             for (int k = 1; k < lp->beats; k++) {
@@ -1497,23 +1617,17 @@ struct LScreen : TransparentWidget {
         const int cols = std::max(1, (int)((x1 - x0) / colW));
         const double per = span / cols;
         const int taps = std::max(1, std::min(48, (int)per));
-        for (int pass = 0; pass < 2; pass++) {   // the playing part bright, the rest dim
-            nvgBeginPath(args.vg);
-            for (int c = 0; c < cols; c++) {
-                double a = start + c * per;
-                bool in = wrap(a + per * 0.5) < L;
-                if (in != (pass == 0)) continue;
-                float pk = 0.f;
-                for (int k = 0; k < taps; k++) {
-                    int i = (int)wrap(a + per * k / taps);
-                    pk = std::max(pk, std::max(std::fabs(lp->l[i]), std::fabs(lp->r[i])));
-                }
-                float h = std::max(0.4f, std::min(1.f, pk) * hh);
-                nvgRect(args.vg, x0 + c * colW, yc - h, colW - 0.35f, 2.f * h);
+        std::vector<float> pk(cols, 0.f);
+        std::vector<char> in(cols);
+        for (int c = 0; c < cols; c++) {
+            double a = start + c * per;
+            in[c] = wrap(a + per * 0.5) < L;
+            for (int k = 0; k < taps; k++) {
+                int i = (int)wrap(a + per * k / taps);
+                pk[c] = std::max(pk[c], std::max(std::fabs(lp->l[i]), std::fabs(lp->r[i])));
             }
-            nvgFillColor(args.vg, trackCol(t, pass == 1 || muted ? 45 : sel ? 220 : 160));
-            nvgFill(args.vg);
         }
+        smoothWave(args, pk.data(), in.data(), cols, x0, colW, yc, hh, t, sel, muted);
         float w = cols * colW;
         if (lp->beats > 0 && lp->beatLen > 0.0) {   // beat ticks in view (bars longer; the loop's top longest)
             nvgBeginPath(args.vg);
@@ -1537,16 +1651,129 @@ struct LScreen : TransparentWidget {
         nvgStroke(args.vg);
     }
 
-    // scroll over the lanes: zoom in / out (x1 .. x32, every lane together)
+    // the smooth view: a translucent wave through the column peaks, mirrored round yc, outlined; the playing
+    // part (in[c]) bright, the rest dim
+    void smoothWave(const DrawArgs& args, const float* pk, const char* in, int n, float x0, float cw, float yc, float hh,
+                    int t, bool sel, bool muted) {
+        if (n < 2) return;
+        std::vector<float> h(n);
+        for (int c = 0; c < n; c++) {   // softened a little across its neighbours
+            float v = 0.5f * pk[c] + 0.25f * (pk[std::max(0, c - 1)] + pk[std::min(n - 1, c + 1)]);
+            h[c] = std::max(0.4f, std::min(1.f, v) * hh);
+        }
+        auto edge = [&](float sgn) {   // left to right along the top (sgn -1) or right to left along the foot (+1)
+            for (int k = 0; k < n; k++) {
+                int c = sgn < 0.f ? k : n - 1 - k, p = sgn < 0.f ? c - 1 : c + 1;
+                float x = x0 + (c + 0.5f) * cw, y = yc + sgn * h[c];
+                if (k == 0) { nvgLineTo(args.vg, x, y); continue; }
+                float xp = x0 + (p + 0.5f) * cw, yp = yc + sgn * h[p];
+                nvgQuadTo(args.vg, xp, yp, (xp + x) * 0.5f, (yp + y) * 0.5f);
+                if (k == n - 1) nvgLineTo(args.vg, x, y);
+            }
+        };
+        const float xe = x0 + n * cw;
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, x0, yc);
+        edge(-1.f);
+        nvgLineTo(args.vg, xe, yc);
+        edge(1.f);
+        nvgClosePath(args.vg);
+        nvgFillColor(args.vg, trackCol(t, muted ? 22 : 34));   // all of it dim
+        nvgFill(args.vg);
+        if (muted) return;
+        for (int a = 0; a < n;) {   // each playing run bright
+            if (!in[a]) { a++; continue; }
+            int b = a;
+            while (b < n && in[b]) b++;
+            nvgSave(args.vg);
+            nvgIntersectScissor(args.vg, x0 + a * cw, yc - hh - 2.f, (b - a) * cw, 2.f * hh + 4.f);
+            nvgFillColor(args.vg, trackCol(t, sel ? 120 : 85));
+            nvgFill(args.vg);
+            nvgStrokeColor(args.vg, trackCol(t, sel ? 235 : 180));
+            nvgStrokeWidth(args.vg, 0.6f);
+            nvgStroke(args.vg);
+            nvgRestore(args.vg);
+            a = b;
+        }
+    }
+
+    // a spectrum across the lane (low .. high): a translucent fill under the curve through the bands, outlined;
+    // a second line over it (peaks, or the live spectrum)
+    void drawSpectrum(const DrawArgs& args, const float* v, const float* line, NVGcolor lineCol, int t, bool sel, bool muted,
+                      float x0, float x1, float yT, float yB) {
+        const float yb = yB - 0.6f, hgt = yB - yT - 1.4f;
+        auto curve = [&](const float* u, bool start) {
+            float xp = x0, yp = yb - u[0] * hgt;
+            if (start) nvgMoveTo(args.vg, xp, yp); else nvgLineTo(args.vg, xp, yp);
+            for (int b = 1; b < kBands; b++) {
+                float x = x0 + (x1 - x0) * b / (kBands - 1), y = yb - u[b] * hgt;
+                nvgQuadTo(args.vg, xp, yp, (xp + x) * 0.5f, (yp + y) * 0.5f);
+                xp = x; yp = y;
+            }
+            nvgLineTo(args.vg, xp, yp);
+        };
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, x0, yb);
+        curve(v, false);
+        nvgLineTo(args.vg, x1, yb);
+        nvgClosePath(args.vg);
+        nvgFillColor(args.vg, trackCol(t, muted ? 25 : sel ? 105 : 75));
+        nvgFill(args.vg);
+        nvgBeginPath(args.vg);
+        curve(v, true);
+        nvgStrokeColor(args.vg, trackCol(t, muted ? 60 : sel ? 240 : 185));
+        nvgStrokeWidth(args.vg, 0.7f);
+        nvgStroke(args.vg);
+        if (!line) return;
+        nvgBeginPath(args.vg);
+        curve(line, true);
+        nvgStrokeColor(args.vg, lineCol);
+        nvgStrokeWidth(args.vg, 0.5f);
+        nvgStroke(args.vg);
+    }
+
+    // the live scope: what leaves the track, held still on a rising zero crossing; a translucent fill to the centre
+    void drawScope(const DrawArgs& args, int t, bool sel, bool muted, float x0, float x1, float yc, float hh) {
+        if (!module) return;
+        const int N = LP::kScope, show = N / 2, pts = 512, w = module->scopeW;
+        const float* s = module->scope[t];
+        auto at = [&](int i) { return s[(w + i) & (N - 1)]; };   // i = 0: the oldest sample
+        int start = N - show;
+        for (int i = N - show; i > 0; i--) if (at(i - 1) <= 0.f && at(i) > 0.f) { start = i; break; }
+        auto trace = [&]() {
+            for (int k = 0; k < pts; k++)
+                nvgLineTo(args.vg, x0 + (x1 - x0) * k / (pts - 1), yc - clamp(at(start + k * show / pts), -1.f, 1.f) * hh);
+        };
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, x0, yc);
+        trace();
+        nvgLineTo(args.vg, x1, yc);
+        nvgClosePath(args.vg);
+        nvgFillColor(args.vg, trackCol(t, muted ? 20 : sel ? 70 : 50));
+        nvgFill(args.vg);
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, x0, yc - clamp(at(start), -1.f, 1.f) * hh);
+        trace();
+        nvgStrokeColor(args.vg, trackCol(t, muted ? 60 : sel ? 240 : 190));
+        nvgStrokeWidth(args.vg, 0.7f);
+        nvgStroke(args.vg);
+    }
+
+    // scroll over the lanes: zoom in / out (x1 .. x32, every lane together; the smooth view)
     void onHoverScroll(const HoverScrollEvent& e) override {
         float y = e.pos.y - mm2px(ls::yLanes);
-        if (!module || e.scrollDelta.y == 0.f || y < 0.f || y >= mm2px(kTracks * ls::kLaneH)) return;
+        if (!module || module->laneView != 0 || e.scrollDelta.y == 0.f || y < 0.f || y >= mm2px(kTracks * ls::kLaneH)) return;
         module->waveZoom = clamp(e.scrollDelta.y > 0.f ? module->waveZoom * 2 : module->waveZoom / 2, 1, 32);
         e.consume(this);
     }
 
-    void onButton(const ButtonEvent& e) override {   // click a lane: select its track
+    void onButton(const ButtonEvent& e) override {   // click a lane: select its track; VIEW: the next view
         if (e.action != GLFW_PRESS || e.button != GLFW_MOUSE_BUTTON_LEFT) return;
+        if (module && e.pos.y < mm2px(ls::kHeadH) && e.pos.x >= viewX0 && e.pos.x <= viewX1) {
+            module->laneView = (module->laneView + 1) % 4;
+            e.consume(this);
+            return;
+        }
         float y = e.pos.y - mm2px(ls::yLanes);
         if (y < 0.f || y >= mm2px(kTracks * ls::kLaneH)) return;
         if (module) module->params[LP::SEL_PARAM].setValue((float)clamp((int)(y / mm2px(ls::kLaneH)), 0, kTracks - 1));
