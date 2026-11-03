@@ -24,6 +24,7 @@ extern Model* modelSynTHBloKDuo;
 extern Model* modelSynTHBloKMix12;
 extern Model* modelSynTHBloKMix8;
 extern Model* modelSynTHBloKEcho;
+extern Model* modelSynTHBloKLoop;
 void init(Plugin* p) {
     pluginInstance = p;
 
@@ -48,5 +49,6 @@ void init(Plugin* p) {
     p->addModel(modelSynTHBloKMix12);
     p->addModel(modelSynTHBloKMix8);
     p->addModel(modelSynTHBloKEcho);
+    p->addModel(modelSynTHBloKLoop);
 }
 

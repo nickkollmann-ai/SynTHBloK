@@ -246,6 +246,16 @@
         "Reverb",
         "Sampler"
       ]
+    },
+    {
+      "slug": "SynTHBloKLoop",
+      "name": "SynTHBloK MATRIX-LOOP",
+      "description": "8-track loop sampler built on the MATRIX-ECHO looper: record / replace, play / stop, play once, undo / redo and clear per track, tempo-locked lengths with count-in, clock or tempo knob, mono or stereo (poly) tracks, 8 inputs with gain and monitor, 8 outputs and a stereo mix, scenes, a JAM-style grid and an OLED showing all 8 loops",
+      "tags": [
+        "Sampler",
+        "Recording",
+        "Mixer"
+      ]
     }
   ],
   "authorEmail": "support@liquidnick.com",
