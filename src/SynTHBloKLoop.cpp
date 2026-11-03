@@ -97,8 +97,12 @@ struct SynTHBloKLoop : Module {
     // goes on in time, and the loop carries on from there when the chop ends)
     int ghost[kTracks] = {}, rollStart[kTracks] = {}, rollLen[kTracks] = {};
     bool chopped[kTracks] = {};
-    int waveZoom = 1;
-    bool autoMon = true;   // a closed take turns its track's input monitor off; REC turns it back on   // the screen's lanes: x1 (whole loops) .. x32 (following the playhead); UI only
+    int dubN[kTracks] = {};   // samples written by the replace now running
+    bool takeClosed = false;  // a take closed: back to LVL once none is recording or waiting to
+    bool replacing[kTracks] = {};   // a playing loop waits for its new take (a cancel lets it play on)
+    int waveZoom = 1;   // the screen's lanes: x1 (whole loops) .. x32 (following the playhead); UI only
+    bool autoMon = true;   // a closed take turns its track's input monitor off; REC turns it back on
+    float listenSm[kTracks] = {};   // 1 = the inputs heard in place of the loops (MON selected)
     bool storeArm = false;
     std::atomic<int> sceneReq{-1};
     // the JAM
@@ -154,7 +158,7 @@ struct SynTHBloKLoop : Module {
         configSwitch(RUN_PARAM, 0.f, 1.f, 1.f, "Run: stop / start every loop (a trigger at RUN toggles it)", {"Stopped", "Running"});
         configButton(RESET_PARAM, "Reset: every loop from the top (a trigger at RESET does too)");
         getParamQuantity(RUN_PARAM)->randomizeEnabled = false;
-        configSwitch(STRIP_PARAM, 0.f, 1.f, 0.f, "Strips", {"IN: input gain", "LVL: track level"});
+        configSwitch(STRIP_PARAM, 0.f, 1.f, 1.f, "Strips and audio", {"MON: input gain, hear the inputs", "LVL: track level, hear the loops"});
         getParamQuantity(STRIP_PARAM)->randomizeEnabled = false;
         configButton(REC_ALL_PARAM, "Record / replace on all 8 tracks at once");
         configParam(CHOP_PARAM, 1.f, 8.f, 8.f, "Chop: every loop repeats this many eighths from where it plays (8: whole)", "/8");
@@ -227,9 +231,28 @@ struct SynTHBloKLoop : Module {
                     lp.fire(lp.sinceBeat);
                     break;
                 }
-                if (autoMon && lp.st != EchoLooper::REC && lp.st != EchoLooper::DUB) params[MON_PARAM + t].setValue(1.f);
+            {
+                bool starting = lp.st != EchoLooper::REC && lp.st != EchoLooper::DUB;
+                bool cancel = lp.arm == EchoLooper::A_REC || lp.arm == EchoLooper::A_DUB;
+                // a replace: REC on a loop records a new take of LEN on the grid, the same as a first take
+                // (all of them start together under ALL 8, each closes at its own LEN)
+                if (starting && !cancel && lp.len > 0 && lp.st != EchoLooper::EMPTY) {
+                    replacing[t] = lp.st != EchoLooper::STOP;
+                    lp.st = EchoLooper::STOP;
+                }
+                // auto monitor: a take about to start opens its monitor and selects MON (the inputs heard)
+                if (autoMon && starting && !cancel) {
+                    params[MON_PARAM + t].setValue(1.f);
+                    params[STRIP_PARAM].setValue(0.f);
+                }
                 lp.press(EchoLooper::B_REC);
+                if (cancel) {   // a second press called it off: a replaced loop plays on, and back to LVL when idle
+                    if (replacing[t] && lp.st == EchoLooper::STOP) lp.press(EchoLooper::B_PLAY);
+                    replacing[t] = false;
+                    if (autoMon) takeClosed = true;
+                }
                 break;
+            }
             case 1: lp.press(EchoLooper::B_PLAY); break;
             case 2: lp.press(EchoLooper::B_ONCE); break;
             case 3: lp.undo(); break;
@@ -303,6 +326,8 @@ struct SynTHBloKLoop : Module {
     // the strips' state: IN (input gain, input meters) or LVL (track level, meters of the loop playing alone,
     // without the input monitor): the two never show each other's audio
     bool stripLvl() { return params[STRIP_PARAM].getValue() > 0.5f; }
+    // the inputs are heard in place of the loops: MON selected (LVL not)
+    bool hearIn() { return !stripLvl(); }
     int stripParam(int t) { return (stripLvl() ? LEVEL_PARAM : GAIN_PARAM) + t; }
     float stripPk(int t) { return stripLvl() ? playPk[t] : inPk[t]; }
 
@@ -625,13 +650,21 @@ struct SynTHBloKLoop : Module {
             if (chopped[t]) { int Lc = playLen(t); ghost[t] = Lc > 0 ? (ghost[t] + 1) % Lc : 0; }
             else ghost[t] = lp.pos;
             // a new take is mono or stereo as its input; replacing with a stereo input makes it stereo
-            if (lp.st == EchoLooper::REC && prevSt[t] != EchoLooper::REC) stereo[t] = ch > 1;
+            if (lp.st == EchoLooper::REC && prevSt[t] != EchoLooper::REC) { stereo[t] = ch > 1; replacing[t] = false; }
             if ((lp.st == EchoLooper::REC || lp.st == EchoLooper::DUB) && ch > 1) stereo[t] = true;
             if (lp.st == EchoLooper::EMPTY) stereo[t] = false;
+            // a replace (REC on a playing loop) ends by itself once it has written over the whole loop
+            if (lp.st == EchoLooper::DUB) {
+                if (prevSt[t] != EchoLooper::DUB) dubN[t] = 0;
+                int Ld = playLen(t);
+                if (Ld > 0 && ++dubN[t] >= Ld) lp.st = EchoLooper::PLAY;
+            }
             // auto monitor-off: a take (or overdub) just closed into a loop
             bool wasRec = prevSt[t] == EchoLooper::REC || prevSt[t] == EchoLooper::DUB;
-            if (autoMon && wasRec && lp.st != EchoLooper::REC && lp.st != EchoLooper::DUB && lp.len > 0)
+            if (autoMon && wasRec && lp.st != EchoLooper::REC && lp.st != EchoLooper::DUB && lp.len > 0) {
                 params[MON_PARAM + t].setValue(0.f);
+                takeClosed = true;
+            }
             prevSt[t] = lp.st;
             // the eighth now playing; RAND may move on from it as it starts
             int Lt = playLen(t);
@@ -645,11 +678,15 @@ struct SynTHBloKLoop : Module {
             } else lastSlice[t] = -1;
             smooth(levelSm[t], params[LEVEL_PARAM + t].getValue(), 0.01f);
             smooth(muteSm[t], params[MUTE_PARAM + t].getValue() > 0.5f ? 0.f : 1.f, 0.004f);
+            // MON selected: the loop fades out and the input in
+            smooth(listenSm[t], hearIn() ? 1.f : 0.f, 0.004f);
+            oL *= 1.f - listenSm[t]; oR *= 1.f - listenSm[t];
             // the loop alone (no input monitor), as it leaves the track
             float pg = levelSm[t] * muteSm[t];
             playPk[t] = std::max(std::max(std::fabs(oL * pg), std::fabs(oR * pg)), playPk[t] * pkFall);
             bool mon = params[MON_PARAM + t].getValue() > 0.5f;
             if (mon) { oL += iL; oR += iR; }
+            else if (listenSm[t] > 0.f) { oL += iL * listenSm[t]; oR += iR * listenSm[t]; mon = true; }
             oL *= levelSm[t] * muteSm[t]; oR *= levelSm[t] * muteSm[t];
             outPk[t] = std::max(std::max(std::fabs(oL), std::fabs(oR)), outPk[t] * pkFall);
             Output& o = outputs[OUT_OUTPUT + t];
@@ -661,6 +698,16 @@ struct SynTHBloKLoop : Module {
                 o.setVoltage(2.5f * (oL + oR));
             }
             mixL += oL; mixR += oR;
+        }
+        // auto monitor-off: once the last take (or replace) has closed, back from MON to LVL (the loops heard)
+        if (takeClosed) {
+            bool busy = false;
+            for (int t = 0; t < kTracks; t++) {
+                const EchoLooper& lp = loop[t];
+                if (lp.st == EchoLooper::REC || lp.st == EchoLooper::DUB || lp.counting()
+                    || lp.arm == EchoLooper::A_REC || lp.arm == EchoLooper::A_DUB) busy = true;
+            }
+            if (!busy) { params[STRIP_PARAM].setValue(1.f); takeClosed = false; }
         }
         // master: gain, then a soft ceiling from 8 V (never past 10 V)
         smooth(masterSm, params[MASTER_PARAM].getValue(), 0.01f);
@@ -926,19 +973,14 @@ struct LChopDisplay : OpaqueWidget {
     }
 };
 
-// In the input plate, beside A-H and shaped like them: IN / LVL (the strips' state; lit amber on LVL) and
-// MON (every track's input monitor: lit while any is on; a click turns them all off, or, all off, all on).
+// In the input plate, beside A-H and shaped like them, a pair selecting the strips and what is heard (the lit one):
+// LVL = track levels, the loops heard; MON = input gains, the inputs heard in place of the loops.
 struct LInBtn : OpaqueWidget {
     LP* module = NULL;
     int param = 0;
     bool mute = false;   // (the MON button)
-    bool anyMon() {
-        for (int t = 0; t < kTracks; t++)
-            if (module->params[LP::MON_PARAM + t].getValue() > 0.5f) return true;
-        return false;
-    }
     void draw(const DrawArgs& args) override {
-        bool on = module ? (mute ? anyMon() : module->params[param].getValue() > 0.5f) : mute;
+        bool on = module ? (module->params[param].getValue() > 0.5f) != mute : mute;
         NVGcolor col = mute ? nvgRGB(0xff, 0xb0, 0x50) : nvgRGB(0xff, 0x70, 0x0f);
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.4f);
@@ -953,17 +995,11 @@ struct LInBtn : OpaqueWidget {
         nvgFontSize(args.vg, 6.f);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
         nvgFillColor(args.vg, on ? nvgRGB(0x10, 0x10, 0x10) : col);
-        nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, mute ? "MON" : (on ? "LVL" : "IN"), NULL);
+        nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, mute ? "MON" : "LVL", NULL);
     }
     void onButton(const ButtonEvent& e) override {
         if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
-            if (module && mute) {
-                float v = anyMon() ? 0.f : 1.f;
-                for (int t = 0; t < kTracks; t++) module->params[LP::MON_PARAM + t].setValue(v);
-            } else if (module) {
-                Param& p = module->params[param];
-                p.setValue(p.getValue() > 0.5f ? 0.f : 1.f);
-            }
+            if (module) module->params[param].setValue(mute ? 0.f : 1.f);
             e.consume(this);
         }
     }
@@ -1470,7 +1506,7 @@ struct LTile : OpaqueWidget {
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
         nvgFillColor(args.vg, trackCol(t, 170));
         nvgText(args.vg, W - 3.f, H - 2.5f, len, NULL);
-        bool mon = module ? module->params[LP::MON_PARAM + t].getValue() > 0.5f : true;
+        bool mon = module ? module->params[LP::MON_PARAM + t].getValue() > 0.5f || module->hearIn() : true;
         bool connected = module && module->inputs[LP::IN_INPUT + t].isConnected();
         bool muted = module && module->params[LP::MUTE_PARAM + t].getValue() > 0.5f;
         if (muted || (mon && connected)) {
@@ -1691,7 +1727,7 @@ struct SynTHBloKLoopWidget : ModuleWidget {
             addChild(r);
             addParam(createParamCentered<Trimpot>(mm2px(Vec(xK, y)), module, LP::GAIN_PARAM + t));
         }
-        // the strips' state and the input mute, on the A-H row (the plate reaches down to it)
+        // LVL / MON: the strips and what is heard, on the A-H row (the plate reaches down to it)
         for (int i = 0; i < 2; i++) {
             LInBtn* b = createWidget<LInBtn>(mm2px(Vec((i == 0 ? xJ : xK) - 3.3f, 85.5f)));
             b->box.size = mm2px(Vec(6.6f, 6.6f)); b->module = module;
