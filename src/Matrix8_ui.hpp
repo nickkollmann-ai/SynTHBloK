@@ -69,6 +69,51 @@ static void drawColorButton(const widget::Widget::DrawArgs& args, Vec size, int 
     nvgText(args.vg, size.x * 0.5f, size.y * 0.5f, label, NULL);
 }
 
+// RAND, after pattern 8 over the jack column: a momentary button shaped like the pattern buttons,
+// outlined in the FX button's green, filled green while held (1 while held, so a SchmittTrigger sees it).
+struct JRandBtn : app::ParamWidget {
+    void drawLayer(const DrawArgs& args, int layer) override {
+        ParamWidget::drawLayer(args, layer);
+        if (layer != 1) return;
+        ParamQuantity* pq = getParamQuantity();
+        bool held = pq && pq->getValue() > 0.5f;
+        NVGcolor g = nvgRGB(120, 230, 90);
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.4f);
+        nvgFillColor(args.vg, held ? g : kIdle);
+        nvgFill(args.vg);
+        nvgStrokeColor(args.vg, g);
+        nvgStrokeWidth(args.vg, held ? 1.2f : 0.8f);
+        nvgStroke(args.vg);
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgFontSize(args.vg, 6.f);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, held ? nvgRGB(0x10, 0x10, 0x10) : g);
+        nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, "RAND", NULL);
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
+            if (ParamQuantity* pq = getParamQuantity()) pq->setValue(1.f);
+            e.consume(this);
+            return;
+        }
+        ParamWidget::onButton(e);
+    }
+    void onDragStart(const DragStartEvent& e) override {}
+    void onDragEnd(const DragEndEvent& e) override {
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT)
+            if (ParamQuantity* pq = getParamQuantity()) pq->setValue(0.f);
+    }
+    // centred on the jack column x (mm), level with the pattern buttons at y (mm)
+    static JRandBtn* create(float x, float y, Module* module, int param) {
+        JRandBtn* b = createParam<JRandBtn>(mm2px(Vec(x - 3.3f, y)), module, param);
+        b->box.size = mm2px(Vec(6.6f, 6.6f));
+        return b;
+    }
+};
+
 // MIDI IN and OUT in one display, in the SynTHBloK MIDI + amber style.
 // Click the top half to pick the input port, the bottom half for the output port.
 struct JMidiDisplay : TransparentWidget {

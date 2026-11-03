@@ -256,6 +256,19 @@
         "Recording",
         "Mixer"
       ]
+    },
+    {
+      "slug": "SynTHBloKMatrixFx",
+      "name": "SynTHBloK MATRIX-FX",
+      "description": "8-input effects matrix played from the MATRIX 8x8 grid and the Maschine JAM: 8 effect slots (64 effects in 7 tabs: drive, filter, mod, glitch, delay, reverb, dynamics), 12 one-click chains, accents, 8 routing scenes, slot links and dub chains, drag-and-drop OLED setup, musical RAND, DJ filter, 60 s tempo-locked looper (MATRIX-ECHO's)",
+      "tags": [
+        "Effect",
+        "Delay",
+        "Reverb",
+        "Distortion",
+        "Filter",
+        "MIDI"
+      ]
     }
   ],
   "authorEmail": "support@liquidnick.com",
