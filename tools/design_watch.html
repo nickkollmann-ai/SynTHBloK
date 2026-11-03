@@ -21,17 +21,26 @@ main{display:grid;grid-template-columns:minmax(300px,.75fr) minmax(0,1.6fr);grid
 #p-design{grid-area:design}#p-asm{grid-area:asm;border-right:0}#p-comp{grid-area:comp;border-top:1px solid var(--line)}
 @media(max-width:900px){main{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1.6fr) minmax(0,1fr);grid-template-areas:"asm asm" "design comp"}#p-design,#p-comp{border-top:1px solid var(--line)}}
 /* LIVE.ASSEMBLY window: replays each save, typing the changed lines and drawing new SVG pieces one at a time */
+/* Once an SVG has been drawn, the drawing stays and takes most of the window; the code is a narrow strip
+   (a quarter of its old half). */
 #asm{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr)}
-#asm.svg{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}
+#asm.svg{grid-template-columns:minmax(0,.15fr) minmax(0,1fr)}
+#asm.svg #code{font-size:9px}
 #code{margin:0;overflow:auto;padding:8px 0;font-size:11px;line-height:1.55;background:#070b10;white-space:pre}
 #code div{padding:0 10px 0 0}#code u{display:inline-block;width:44px;padding-right:10px;text-align:right;color:#2c4652;text-decoration:none;user-select:none}
 #code .ctx{color:#4f6a76}#code .del{color:var(--bad);text-decoration:line-through;opacity:.7}#code .add{color:var(--tx);background:#00e5ff12}
 #code .add.typing::after{content:"▌";color:var(--mg)}#code .more{color:var(--mut);font-style:italic;padding-left:54px}
-#draw{display:none;align-items:center;justify-content:center;padding:12px;min-height:0;border-left:1px solid var(--line);background:repeating-conic-gradient(#0a1016 0 25%,#0c131a 0 50%) 0 0/24px 24px}
+#draw{display:none;position:relative;align-items:center;justify-content:center;padding:12px;min-height:0;border-left:1px solid var(--line);background:repeating-conic-gradient(#0a1016 0 25%,#0c131a 0 50%) 0 0/24px 24px}
 #asm.svg #draw{display:flex}
 #draw svg{width:100%;height:100%}
 #draw .pc{visibility:hidden}#draw .pc.on{visibility:visible;animation:pc 1s ease}
 @keyframes pc{0%{filter:drop-shadow(0 0 4px #ff00aa) brightness(1.8)}100%{filter:none}}
+/* an edit: the pieces taken out show in red and fade away as the new ones go in; the rest dims meanwhile */
+#draw.edit svg>*:not(.gone){transition:opacity .4s}#draw.edit.busy svg .keep{opacity:.45}
+#draw .gone{opacity:0}#draw .gone.on{animation:gone 1.4s ease forwards}
+@keyframes gone{0%{opacity:1;filter:drop-shadow(0 0 3px #ff3b5c)}100%{opacity:0}}
+#draw-tag{position:absolute;top:10px;left:12px;padding:2px 8px;font-size:11px;letter-spacing:.14em;color:#070b10;background:var(--cy)}
+#draw-tag.edit{background:var(--or)}#draw-tag.done{background:var(--line);color:var(--mut)}
 /* Click-to-zoom on DESIGN images: first view fits the window, clicking the image toggles actual pixels. */
 #stage img{cursor:zoom-in}
 #zoom{position:fixed;inset:0;z-index:10;display:none;background:#05070bf2;overflow:auto;cursor:zoom-out}
@@ -303,7 +312,7 @@ function replay({p, before, now}) {
   if (!before) { d.start = 0; d.removed = []; d.added = d.B; d.end = d.B.length; }
   document.getElementById('asm-file').textContent = p.slice(1);
   document.getElementById('asm-meta').textContent = `+${d.added.length} / -${d.removed.length} lines` + (before ? '' : ' · new file');
-  asm.classList.toggle('svg', isSvg);
+  if (isSvg) asm.classList.add('svg');   // the last drawing stays up while code saves replay beside it
 
   // Code: 3 lines of context, removed lines struck through, then the added lines typed out.
   const MAX = 300, row = (n, cls, s) => `<div class="${cls}"><u>${n}</u>${s.replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]))}</div>`;
@@ -314,22 +323,48 @@ function replay({p, before, now}) {
   const typed = d.added.slice(0, MAX), rows = typed.map((_, k) => { const el = document.createElement('div'); el.className = 'add'; el.innerHTML = `<u>${d.start + k + 1}</u>`; el.appendChild(document.createTextNode('')); return el; });
   const tail = d.B.slice(d.end, d.end + 3).map((s, k) => row(d.end + k + 1, 'ctx', s)).join('') + (d.added.length > MAX ? `<div class="more">… ${d.added.length - MAX} more lines in this save</div>` : '');
 
-  // Drawing: the whole new SVG, with only the pieces that are new in this save hidden until their turn.
-  let pieces = [];
-  draw.innerHTML = '';
+  // Drawing: a new SVG is built piece by piece from nothing. An edited one shows what it was: the pieces
+  // that stay dim a little, the ones taken out flash red and fade, and the new or changed ones go in one at a time.
+  let pieces = [], gone = [];
   if (isSvg) {
+    draw.innerHTML = '';
     const doc = new DOMParser().parseFromString(now, 'image/svg+xml'), svg = doc.documentElement;
     if (svg.tagName.toLowerCase() === 'svg') {
-      const old = {};
-      if (before) leaves(new DOMParser().parseFromString(before, 'image/svg+xml').documentElement).forEach(e => old[e.outerHTML] = (old[e.outerHTML] || 0) + 1);
+      const old = new Map(), prev = before ? leaves(new DOMParser().parseFromString(before, 'image/svg+xml').documentElement) : [];
+      prev.forEach(e => old.set(e.outerHTML, (old.get(e.outerHTML) || []).concat([e])));
       const live = document.importNode(svg, true);
       if (!live.getAttribute('viewBox') && live.getAttribute('width')) live.setAttribute('viewBox', `0 0 ${parseFloat(live.getAttribute('width'))} ${parseFloat(live.getAttribute('height'))}`);
       live.removeAttribute('width'); live.removeAttribute('height');
       const src = leaves(svg), dst = leaves(live);
-      src.forEach((e, k) => { const h = e.outerHTML; if (old[h]) old[h]--; else { dst[k].classList.add('pc'); pieces.push(dst[k]); } });
+      src.forEach((e, k) => {
+        const same = old.get(e.outerHTML);
+        if (same && same.length) { same.pop(); dst[k].classList.add('keep'); }
+        else { dst[k].classList.add('pc'); pieces.push(dst[k]); }
+      });
+      // what the old version had and this one has not (drawn on top, without their old group transforms)
+      for (const list of old.values()) list.forEach(e => {
+        const g = document.importNode(e, true);
+        g.classList.add('gone');
+        live.appendChild(g); gone.push(g);
+      });
       draw.appendChild(live);
     }
+    const tag = document.createElement('span');
+    tag.id = 'draw-tag';
+    tag.className = before ? 'edit' : '';
+    draw.appendChild(tag);
+    draw.classList.toggle('edit', !!before);
+    draw.classList.add('busy');
   }
+  const tagEl = document.getElementById('draw-tag');
+  const setTag = (n, doneNow) => {
+    if (!isSvg || !tagEl) return;
+    tagEl.textContent = before ? `EDITING SVG · +${pieces.length} new / changed · -${gone.length} removed` + (doneNow ? ' · DONE' : ` · ${n}/${pieces.length}`)
+                               : `BUILDING NEW SVG · ${n}/${pieces.length} pieces` + (doneNow ? ' · DONE' : '');
+    if (doneNow) tagEl.classList.add('done');
+  };
+  setTag(0, false);
+  gone.forEach(g => g.classList.add('on'));
 
   // One clock for both: about 25 ms a character, between 1.5 and 9 seconds in all.
   const chars = typed.reduce((n, s) => n + s.length + 1, 0), total = Math.min(9000, Math.max(1500, chars * 25)), t0 = performance.now();
@@ -346,9 +381,10 @@ function replay({p, before, now}) {
     }
     code.scrollTop = code.scrollHeight;
     const wantPieces = Math.round(pieces.length * f);
-    while (shownPieces < wantPieces) pieces[shownPieces++].classList.add('on');
+    if (shownPieces < wantPieces) { while (shownPieces < wantPieces) pieces[shownPieces++].classList.add('on'); setTag(shownPieces, false); }
     if (f >= 1) {
       clearInterval(running); running = null;
+      if (isSvg) { draw.classList.remove('busy'); gone.forEach(g => g.remove()); setTag(pieces.length, true); }
       rows.forEach(r => r.classList.remove('typing'));
       code.insertAdjacentHTML('beforeend', tail);
       const first = code.querySelector('.add, .del'); if (first) code.scrollTop = Math.max(0, first.offsetTop - 60);
