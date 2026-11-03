@@ -16,9 +16,10 @@ header{display:flex;align-items:center;gap:14px;padding:8px 14px;border-bottom:1
 header b{color:var(--mg);letter-spacing:.16em;font-weight:600}
 header span{color:var(--mut)}
 #live{margin-left:auto;color:var(--cy)}
-main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) minmax(280px,.9fr);grid-template-areas:"design asm comp";min-height:0}
-#p-design{grid-area:design}#p-asm{grid-area:asm}#p-comp{grid-area:comp}
-@media(max-width:1200px){main{grid-template-columns:minmax(0,1fr) minmax(280px,1fr);grid-template-rows:1fr 1fr;grid-template-areas:"design comp" "asm asm"}#p-asm{border-top:1px solid var(--line);border-right:0}}
+/* DESIGN and COMPILER stacked on the left; LIVE.ASSEMBLY takes the large right side. */
+main{display:grid;grid-template-columns:minmax(300px,.75fr) minmax(0,1.6fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"design asm" "comp asm";min-height:0}
+#p-design{grid-area:design}#p-asm{grid-area:asm;border-right:0}#p-comp{grid-area:comp;border-top:1px solid var(--line)}
+@media(max-width:900px){main{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1.6fr) minmax(0,1fr);grid-template-areas:"asm asm" "design comp"}#p-design,#p-comp{border-top:1px solid var(--line)}}
 /* LIVE.ASSEMBLY window: replays each save, typing the changed lines and drawing new SVG pieces one at a time */
 #asm{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr)}
 #asm.svg{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}
@@ -31,6 +32,13 @@ main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) minmax(280
 #draw svg{width:100%;height:100%}
 #draw .pc{visibility:hidden}#draw .pc.on{visibility:visible;animation:pc 1s ease}
 @keyframes pc{0%{filter:drop-shadow(0 0 4px #ff00aa) brightness(1.8)}100%{filter:none}}
+/* Click-to-zoom on DESIGN images: first view fits the window, clicking the image toggles actual pixels. */
+#stage img{cursor:zoom-in}
+#zoom{position:fixed;inset:0;z-index:10;display:none;background:#05070bf2;overflow:auto;cursor:zoom-out}
+#zoom.on{display:grid;place-items:center}
+#zoom img{max-width:96vw;max-height:92vh;object-fit:contain;cursor:zoom-in;background:#090e14;box-shadow:0 0 0 1px var(--line)}
+#zoom.full{display:block;padding:20px}#zoom.full img{max-width:none;max-height:none;cursor:zoom-out}
+#zoom-cap{position:fixed;left:14px;bottom:10px;font-size:11px;letter-spacing:.1em;color:var(--mut)}
 #asm-meta{color:var(--mut)}#replay{background:transparent;border:1px solid var(--line);color:var(--cy);font:inherit;font-size:10px;letter-spacing:.12em;padding:1px 8px;cursor:pointer}
 .pane{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
 .pane:last-child{border-right:0}
@@ -85,6 +93,7 @@ footer button em{display:block;font-style:normal;background:var(--cy);color:#070
   </section>
 </main>
 <footer id="strip"></footer>
+<div id="zoom"><img alt=""><span id="zoom-cap">click the image for actual size · click outside or press Esc to close</span></div>
 <script>
 const ROOTS = ['/res/', '/web-images/'], IMG = /\.(svg|png|webp|jpe?g)$/i, POLL = 1500;
 const files = new Map();          // path -> last-modified ms
@@ -231,6 +240,16 @@ async function scanLog() {
   if (wasRunning && st.dataset.last !== st.textContent) feed(`compiler: <b>${st.textContent}</b>`);
   st.dataset.last = st.textContent;
 }
+
+// Click-to-zoom for the panel, screenshot and file images in DESIGN.
+const zoom = document.getElementById('zoom'), zimg = zoom.querySelector('img');
+document.getElementById('stage').addEventListener('click', e => {
+  if (e.target.tagName !== 'IMG') return;
+  zimg.src = e.target.src; zoom.className = 'on';
+});
+zimg.onclick = e => { e.stopPropagation(); zoom.classList.toggle('full'); };
+zoom.onclick = () => zoom.className = '';
+addEventListener('keydown', e => { if (e.key === 'Escape') zoom.className = ''; });
 
 // ---- LIVE.ASSEMBLY ----
 // Every res/*.svg and src/* file is cached, so a save can be compared with the version before it.
