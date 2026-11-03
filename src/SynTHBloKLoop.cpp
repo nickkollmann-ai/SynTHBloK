@@ -19,8 +19,8 @@
 #include <chrono>
 
 // The Maschine JAM ("JAM Template 4 Rack", as MATRIX-DRUM; the module owns the JAM when last clicked):
-//   pads           = the grid: play that track from that eighth (MUTE held: mute the row's track;
-//                    SOLO held: play / stop it)
+//   pads           = the grid: play that track from that eighth (JUMP), or gate that eighth on / off (GATE)
+//                    (MUTE held: mute the row's track; SOLO held: play / stop it)
 //   scene 1-8      = select the track          group A-H = mute track 1-8 (lit: muted)
 //   touch strips   = input gain A-H, or (strips on LVL) track level 1-8        knob = MASTER (push: back to 0 dB)
 //   PLAY / REC     = PLAY / REC                CLEAR     = CLEAR      SONG = UNDO / REDO    DUPLICATE = ONCE
@@ -66,7 +66,8 @@ struct SynTHBloKLoop : Module {
     enum ParamId { SEL_PARAM, REC_PARAM, PLAY_PARAM, ONCE_PARAM, UNDO_PARAM, CLEAR_PARAM, COUNTIN_PARAM, TEMPO_PARAM,
                    MASTER_PARAM, ENUMS(LEN_PARAM, kTracks), ENUMS(GAIN_PARAM, kTracks), ENUMS(MON_PARAM, kTracks),
                    ENUMS(LEVEL_PARAM, kTracks), MIDI_ON_PARAM, PAGE_PARAM, ENUMS(MUTE_PARAM, kTracks), RUN_PARAM, RESET_PARAM,
-                   STRIP_PARAM, IN_MUTE_PARAM, REC_ALL_PARAM, CHOP_PARAM, CLEAR_ALL_PARAM, PLAY_ALL_PARAM, PARAMS_LEN };
+                   STRIP_PARAM, IN_MUTE_PARAM, REC_ALL_PARAM, CHOP_PARAM, CLEAR_ALL_PARAM, PLAY_ALL_PARAM, PAD_MODE_PARAM,
+                   PARAMS_LEN };
     // REC .. CLEAR jacks: mono = the selected track; poly = channel n plays track n
     enum InputId { ENUMS(IN_INPUT, kTracks), CLOCK_INPUT, REC_INPUT, PLAY_INPUT, ONCE_INPUT, UNDO_INPUT, CLEAR_INPUT,
                    RUN_INPUT, RESET_INPUT, INPUTS_LEN };
@@ -87,6 +88,10 @@ struct SynTHBloKLoop : Module {
     // the track may play another eighth instead (as many whole beats away, so it stays on the grid)
     std::atomic<int> padReq{-1};   // track * 8 + eighth, from the UI
     int pend[kTracks], lastSlice[kTracks];
+    // GATE (the pads' mode): each track's eighths gated off (bit c: silent there) and accented (louder), as the
+    // playhead's column; a clear sets them back (all on, none accented)
+    int gateOff[kTracks] = {}, accent[kTracks] = {};
+    float gateSm[kTracks];
     bool randOn[kTracks] = {};   // the lane has a RAND effect (its mode); it plays while randAll is on
     bool randAll = false;        // RAND (the button, the JAM's GRID): every lane's effect on / off
     // RAND's mode per track (what a random step does) and its amount (LOW / MED / HIGH: how often)
@@ -162,7 +167,7 @@ struct SynTHBloKLoop : Module {
             configParam(LEVEL_PARAM + t, 0.f, 2.f, 1.f, string::f("Track %d level", t + 1), " dB", -10.f, 20.f);
             configSwitch(MUTE_PARAM + t, 0.f, 1.f, 0.f, string::f("Track %d mute (button %c)", t + 1, 'A' + t), {"Off", "Muted"});
             getParamQuantity(MUTE_PARAM + t)->randomizeEnabled = false;
-            gainSm[t] = levelSm[t] = muteSm[t] = 1.f;
+            gainSm[t] = levelSm[t] = muteSm[t] = gateSm[t] = 1.f;
             pend[t] = lastSlice[t] = -1;
             randAmt[t] = 1;
         }
@@ -191,6 +196,9 @@ struct SynTHBloKLoop : Module {
         configParam(CHOP_PARAM, 1.f, 8.f, 8.f, "Chop: every loop repeats this many eighths from where it plays (8: whole)", "/8");
         getParamQuantity(CHOP_PARAM)->snapEnabled = true;
         getParamQuantity(CHOP_PARAM)->randomizeEnabled = false;
+        configSwitch(PAD_MODE_PARAM, 0.f, 1.f, 0.f, "Pads",
+                     {"JUMP: a pad plays from that eighth", "GATE: a pad gates that eighth on / off (right-click: accent)"});
+        getParamQuantity(PAD_MODE_PARAM)->randomizeEnabled = false;
         configSwitch(IN_MUTE_PARAM, 0.f, 1.f, 0.f, "(unused: was the input mute)", {"Off", "On"});
         getParamQuantity(IN_MUTE_PARAM)->randomizeEnabled = false;
         configInput(RUN_INPUT, "Run (trigger: toggles RUN)");
@@ -210,6 +218,7 @@ struct SynTHBloKLoop : Module {
     void onReset() override {
         for (int t = 0; t < kTracks; t++) {
             loop[t].clear(); stereo[t] = false; randOn[t] = false; pend[t] = -1; randMode[t] = RM_8; randAmt[t] = 1;
+            gateOff[t] = accent[t] = 0;
         }
         randAll = false;
         for (int k = 0; k < 8; k++) { sceneMask[k] = 0; sceneUsed[k] = false; }
@@ -227,6 +236,19 @@ struct SynTHBloKLoop : Module {
         bool v = params[param].getValue() > 0.5f, e = v && !btnPrev[b];
         btnPrev[b] = v;
         return e;
+    }
+    // GATE (the pads' mode): a pad gates its eighth on / off, or (acc: right-click) accents it (an accented
+    // eighth plays)
+    bool gateMode() { return params[PAD_MODE_PARAM].getValue() > 0.5f; }
+    void gatePad(int r, int c, bool acc) {
+        const int bit = 1 << c;
+        if (!acc) {
+            gateOff[r] ^= bit;
+            if (gateOff[r] & bit) accent[r] &= ~bit;
+        } else {
+            accent[r] ^= bit;
+            if (accent[r] & bit) gateOff[r] &= ~bit;
+        }
     }
     // the tracks playing (or armed to start) now: a scene stores these
     void storeScene(int k) {
@@ -553,7 +575,11 @@ struct SynTHBloKLoop : Module {
                     if (padNote(r, c) == a) {
                         if (muteHeld) toggle(params[MUTE_PARAM + r]);
                         else if (soloHeld) act(r, 1);
-                        else { params[SEL_PARAM].setValue((float)r); padReq.store(r * 8 + c); }
+                        else {
+                            params[SEL_PARAM].setValue((float)r);
+                            if (gateMode()) gatePad(r, c, false);
+                            else padReq.store(r * 8 + c);
+                        }
                         pad = true; break;
                     }
                 if (!pad)
@@ -609,8 +635,10 @@ struct SynTHBloKLoop : Module {
             if (lp.len <= 0) return 0;
             int L = playLen(r);
             bool head = pend[r] < 0 && lp.playing() && L > 0 && c == clamp((int)((int64_t)lp.pos * 8 / L), 0, 7);
-            if (head) return lp.st == EchoLooper::DUB ? kJamBright[4] : kJamWhite;
-            return r == s ? kJamBright[r] : kJamDim[r];
+            bool off = (gateOff[r] >> c) & 1;   // GATE: an eighth gated off is dark (the playhead dim on it)
+            if (head) return lp.st == EchoLooper::DUB ? kJamBright[4] : off ? kJamDim[r] : kJamWhite;
+            if (off) return 0;
+            return r == s || (accent[r] >> c) & 1 ? kJamBright[r] : kJamDim[r];   // an accent bright on any row
         }
         if (idx < 72) { int i = idx - 64; return i == s ? kJamBright[i] : kJamDim[i]; }
         if (idx < 80) return (int)std::round(params[stripParam(idx - 72)].getValue() * 0.5f * 127.f);
@@ -833,6 +861,7 @@ struct SynTHBloKLoop : Module {
             }
             if ((wasRec && lp.st != EchoLooper::REC && lp.st != EchoLooper::DUB)
                 || (lp.st == EchoLooper::EMPTY && prevSt[t] != EchoLooper::EMPTY)) takeGen[t]++;
+            if (lp.st == EchoLooper::EMPTY && prevSt[t] != EchoLooper::EMPTY) gateOff[t] = accent[t] = 0;
             if (wasRec && lp.st != EchoLooper::REC && lp.st != EchoLooper::DUB && lp.len > 0) doneMon[t] = true;
             if ((lp.st == EchoLooper::REC || lp.st == EchoLooper::DUB) && !wasRec) doneMon[t] = false;
             prevSt[t] = lp.st;
@@ -849,6 +878,14 @@ struct SynTHBloKLoop : Module {
             } else { lastSlice[t] = -1; rReps[t] = rBack[t] = 0; }
             smooth(levelSm[t], params[LEVEL_PARAM + t].getValue(), 0.01f);
             smooth(muteSm[t], params[MUTE_PARAM + t].getValue() > 0.5f ? 0.f : 1.f, 0.004f);
+            // GATE: the loop silent on an eighth gated off, louder (+6 dB) on an accented one (a short fade, no click)
+            float gt = 1.f;
+            if (lp.playing() && lp.st != EchoLooper::DUB && Lt > 0) {
+                int gc = clamp((int)((int64_t)lp.pos * 8 / Lt), 0, 7);
+                gt = (gateOff[t] >> gc) & 1 ? 0.f : (accent[t] >> gc) & 1 ? 2.f : 1.f;
+            }
+            smooth(gateSm[t], gt, 0.001f);
+            oL *= gateSm[t]; oR *= gateSm[t];
             // MON selected: the loop fades out and the input in
             smooth(listenSm[t], hearIn() ? 1.f : 0.f, 0.004f);
             oL *= 1.f - listenSm[t]; oR *= 1.f - listenSm[t];
@@ -946,6 +983,11 @@ struct SynTHBloKLoop : Module {
         }
         json_object_set_new(root, "sceneRand", sr);
         json_object_set_new(root, "autoMon", json_boolean(autoMon));
+        json_t* go = json_array();   // each track's eighths gated off, and accented (bit c: eighth c)
+        json_t* ac = json_array();
+        for (int t = 0; t < kTracks; t++) { json_array_append_new(go, json_integer(gateOff[t])); json_array_append_new(ac, json_integer(accent[t])); }
+        json_object_set_new(root, "gateOff", go);
+        json_object_set_new(root, "accent", ac);
         json_object_set_new(root, "in", midiIn.toJson());
         json_object_set_new(root, "out", midiOut.toJson());
         return root;
@@ -983,6 +1025,12 @@ struct SynTHBloKLoop : Module {
             if (ra && strlen(ra) >= (size_t)kTracks) randAmt[t] = clamp(ra[t] - '0', 0, 2);
         }
         if (json_t* j = json_object_get(root, "autoMon")) autoMon = json_boolean_value(j);
+        json_t* go = json_object_get(root, "gateOff");
+        json_t* ac = json_object_get(root, "accent");
+        for (int t = 0; t < kTracks; t++) {
+            gateOff[t] = (int)json_integer_value(json_array_get(go, t)) & 0xff;   // (none saved: 0, all on)
+            accent[t] = (int)json_integer_value(json_array_get(ac, t)) & 0xff;
+        }
         if (json_t* j = json_object_get(root, "in")) midiIn.fromJson(j);
         if (json_t* j = json_object_get(root, "out")) midiOut.fromJson(j);
     }
@@ -1019,7 +1067,9 @@ struct LTrackBtn : OpaqueWidget {
 
 // A grid pad: row = track, column = an eighth of its loop. A loop lights its row dim, the playing eighth
 // bright; a take being recorded fills its row red as it goes (blinks while recording free). Click: select the
-// track and play from that eighth (on the next beat when on the grid: the pad blinks until then).
+// track and play from that eighth (on the next beat when on the grid: the pad blinks until then). GATE (the pads'
+// mode): click gates the eighth on / off, right-click accents it; an eighth gated off is dark, an accented one
+// has a bright core (in either mode).
 struct LPad : OpaqueWidget {
     LP* module = NULL;
     int r = 0, c = 0;
@@ -1046,26 +1096,39 @@ struct LPad : OpaqueWidget {
                 rec = head && lp.st == EchoLooper::DUB;
             }
         }
+        bool off = module && (module->gateOff[r] >> c) & 1, acc = module && !off && (module->accent[r] >> c) & 1;
         NVGcolor fill = kIdle;
         if (rec) fill = kRecRed;
+        else if (has && off) fill = head ? nvgRGB(0x44, 0x44, 0x44) : kIdle;
         else if (head) fill = nvgLerpRGBA(onCol, nvgRGB(0xff, 0xff, 0xff), 0.35f);
         else if (has) fill = nvgLerpRGBA(kIdle, onCol, 0.45f);
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.6f);
         nvgFillColor(args.vg, fill);
         nvgFill(args.vg);
-        nvgStrokeColor(args.vg, sel ? onCol : nvgLerpRGBA(kIdle, col, 0.7f));
+        NVGcolor edge = sel ? onCol : nvgLerpRGBA(kIdle, col, 0.7f);
+        if (has && off && !rec) edge = nvgLerpRGBA(kIdle, edge, 0.35f);
+        nvgStrokeColor(args.vg, edge);
         nvgStrokeWidth(args.vg, sel ? 1.2f : 0.8f);
         nvgStroke(args.vg);
+        if (has && acc && !rec) {   // accent: a bright core, as on MATRIX-DRUM and MATRIX-DUO
+            float m = box.size.x * 0.3f;
+            nvgBeginPath(args.vg);
+            nvgRoundedRect(args.vg, m, m, box.size.x - 2.f * m, box.size.y - 2.f * m, 0.8f);
+            nvgFillColor(args.vg, nvgLerpRGBA(onCol, nvgRGB(0xff, 0xf4, 0xd0), 0.75f));
+            nvgFill(args.vg);
+        }
     }
     void onButton(const ButtonEvent& e) override {
-        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
-            if (module) {
-                module->params[LP::SEL_PARAM].setValue((float)r);
-                module->padReq.store(r * 8 + c);
-            }
-            e.consume(this);
+        if (e.action != GLFW_PRESS || (e.button != GLFW_MOUSE_BUTTON_LEFT && e.button != GLFW_MOUSE_BUTTON_RIGHT)) return;
+        bool gate = module && module->gateMode();
+        if (e.button == GLFW_MOUSE_BUTTON_RIGHT && !gate) return;
+        if (module) {
+            module->params[LP::SEL_PARAM].setValue((float)r);
+            if (!gate) module->padReq.store(r * 8 + c);
+            else module->gatePad(r, c, e.button == GLFW_MOUSE_BUTTON_RIGHT);
         }
+        e.consume(this);
     }
 };
 
@@ -1419,11 +1482,12 @@ struct LTitle : TransparentWidget {
 namespace ls {
 const float kPad = 2.f, kCG = 1.f, kGap = 0.9f;
 const float kHeadH = 7.f;                                   // big track number + name | state, layers, length
-const float yInfo = kHeadH;                                 // LEN | COUNT | IN | tempo
-const float yLanes = yInfo + oled::kRow + 0.4f;             // the 8 loops
-const float kLaneH = 5.2f;
-const float yLen = yLanes + kTracks * kLaneH + 0.6f;        // FREE .. 8 BAR | COUNT
-const float yScene = yLen + oled::kCellH + kGap;            // U1 .. U8 | STORE
+const float yInfo = kHeadH;                                 // VIEW | RAND | COUNT | FREE .. 8 BAR | tempo
+const float yLanes = yInfo + oled::kRow + 0.4f;             // the 8 loops (taller: the row LEN had)
+const float kLaneH = 5.2f + (oled::kCellH + kGap) / kTracks;
+const float yScene = yLanes + kTracks * kLaneH + 0.6f;      // U1 .. U8 | STORE
+// the info row's cells (mm from the screen's left): COUNT, then the record lengths
+const float kInfoCellH = 3.8f, xCount = 21.f, kCountW = 13.f, kLenW = 11.5f;
 const float yTiles = yScene + oled::kCellH + 1.2f;          // 01 .. 08, 2 rows of 4
 const float kTileH = 8.f;
 const float yTrans = yTiles + 2.f * kTileH + 2.f * kGap;   // REC | PLAY | ONCE | UNDO | CLEAR, tall cells
@@ -1531,7 +1595,7 @@ struct LScreen : TransparentWidget {
         nvgBeginPath(args.vg);
         oled::divider(args, 4.f, mm2px(ls::yInfo), W - 4.f, mm2px(ls::yInfo));
         oled::divider(args, 4.f, mm2px(ls::yLanes - 0.2f), W - 4.f, mm2px(ls::yLanes - 0.2f));
-        oled::divider(args, 4.f, mm2px(ls::yLen - 0.3f), W - 4.f, mm2px(ls::yLen - 0.3f));
+        oled::divider(args, 4.f, mm2px(ls::yScene - 0.3f), W - 4.f, mm2px(ls::yScene - 0.3f));
         oled::divider(args, 4.f, mm2px(ls::yTiles - 0.6f), W - 4.f, mm2px(ls::yTiles - 0.6f));
         oled::dividerStroke(args);
         std::shared_ptr<window::Font> font = APP->window->uiFont;
@@ -2128,25 +2192,31 @@ struct LTile : OpaqueWidget {
     }
 };
 
-// A scene cell U1-U8 (dim while empty; the last recalled or stored lit), or STORE (k == -1, blinks while armed:
-// the next scene clicked stores which tracks play now). A scene starts and stops tracks on the grid, as PLAY does.
-// Right-click a scene: store or clear it.
+// A scene cell U1-U8 (grey while empty, amber when stored; the selected one lit), or STORE (k == -1, blinks while
+// armed: the next scene clicked stores which tracks play now). While armed every scene blinks, the selected one
+// twice as fast; a scene just stored to blinks fast for a moment. A scene starts and stops tracks on the grid, as
+// PLAY does. Right-click a scene: store or clear it.
 struct LSceneCell : OpaqueWidget {
     LP* module = NULL;
     int k = 0;
+    double confirmT = -1.0;   // when this scene was last stored to (the confirm blink)
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
         bool store = k < 0;
         bool armed = module && module->storeArm;
-        bool blink = armed && std::fmod(glfwGetTime(), 0.5) < 0.25;
+        double now = glfwGetTime();
+        bool slow = std::fmod(now, 0.5) < 0.25, fast = std::fmod(now, 0.25) < 0.125;
         bool empty = !store && (!module || !module->sceneUsed[k]);
-        bool on = store ? blink : module && module->curScene == k;
+        bool sel = !store && module && module->curScene == k;
+        bool confirm = !store && confirmT >= 0.0 && now - confirmT < 0.6;
+        bool on = store ? armed && slow : confirm ? fast : armed ? (sel ? fast : slow) : sel;
         float W = box.size.x, H = box.size.y;
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, 0.f, 0.f, W, H, 1.2f);
         nvgFillColor(args.vg, on ? oled::litFill() : oled::offFill());
         nvgFill(args.vg);
-        nvgStrokeColor(args.vg, oled::outline(on || (armed && !store) ? 255 : empty ? 50 : 110));
+        int oa = on || (armed && !store) ? 255 : empty ? 90 : 140;
+        nvgStrokeColor(args.vg, empty && !on ? nvgRGBA(170, 170, 170, oa) : oled::outline(oa));
         nvgStrokeWidth(args.vg, 0.7f);
         nvgStroke(args.vg);
         std::shared_ptr<window::Font> font = APP->window->uiFont;
@@ -2157,7 +2227,7 @@ struct LSceneCell : OpaqueWidget {
         else snprintf(lab, sizeof lab, "U%d", k + 1);
         nvgFontSize(args.vg, 6.5f);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFillColor(args.vg, on ? oled::ink() : empty && !armed ? oled::dim() : oled::amber());
+        nvgFillColor(args.vg, on ? oled::ink() : empty ? nvgRGBA(170, 170, 170, armed ? 220 : 150) : oled::amber());
         nvgText(args.vg, W * 0.5f, H * 0.5f, lab, NULL);
     }
     void onButton(const ButtonEvent& e) override {
@@ -2167,7 +2237,10 @@ struct LSceneCell : OpaqueWidget {
             int u = k;
             ui::Menu* menu = createMenu();
             menu->addChild(createMenuLabel("Scene U" + std::to_string(u + 1)));
-            menu->addChild(createMenuItem("Store the tracks playing now", "", [=]() { m->storeScene(u); m->storeArm = false; }));
+            LSceneCell* self = this;
+            menu->addChild(createMenuItem("Store the tracks playing now", "", [=]() {
+                m->storeScene(u); m->storeArm = false; self->confirmT = glfwGetTime();
+            }));
             menu->addChild(createMenuItem("Clear", "", [=]() {
                 m->sceneUsed[u] = false; m->sceneMask[u] = 0; m->sRandUsed[u] = false;
                 if (m->curScene == u) m->curScene = -1;
@@ -2177,7 +2250,7 @@ struct LSceneCell : OpaqueWidget {
         }
         if (e.button != GLFW_MOUSE_BUTTON_LEFT) return;
         if (k < 0) m->storeArm = !m->storeArm;
-        else if (m->storeArm) { m->storeScene(k); m->storeArm = false; }
+        else if (m->storeArm) { m->storeScene(k); m->storeArm = false; confirmT = glfwGetTime(); }
         else m->sceneReq.store(k);
         e.consume(this);
     }
@@ -2349,6 +2422,13 @@ struct SynTHBloKLoopWidget : ModuleWidget {
                 p->box.size = mm2px(Vec(6.6f, 6.6f)); p->module = module; p->r = r; p->c = c;
                 addChild(p);
             }
+        // the pads' mode, between the grid and A-H: JUMP over A-B, GATE over C-D
+        for (int i = 0; i < 2; i++) {
+            oled::Cell* mc = createParam<oled::Cell>(mm2px(Vec(colX(2 * i), 80.15f)), module, LP::PAD_MODE_PARAM);
+            mc->box.size = mm2px(Vec(colX(1) - colX(0) + 6.6f, oled::kCellH)); mc->module = module;
+            mc->setTo = i; mc->label = i == 0 ? "JUMP" : "GATE";
+            addParam(mc);
+        }
         // the right column: RAND over the track outputs; then CHOP (arrows and display)
         LRandBtn* rb = createWidget<LRandBtn>(mm2px(Vec(DX + 65.8f, 10.5f)));
         rb->box.size = mm2px(Vec(7.6f, 6.6f)); rb->module = module;
@@ -2385,16 +2465,22 @@ struct SynTHBloKLoopWidget : ModuleWidget {
             addParam(c);
             return c;
         };
-        // record length (the selected track's; the cells follow the selection) | COUNT, two cells wide
+        // on the info row, after VIEW and RAND: COUNT, then the record length (blue; the selected track's: the
+        // cells follow the selection)
         const float u9 = (inner - 8.f * CG) / 9.f;
+        const float yIc = ls::yInfo + (oled::kRow - ls::kInfoCellH) * 0.5f;
+        LCountCell* cc = createParam<LCountCell>(mm2px(Vec(OX + ls::xCount, OY + yIc)), module, LP::COUNTIN_PARAM);
+        cc->box.size = mm2px(Vec(ls::kCountW, ls::kInfoCellH)); cc->module = module; cc->fontSize = 6.f;
+        addParam(cc);
         for (int i = 0; i < kLenN; i++) {
-            oled::Cell* c = cell(ls::kPad + i * (u9 + CG), ls::yLen, u9, LP::LEN_PARAM, kLenName[i]);
-            c->setTo = kLenBeats[i];
+            LTintCell* c = createParam<LTintCell>(mm2px(Vec(OX + ls::xCount + ls::kCountW + CG + i * (ls::kLenW + CG), OY + yIc)),
+                                                  module, LP::LEN_PARAM);
+            c->box.size = mm2px(Vec(ls::kLenW, ls::kInfoCellH)); c->module = module;
+            c->label = kLenName[i]; c->setTo = kLenBeats[i]; c->fontSize = 6.f;
+            c->tint = nvgRGB(0x5a, 0xa0, 0xff);
+            addParam(c);
             lenCell[i] = c;
         }
-        LCountCell* cc = createParam<LCountCell>(mm2px(Vec(OX + ls::kPad + kLenN * (u9 + CG), OY + ls::yLen)), module, LP::COUNTIN_PARAM);
-        cc->box.size = mm2px(Vec(2.f * u9 + CG, CH)); cc->module = module;
-        addParam(cc);
         // scenes U1-U8 | STORE
         for (int k = 0; k <= 8; k++) {
             LSceneCell* c = createWidget<LSceneCell>(mm2px(Vec(OX + ls::kPad + k * (u9 + CG), OY + ls::yScene)));
