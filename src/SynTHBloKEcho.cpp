@@ -48,19 +48,13 @@ const char* const kClockDivName[3] = {"1/16 (MATRIX steps)", "1/8", "1/4 (beats)
 struct EchoLenQuantity : ParamQuantity {
     std::string getDisplayValueString() override;
 };
-const int kFreeDivMax = 64;   // a free loop halves down to 1/64
-const int kSubMax = 5;        // a tempo loop halves below a beat down to 1/32 beat (LEN -1 .. -5)
-// the LENGTH knob shows the LEN it picks (defined after the module)
-struct EchoLenKnobQuantity : ParamQuantity {
-    std::string getDisplayValueString() override;
-};
 } // namespace
 
 struct SynTHBloKEcho : Module {
     enum ParamId { TYPE_PARAM, TIME_PARAM, SUBDIV_PARAM, FEEDBACK_PARAM, LEVEL_PARAM, TONE_PARAM, MOD_PARAM, SPACE_PARAM,
                    LOOP_LEVEL_PARAM, TAP_PARAM, FREEZE_PARAM, KILLDRY_PARAM, ON_PARAM,
                    REC_PARAM, PLAY_PARAM, ONCE_PARAM, UNDO_PARAM, CLEAR_PARAM, QUANT_PARAM, PREFX_PARAM,
-                   STORE_PARAM, ENUMS(SLOT_PARAM, 6), LEN_PARAM, LENDN_PARAM, LENUP_PARAM, BANK_PARAM, MASTER_PARAM, LENKNOB_PARAM, PARAMS_LEN };
+                   STORE_PARAM, ENUMS(SLOT_PARAM, 6), LEN_PARAM, LENDN_PARAM, LENUP_PARAM, BANK_PARAM, MASTER_PARAM, LENKNOB_PARAM, COUNTIN_PARAM, PAGE_PARAM, PARAMS_LEN };
     enum InputId { IN_L_INPUT, IN_R_INPUT, CLOCK_INPUT, TAP_INPUT, FREEZE_INPUT, BYPASS_INPUT,
                    REC_INPUT, PLAY_INPUT, ONCE_INPUT, UNDO_INPUT, CLEAR_INPUT, INPUTS_LEN };
     enum OutputId { OUT_L_OUTPUT, OUT_R_OUTPUT, OUTPUTS_LEN };
@@ -91,9 +85,6 @@ struct SynTHBloKEcho : Module {
     float masterSm = 1.26f;
     float onSm = 1.f, drySm = 1.f, freezeSm = 0.f, levelSm = 0.5f, spaceSm = 0.f, loopSm = 1.f;
     int barPos = 0;   // the beat of the bar that comes next
-    bool hadLoop = false;
-    float lenKnobSeen = -1.f, lenFlash = 0.f;   // LENGTH knob: its last value; the LEN line lights while it turns
-    int lenByKnob = 1 << 30;
     // for the display
     float timeNow = 0.375f, beatNow = 0.f;
     int source = 0;   // 0 free (TIME knob), 1 tap, 2 clock
@@ -124,22 +115,25 @@ struct SynTHBloKEcho : Module {
         configButton(ONCE_PARAM, "Loop: play once");
         configButton(UNDO_PARAM, "Loop: undo / redo the last replace");
         configButton(CLEAR_PARAM, "Loop: clear");
-        configSwitch(QUANT_PARAM, 0.f, 2.f, 1.f, "Loop timing (with a clock or tapped tempo)",
-                     {"Free (acts at once; with a tempo, loops are whole beats)", "Beat grid", "Bar grid (4 beats)"});
+        configParam(QUANT_PARAM, 0.f, 2.f, 1.f, "(not used: the looper always works to the beat)");
         configSwitch(PREFX_PARAM, 0.f, 1.f, 0.f, "Looper position", {"After the delay", "Before the delay (loops get echoed)"});
         configSwitch(STORE_PARAM, 0.f, 1.f, 0.f, "Store (then click a preset slot)", {"Off", "On"});
         for (int i = 0; i < kSlots; i++) configButton(SLOT_PARAM + i, string::f("Preset %d (click: load; STORE lit: save)", i + 1));
-        configParam<EchoLenQuantity>(LEN_PARAM, -(float)kSubMax, 256.f, 0.f,
-                                     "Loop length (beats from the loop start, down to 1/32 beat; no loop yet: beats to record)");
+        configParam<EchoLenQuantity>(LEN_PARAM, 0.f, 256.f, 0.f, "Record length (with a clock; free: until REC again)");
         getParamQuantity(LEN_PARAM)->snapEnabled = true;
-        configButton(LENDN_PARAM, "Loop length: halve");
-        configButton(LENUP_PARAM, "Loop length: double");
+        configButton(LENDN_PARAM, "(not used)");   // the old /2 and x2 cells and LENGTH knob: ids kept for old patches
+        configButton(LENUP_PARAM, "(not used)");
         // the final stage: a little boost by default (+2 dB), up to +6 dB, softly held under 10 V
         configParam(MASTER_PARAM, 0.f, 2.f, 1.26f, "Master output (OUT L / R)", " dB", -10.f, 20.f);
-        configParam<EchoLenKnobQuantity>(LENKNOB_PARAM, 0.f, 1.f, 1.f, "Loop length (the LEN line: 1/32 beat .. full)");
+        configParam(LENKNOB_PARAM, 0.f, 1.f, 1.f, "(not used)");
         configSwitch(BANK_PARAM, 0.f, 2.f, 0.f, "Preset bank",
                      {"User (STORE saves here)", "Drums (genre presets; repeats tucked under the beat)", "Synth (genre presets)"});
-        for (int id : {FREEZE_PARAM, KILLDRY_PARAM, ON_PARAM, QUANT_PARAM, PREFX_PARAM, STORE_PARAM, TYPE_PARAM, LEN_PARAM, BANK_PARAM, LENKNOB_PARAM})
+        configSwitch(COUNTIN_PARAM, 0.f, 4.f, 0.f, "Count-in before a new take (with a clock)",
+                     {"Off (starts on the next beat)", "1 beat", "2 beats", "3 beats", "4 beats"});
+        // MODE: which page the screen's readout shows: the delay types, or a bank's presets (that bank is the one used)
+        configSwitch(PAGE_PARAM, 0.f, 3.f, 0.f, "Mode (the readout beside it)",
+                     {"Delay types", "User presets", "Drums presets", "Synth presets"});
+        for (int id : {FREEZE_PARAM, KILLDRY_PARAM, ON_PARAM, QUANT_PARAM, PREFX_PARAM, STORE_PARAM, TYPE_PARAM, LEN_PARAM, BANK_PARAM, LENKNOB_PARAM, COUNTIN_PARAM, PAGE_PARAM})
             getParamQuantity(id)->randomizeEnabled = false;
         configInput(IN_L_INPUT, "Left / mono");
         configInput(IN_R_INPUT, "Right (normalled to left)");
@@ -205,54 +199,6 @@ struct SynTHBloKEcho : Module {
         btnPrev[btn] = b;
         if (input >= 0 && trig[btn].process(inputs[input].getVoltage(), 0.1f, 1.f)) edge = true;
         return edge;
-    }
-
-    // no loop yet (or recording one): LEN is the take's length in beats, 0 = until REC / PLAY / ONCE
-    bool recSetting() { return looper.len <= 0; }
-    // set the loop length in beats (all of them = 0, "full"); with no loop, the beats to record
-    void setLen(int n) {
-        if (recSetting()) { params[LEN_PARAM].setValue((float)clamp(n, 0, 256)); return; }
-        if (looper.beats <= 0) return;
-        n = clamp(n, 1, looper.beats);
-        params[LEN_PARAM].setValue(n >= looper.beats ? 0.f : (float)n);
-    }
-    // a loop recorded without a tempo grid has no beats: its LEN is 0 (all of it) or 1 / LEN (2, 4, 8, 16)
-    bool freeLoop() { return looper.beats <= 0 && looper.len > 0 && looper.st != EchoLooper::REC; }
-    int freeDiv() { return clamp((int)params[LEN_PARAM].getValue(), 0, kFreeDivMax); }
-    // the LEN values the LENGTH knob sweeps, shortest to longest: no loop: FREE, 1 .. 64 beats to record;
-    // a free loop: 1/64 .. full; a tempo loop: 1/32 beat .. 1/2 beat, 1 .. beats - 1, full
-    int lenOptions(int* o, int maxN) {
-        int n = 0;
-        if (recSetting()) { o[n++] = 0; for (int b = 1; b <= 64; b *= 2) o[n++] = b; }
-        else if (freeLoop()) { for (int d = kFreeDivMax; d >= 2; d /= 2) o[n++] = d; o[n++] = 0; }
-        else if (looper.beats > 0) {
-            for (int k = kSubMax; k >= 1; k--) o[n++] = -k;
-            for (int b = 1; b < looper.beats && n < maxN - 1; b++) o[n++] = b;
-            o[n++] = 0;
-        }
-        return n;
-    }
-    // below one beat a tempo loop plays 1 / 2^k of a beat: LEN = -k
-    int lenSub() { int v = (int)std::round(params[LEN_PARAM].getValue()); return v < 0 ? std::min(-v, kSubMax) : 0; }
-    void setSub(int k) {
-        if (looper.beats <= 0) return;
-        k = clamp(k, 0, kSubMax);
-        if (k == 0) setLen(1);
-        else params[LEN_PARAM].setValue((float)-k);
-    }
-    void halveLen() {
-        int v = (int)params[LEN_PARAM].getValue();
-        if (recSetting()) setLen(v <= 0 ? 4 : std::max(1, v / 2));   // from FREE: one bar
-        else if (freeLoop()) params[LEN_PARAM].setValue((float)std::min(kFreeDivMax, std::max(2, 2 * freeDiv())));
-        else if (looper.loopBeats > 1 && lenSub() == 0) setLen(looper.loopBeats / 2);
-        else setSub(lenSub() + 1);   // 1 beat -> 1/2 -> ... -> 1/32
-    }
-    void doubleLen() {
-        int v = (int)params[LEN_PARAM].getValue();
-        if (recSetting()) setLen(v <= 0 ? 4 : 2 * v);
-        else if (freeLoop()) params[LEN_PARAM].setValue(freeDiv() <= 2 ? 0.f : (float)(freeDiv() / 2));
-        else if (lenSub() > 0) setSub(lenSub() - 1);
-        else setLen(looper.loopBeats * 2);
     }
 
     void process(const ProcessArgs& args) override {
@@ -336,11 +282,13 @@ struct SynTHBloKEcho : Module {
         tapFlash -= dt;
         beatEdge = beatEdge && beat > 0.f;
 
-        // ---- looper grid: every beat or every bar (4 beats) ----
-        int grid = clamp((int)std::round(params[QUANT_PARAM].getValue()), 0, 2);
+        // ---- looper grid: every beat (QUANT_PARAM is no longer on the screen; its id stays for old patches) ----
+        const int grid = 1;
         bool gridEdge = false;
         if (beatEdge) { gridEdge = grid == 1 || barPos == 0; barPos = (barPos + 1) % 4; }
-        looper.tempoBeat = beat > 0.f ? beat * sr : 0.f;   // FREE grid: acts at once, lengths still in whole beats
+        looper.tempoBeat = beat > 0.f ? beat * sr : 0.f;   // FREE grid: takes start on a beat, lengths in whole beats
+        looper.countIn = clamp((int)std::round(params[COUNTIN_PARAM].getValue()), 0, 4);
+        looper.gridBeats = grid == 2 ? 4 : 1;
         looper.sync(beatEdge, gridEdge, grid > 0 && beat > 0.f ? beat * sr : 0.f, restart && beatEdge);
 
         // ---- switches ----
@@ -354,7 +302,10 @@ struct SynTHBloKEcho : Module {
         smooth(loopSm, params[LOOP_LEVEL_PARAM].getValue(), 0.01f);
 
         // ---- presets ----
-        if (params[STORE_PARAM].getValue() > 0.5f && bank() != 0) params[BANK_PARAM].setValue(0.f);   // STORE saves to USER
+        // MODE on a preset page uses that bank; STORE saves to USER (the page follows)
+        int page = clamp((int)std::round(params[PAGE_PARAM].getValue()), 0, 3);
+        if (params[STORE_PARAM].getValue() > 0.5f && page != 1) { params[PAGE_PARAM].setValue(1.f); page = 1; }
+        if (page > 0 && bank() != page - 1) params[BANK_PARAM].setValue((float)(page - 1));
         for (int s = 0; s < kSlots; s++) {
             bool b = params[SLOT_PARAM + s].getValue() > 0.5f;
             if (b && !slotPrev[s]) {
@@ -366,50 +317,15 @@ struct SynTHBloKEcho : Module {
         }
 
         // ---- looper transport (on the grid when there is a tempo) and length ----
-        if (press(1, REC_PARAM, REC_INPUT)) {
-            // REC on a stopped loop records a new take as long as the loop LEN shows (a free loop: until REC again)
-            if (looper.st == EchoLooper::STOP && looper.arm != EchoLooper::A_REC)
-                params[LEN_PARAM].setValue(looper.beats > 0 ? (float)looper.loopBeats : 0.f);
-            looper.press(EchoLooper::B_REC);
-        }
+        if (press(1, REC_PARAM, REC_INPUT)) looper.press(EchoLooper::B_REC);
         if (press(2, PLAY_PARAM, PLAY_INPUT)) looper.press(EchoLooper::B_PLAY);
         if (press(3, ONCE_PARAM, ONCE_INPUT)) looper.press(EchoLooper::B_ONCE);
         if (press(4, UNDO_PARAM, UNDO_INPUT)) looper.undo();
-        if (press(5, CLEAR_PARAM, CLEAR_INPUT)) {
-            if (looper.len > 0)   // the next take keeps this length (after a free loop: until REC again)
-                params[LEN_PARAM].setValue(looper.beats > 0 ? (float)looper.loopBeats : 0.f);
-            looper.clear();
-        }
-        // a new take plays in full
-        bool hasLoop = looper.len > 0;
-        if (hasLoop && !hadLoop) params[LEN_PARAM].setValue(0.f);
-        hadLoop = hasLoop;
-        bool lenDn = press(6, LENDN_PARAM, -1), lenUp = press(7, LENUP_PARAM, -1);
-        if (lenDn) halveLen();
-        if (lenUp) doubleLen();
-        // LENGTH knob: turning it picks a LEN from the lengths that fit now; LEN set another way moves the knob
-        {
-            static const int kMaxOpt = 300;
-            int o[kMaxOpt], n = lenOptions(o, kMaxOpt);
-            float kv = params[LENKNOB_PARAM].getValue();
-            int cur = (int)std::round(params[LEN_PARAM].getValue());
-            if (n > 1 && lenKnobSeen >= 0.f && std::fabs(kv - lenKnobSeen) > 1e-4f) {
-                int i = clamp((int)std::round(kv * (n - 1)), 0, n - 1);
-                params[LEN_PARAM].setValue((float)o[i]);
-                lenByKnob = o[i];
-                lenFlash = 1.f;
-            } else if (cur != lenByKnob) {
-                for (int i = 0; i < n; i++)
-                    if (o[i] == cur) { params[LENKNOB_PARAM].setValue(n > 1 ? (float)i / (n - 1) : 1.f); break; }
-                lenByKnob = cur;
-            }
-            lenKnobSeen = params[LENKNOB_PARAM].getValue();
-            lenFlash = std::max(0.f, lenFlash - dt);
-        }
-        int lv = (int)std::round(params[LEN_PARAM].getValue());
-        looper.setLoopBeats(std::max(0, lv), lenSub());
-        if (freeLoop()) looper.playLen = freeDiv() > 1 ? std::max(1, looper.len / freeDiv()) : looper.len;
-        looper.recBeats = recSetting() ? (int)params[LEN_PARAM].getValue() : 0;
+        if (press(5, CLEAR_PARAM, CLEAR_INPUT)) looper.clear();
+        // LEN (the FREE | 1-4 BT | 1-4 BAR cells) is the record length: every new take (with a clock) records
+        // that many beats from its first beat, then plays; FREE records until REC / PLAY / ONCE. Loops play in full.
+        looper.setLoopBeats(0);
+        looper.recBeats = std::max(0, (int)std::round(params[LEN_PARAM].getValue()));
         // ---- audio (internal units: +-1 = +-5 V) ----
         float inL = inputs[IN_L_INPUT].getVoltage() / 5.f;
         float inR = inputs[IN_R_INPUT].isConnected() ? inputs[IN_R_INPUT].getVoltage() / 5.f : inL;
@@ -473,6 +389,7 @@ struct SynTHBloKEcho : Module {
         playFlash = st == EchoLooper::PLAY || st == EchoLooper::DUB ? 1.f : 0.f;
         onceFlash = st == EchoLooper::ONCE ? 1.f : 0.f;
         if (a == EchoLooper::A_REC || a == EchoLooper::A_DUB) recFlash = bl;
+        if (looper.counting()) recFlash = looper.sinceBeat < 0.25f * looper.tempoBeat ? 1.f : 0.f;   // the count: lit on each beat
         if (a == EchoLooper::A_CLOSE || a == EchoLooper::A_PLAY || a == EchoLooper::A_STOP) playFlash = bl;
         if (a == EchoLooper::A_CLOSE_ONCE || a == EchoLooper::A_ONCE) onceFlash = bl;
     }
@@ -514,16 +431,7 @@ typedef SynTHBloKEcho EC;
 namespace {
 std::string EchoLenQuantity::getDisplayValueString() {
     int v = (int)getValue();
-    EC* m = dynamic_cast<EC*>(module);
-    if (m && m->recSetting()) return v <= 0 ? "Free (record until REC / PLAY)" : string::f("Record %d beat%s", v, v == 1 ? "" : "s");
-    if (v < 0) return string::f("1/%d beat", 1 << std::min(-v, kSubMax));
-    if (m && m->freeLoop()) return v <= 1 ? "Full" : string::f("1/%d of the loop", v);
-    if (v <= 0) return "Full";
-    return string::f("%d beat%s", v, v == 1 ? "" : "s");
-}
-std::string EchoLenKnobQuantity::getDisplayValueString() {
-    EC* m = dynamic_cast<EC*>(module);
-    return m ? m->paramQuantities[EC::LEN_PARAM]->getDisplayValueString() : "Full";
+    return v <= 0 ? "Free (record until REC / PLAY)" : string::f("Record %d beat%s", v, v == 1 ? "" : "s");
 }
 } // namespace
 
@@ -603,18 +511,22 @@ void echoLine(const widget::Widget::DrawArgs& args, float x0, float x1, float yc
 // oled::Cells laid over it by the widget, on a 6-column grid where it fits.
 namespace es {
 const float kGap = 0.9f;                                   // cell row gap
-const float yInfo = 0.f;                                   // TIME | SUBDIV | tempo
-const float yType = oled::kRow + 0.5f;                     // 2 rows of TYPE cells
-const float yFx = yType + 2.f * (oled::kCellH + kGap);     // FREEZE | KILL DRY | ON | TAP
-const float yPreset = yFx + oled::kCellH + 0.8f;           // PRESET line
-const float yPresetCells = yPreset + oled::kRow;           // 1 .. 6 | STORE
-const float yLoop = yPresetCells + oled::kCellH + 0.8f;    // LOOP line
-const float kWaveH = 8.f;
+// the looper on top
+const float yLoop = 0.f;                                   // LOOP line
+const float kWaveH = 14.4f;
 const float yWave = yLoop + oled::kRow;                    // the loop's waveform
-const float yLen = yWave + kWaveH + 0.5f;                  // LEN value | /2 | x2 | FULL
-const float yTrans = yLen + oled::kCellH + kGap;           // REC | PLAY | ONCE | UNDO | CLEAR
-const float yGrid = yTrans + oled::kCellH + kGap;          // FREE | BEAT | BAR | LOOP BEFORE DELAY
-const float kH = yGrid + oled::kCellH + 1.5f;
+// under the waveform: two rows at the left, the record-length block (3 x 3) at the right beside both
+const float yGrid = yWave + kWaveH + 0.5f;                 // COUNT | LOOP BEFORE DELAY
+const float yTrans = yGrid + oled::kCellH + kGap;          // REC | PLAY | ONCE | UNDO | CLEAR, tall cells
+const float kTransH = 2.f * oled::kCellH + kGap;           // as tall as two rows: near square
+const float kLenW = 30.f;                                  // the record-length block's width
+// the delay below
+const float yInfo = yTrans + kTransH + 0.8f;               // TIME | SUBDIV | tempo
+const float yPage = yInfo + oled::kRow;                    // the MODE page and what is chosen on it
+// left: FREEZE | KILL DRY over ON | MODE (as big as REC / PLAY); right: the page's cells, 3 rows
+const float yBlk = yPage + oled::kRow + 0.3f;
+const float kBlkH = 3.f * oled::kCellH + 2.f * kGap;
+const float kH = yBlk + kBlkH + 0.5f;
 const float kPad = 2.f, kCG = 1.f;
 }
 
@@ -629,13 +541,14 @@ struct EchoScreen : TransparentWidget {
         float W = box.size.x, H = box.size.y;
         oled::box(args, W, H);
         const float R = mm2px(oled::kRow);
-        const float yP = mm2px(es::yPreset), yL = mm2px(es::yLoop), yW = mm2px(es::yWave), yWB = mm2px(es::yWave + es::kWaveH);
+        const float yL = mm2px(es::yLoop), yW = mm2px(es::yWave), yWB = mm2px(es::yWave + es::kWaveH);
+        const float yI = mm2px(es::yInfo);
         nvgBeginPath(args.vg);
-        oled::divider(args, 4.f, R, W - 4.f, R);
-        oled::divider(args, W / 3.f, 2.f, W / 3.f, R - 2.f);
-        oled::divider(args, 2.f * W / 3.f, 2.f, 2.f * W / 3.f, R - 2.f);
-        oled::divider(args, 4.f, yP - mm2px(0.4f), W - 4.f, yP - mm2px(0.4f));
-        oled::divider(args, 4.f, yL - mm2px(0.4f), W - 4.f, yL - mm2px(0.4f));
+        oled::divider(args, 4.f, yI - mm2px(0.4f), W - 4.f, yI - mm2px(0.4f));   // looper above, delay below
+        oled::divider(args, 4.f, yI + R, W - 4.f, yI + R);
+        oled::divider(args, 4.f, mm2px(es::yBlk - 0.15f), W - 4.f, mm2px(es::yBlk - 0.15f));   // under the MODE page line
+        oled::divider(args, W / 3.f, yI + 2.f, W / 3.f, yI + R - 2.f);
+        oled::divider(args, 2.f * W / 3.f, yI + 2.f, 2.f * W / 3.f, yI + R - 2.f);
         oled::divider(args, 4.f, yW, W - 4.f, yW);
         oled::divider(args, 4.f, yWB, W - 4.f, yWB);
         oled::dividerStroke(args);
@@ -643,14 +556,49 @@ struct EchoScreen : TransparentWidget {
         if (!font) return;
         nvgFontFaceId(args.vg, font->handle);
         nvgScissor(args.vg, 0, 0, W, H);
-        drawDelay(args, W, R);
-        drawPreset(args, W, yP + R * 0.5f);
+        drawDelay(args, W, yI + R * 0.5f);
+        drawPage(args, W, mm2px(es::yPage + oled::kRow * 0.5f));
         drawLoop(args, W, yL, yW, yWB);
         nvgResetScissor(args.vg);
     }
 
+    // the MODE page: TYPE and the delay type, or the bank and its loaded preset (or the STORE prompt)
+    // (the title a little bigger and brighter than the other lines, in pale gold, so the page stands out)
+    void pageLine(const DrawArgs& args, float W, float y, const char* title, const char* val, NVGcolor col) {
+        nvgFontSize(args.vg, 7.5f);
+        nvgFillColor(args.vg, nvgRGB(0xff, 0xe4, 0x9a));
+        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgText(args.vg, 4.f, y, title, NULL);
+        nvgFontSize(args.vg, 8.f);
+        nvgFillColor(args.vg, col);
+        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+        nvgText(args.vg, W - 4.f, y, val, NULL);
+    }
+    void drawPage(const DrawArgs& args, float W, float y) {
+        if (!module) { pageLine(args, W, y, "TYPES", "2290", oled::amber()); return; }
+        int page = clamp((int)std::round(module->params[EC::PAGE_PARAM].getValue()), 0, 3);
+        if (module->params[EC::STORE_PARAM].getValue() > 0.5f) {
+            pageLine(args, W, y, "STORE", "CLICK A PRESET TO SAVE INTO", oled::litFill());
+            return;
+        }
+        if (page == 0) {
+            pageLine(args, W, y, "TYPES", kEchoTypeName[clamp((int)module->params[EC::TYPE_PARAM].getValue(), 0, ET_NUM - 1)], oled::amber());
+            return;
+        }
+        char val[48] = "--";
+        int b = page - 1;
+        if (module->curBank == b && module->curSlot >= 0 && module->preset(b, module->curSlot)) {
+            const float* s = module->preset(b, module->curSlot);
+            const char* type = kEchoTypeName[clamp((int)s[0], 0, ET_NUM - 1)];
+            const char* sub = kEchoSub[clamp((int)s[2], 0, 10)].name;
+            if (b > 0) snprintf(val, sizeof val, "%s  %s  %s", kGenre[b - 1][module->curSlot].name, type, sub);
+            else snprintf(val, sizeof val, "%d  %s  %s", module->curSlot + 1, type, sub);
+        }
+        pageLine(args, W, y, kBankName[b], val, oled::amber());
+    }
+
     // TIME | SUBDIV (click / scroll steps) | the tempo, with the beat of the bar
-    void drawDelay(const DrawArgs& args, float W, float R) {
+    void drawDelay(const DrawArgs& args, float W, float y) {
         float T = module ? module->timeNow : 0.375f;
         char tm[24], src[32] = "--- BPM", sub[16] = "1/8.";
         if (T < 1.f) snprintf(tm, sizeof tm, "%.0f ms", T * 1000.f);
@@ -669,7 +617,6 @@ struct EchoScreen : TransparentWidget {
         NVGcolor tc = oled::amber();
         if (module && module->freezeNow) { tname = "FREEZE"; tc = oled::litFill(); }
         else if (module && !module->onNow) { tname = "BYPASS"; tc = oled::dim(); }
-        float y = R * 0.5f;
         echoLine(args, 0.f, W / 3.f, y, tname, tm, tc);
         echoLine(args, W / 3.f, 2.f * W / 3.f, y, "SUBDIV", sub);
         // four beat squares, the current beat lit
@@ -685,20 +632,6 @@ struct EchoScreen : TransparentWidget {
         nvgFillColor(args.vg, srcCol);
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
         nvgText(args.vg, W - 4.f, y, src, NULL);
-    }
-
-    void drawPreset(const DrawArgs& args, float W, float y) {
-        char val[40] = "--";
-        NVGcolor col = oled::amber();
-        if (module && module->params[EC::STORE_PARAM].getValue() > 0.5f) { snprintf(val, sizeof val, "STORE: CLICK A SLOT"); col = oled::litFill(); }
-        else if (module && module->curSlot >= 0 && module->preset(module->curBank, module->curSlot)) {
-            const float* s = module->preset(module->curBank, module->curSlot);
-            const char* type = kEchoTypeName[clamp((int)s[0], 0, ET_NUM - 1)];
-            const char* sub = kEchoSub[clamp((int)s[2], 0, 10)].name;
-            if (module->curBank > 0) snprintf(val, sizeof val, "%s %s %s", kGenre[module->curBank - 1][module->curSlot].name, type, sub);
-            else snprintf(val, sizeof val, "%d  %s  %s", module->curSlot + 1, type, sub);
-        }
-        echoLine(args, 0.f, col6(W, 3) - mm2px(es::kCG), y, "PRESET", val, col);   // USER | DRUMS | SYNTH cells at the right
     }
 
     // LOOP state | armed action | layers and length; the waveform with the playing part, beats and playhead; LEN
@@ -723,7 +656,12 @@ struct EchoScreen : TransparentWidget {
         nvgFontSize(args.vg, 7.5f);
         nvgFillColor(args.vg, stc);
         nvgText(args.vg, mm2px(7.5f), y0, kLoopStateName[st], NULL);
-        if (lp && lp->arm != EchoLooper::A_NONE && module->blink < 0.125f) {
+        if (lp && lp->counting()) {   // the count-in: beats left until the take starts
+            char cnt[16];
+            snprintf(cnt, sizeof cnt, "COUNT %d", lp->counting());
+            nvgFillColor(args.vg, oled::litFill());
+            nvgText(args.vg, mm2px(22.f), y0, cnt, NULL);
+        } else if (lp && lp->arm != EchoLooper::A_NONE && module->blink < 0.125f) {
             nvgFillColor(args.vg, oled::litFill());
             nvgText(args.vg, mm2px(22.f), y0, kArmName[clamp(lp->arm, 0, 7)], NULL);
         }
@@ -742,6 +680,8 @@ struct EchoScreen : TransparentWidget {
         } else if (lp && lp->len > 0) {
             // the view: [v0, v0 + span) samples; zoomed in, the bars are read from the recording itself
             if (zoom < 1.f) zoom = 1.f;
+            // zoomed in while it plays: the view follows the playhead, keeping it in the middle
+            if (zoom > 1.f && lp->playing()) view0 = (float)lp->pos / lp->len - 0.5f / zoom;
             view0 = clamp(view0, 0.f, 1.f - 1.f / zoom);
             const double len = lp->len, v0 = view0 * len, span = len / zoom;
             auto X = [&](double s) { return x0 + (x1 - x0) * (float)((s - v0) / span); };
@@ -811,36 +751,12 @@ struct EchoScreen : TransparentWidget {
             nvgStrokeWidth(args.vg, 0.6f);
             nvgStroke(args.vg);
         }
-
-        // LEN: beats playing / beats recorded (click / scroll steps one beat)
-        char len[32] = "--";
-        NVGcolor lc = oled::dim();
-        if (lp && module->recSetting()) {   // no loop yet: the beats to record (needs a clock / tap)
-            int n = (int)module->params[EC::LEN_PARAM].getValue();
-            if (n <= 0) snprintf(len, sizeof len, "REC FREE");
-            else if (module->beatNow > 0.f) { snprintf(len, sizeof len, "REC %d BT", n); lc = oled::amber(); }
-            else snprintf(len, sizeof len, "%d BT NO TEMPO", n);
-        } else if (lp && lp->beats > 0) {
-            if (lp->loopSub > 0) snprintf(len, sizeof len, "1/%d OF %d BT", 1 << lp->loopSub, lp->beats);
-            else if (lp->loopBeats >= lp->beats) snprintf(len, sizeof len, "FULL  %d BT", lp->beats);
-            else snprintf(len, sizeof len, "%d / %d BT", lp->loopBeats, lp->beats);
-            lc = oled::amber();
-        } else if (lp && lp->len > 0) {   // a free loop: all of it or 1 / n
-            int d = module->freeDiv();
-            if (d > 1) snprintf(len, sizeof len, "1/%d  FREE", d);
-            else snprintf(len, sizeof len, "FULL  FREE");
-            lc = oled::amber();
-        }
-        if (module && module->lenFlash > 0.f) lc = oled::litFill();   // lit while the LENGTH knob turns
-        float x3 = col6(W, 3) - mm2px(es::kCG);
-        echoLine(args, 0.f, x3, mm2px(es::yLen + oled::kCellH * 0.5f), "LEN", len, lc);
     }
 
-    // clickable values: SUBDIV and LEN; the waveform zooms with the scroll wheel (right-click: all of it)
+    // clickable value: SUBDIV; the waveform zooms with the scroll wheel (right-click: all of it)
     int zone(Vec p) {
         float W = box.size.x;
-        if (p.y < mm2px(oled::kRow) && p.x >= W / 3.f && p.x < 2.f * W / 3.f) return 1;
-        if (p.y >= mm2px(es::yLen) && p.y < mm2px(es::yLen + oled::kCellH) && p.x < col6(W, 3) - mm2px(es::kCG)) return 2;
+        if (p.y >= mm2px(es::yInfo) && p.y < mm2px(es::yInfo + oled::kRow) && p.x >= W / 3.f && p.x < 2.f * W / 3.f) return 1;
         if (p.y >= mm2px(es::yWave) && p.y < mm2px(es::yWave + es::kWaveH)) return 3;
         return 0;
     }
@@ -857,12 +773,6 @@ struct EchoScreen : TransparentWidget {
         if (z == 1) {
             int s = (int)module->params[EC::SUBDIV_PARAM].getValue();
             module->params[EC::SUBDIV_PARAM].setValue((float)((s + d + 11) % 11));
-        } else if (z == 2) {   // one beat at a time; a free loop halves / doubles
-            if (module->freeLoop()) { if (d > 0) module->doubleLen(); else module->halveLen(); }
-            else if (module->recSetting()) module->setLen((int)module->params[EC::LEN_PARAM].getValue() + d);
-            else if (module->lenSub() > 0 || (module->looper.loopBeats <= 1 && d < 0)) {   // below a beat: halves
-                if (d > 0) module->doubleLen(); else module->halveLen();
-            } else module->setLen(module->looper.loopBeats + d);
         }
     }
     void onButton(const ButtonEvent& e) override {
@@ -884,11 +794,121 @@ struct EchoScreen : TransparentWidget {
     }
 };
 
+// REC / PLAY: a cell in its own colour, dim (outline and label) until engaged, filled while it is
+struct EchoTintCell : oled::Cell {
+    NVGcolor tint = nvgRGB(0xff, 0x32, 0x28);
+    void drawLayer(const DrawArgs& args, int layer) override {
+        ParamWidget::drawLayer(args, layer);
+        if (layer != 1) return;
+        bool on = lit();
+        float W = box.size.x, H = box.size.y;
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, W, H, 1.2f);
+        nvgFillColor(args.vg, on ? tint : oled::offFill());
+        nvgFill(args.vg);
+        nvgStrokeColor(args.vg, nvgTransRGBA(tint, on ? 255 : 120));
+        nvgStrokeWidth(args.vg, 0.7f);
+        nvgStroke(args.vg);
+        if (module && jack >= 0 && module->inputs[jack].isConnected()) {
+            nvgBeginPath(args.vg);
+            nvgCircle(args.vg, W - 2.4f, 2.4f, 1.1f);
+            nvgFillColor(args.vg, on ? oled::ink() : tint);
+            nvgFill(args.vg);
+        }
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgFontSize(args.vg, fontSize);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, on ? oled::ink() : nvgTransRGBA(tint, 190));
+        nvgText(args.vg, W * 0.5f, H * 0.5f, label, NULL);
+    }
+};
+
+// MODE: steps the page TYPES > USER > DRUMS > SYNTH (click; scroll both ways; right-click lists them). Lit
+// while pressed; the page shows in the line above the cells.
+struct EchoModeCell : oled::Cell {
+    bool held = false;
+    int flashFrames = 0;   // lit a moment even for a quick click
+    EchoModeCell() { latch = true; }
+    void step() override {
+        if (flashFrames > 0) flashFrames--;
+        oled::Cell::step();
+    }
+    void onDragEnd(const DragEndEvent& e) override { held = false; }
+    void step_(int d, bool wrap) {
+        ParamQuantity* pq = getParamQuantity();
+        if (!pq) return;
+        int v = (int)std::round(pq->getValue()) + d;
+        pq->setValue((float)(wrap ? (v % 4 + 4) % 4 : clamp(v, 0, 3)));
+    }
+    void drawLayer(const DrawArgs& args, int layer) override {
+        ParamWidget::drawLayer(args, layer);
+        if (layer != 1) return;
+        // lit while pressed (the page it is on shows in the line above the cells)
+        bool on = held || flashFrames > 0;
+        float W = box.size.x, H = box.size.y;
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, W, H, 1.2f);
+        nvgFillColor(args.vg, on ? oled::litFill() : oled::offFill());
+        nvgFill(args.vg);
+        nvgStrokeColor(args.vg, oled::outline(on ? 255 : 110));
+        nvgStrokeWidth(args.vg, 0.7f);
+        nvgStroke(args.vg);
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFontSize(args.vg, fontSize);
+        nvgFillColor(args.vg, on ? oled::ink() : oled::amber());
+        nvgText(args.vg, W * 0.5f, H * 0.5f, label, NULL);
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
+            step_(1, true);
+            held = true; flashFrames = 8;
+            e.consume(this);
+            return;
+        }
+        oled::Cell::onButton(e);
+    }
+    void onHoverScroll(const HoverScrollEvent& e) override {
+        if (e.scrollDelta.y == 0.f) return;
+        step_(e.scrollDelta.y > 0.f ? 1 : -1, false);
+        e.consume(this);
+    }
+};
+
+// COUNT-IN: one cell that steps OFF > 1 > 2 > 3 > 4 beats (click; scroll both ways; right-click lists them)
+struct EchoCountCell : oled::Cell {
+    char text[12] = "COUNT OFF";
+    EchoCountCell() { label = text; latch = true; }
+    void set(int v) { if (ParamQuantity* pq = getParamQuantity()) pq->setValue((float)((v % 5 + 5) % 5)); }
+    int get() { ParamQuantity* pq = getParamQuantity(); return pq ? (int)std::round(pq->getValue()) : 0; }
+    void step() override {
+        int v = get();
+        if (v > 0) snprintf(text, sizeof text, "COUNT %d", v);
+        else snprintf(text, sizeof text, "COUNT OFF");
+        oled::Cell::step();
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) { set(get() + 1); e.consume(this); return; }
+        oled::Cell::onButton(e);
+    }
+    void onHoverScroll(const HoverScrollEvent& e) override {
+        if (e.scrollDelta.y == 0.f) return;
+        set(clamp(get() + (e.scrollDelta.y > 0.f ? 1 : -1), 0, 4));
+        e.consume(this);
+    }
+};
+
 } // namespace
 
 struct SynTHBloKEchoWidget : ModuleWidget {
     oled::Cell* undoCell = NULL;
     oled::Cell* slotCell[6] = {};
+    oled::Cell* typeCell[ET_NUM] = {};
+    oled::Cell* storeCell = NULL;
 
     SynTHBloKEchoWidget(EC* module) {
         setModule(module);
@@ -927,55 +947,94 @@ struct SynTHBloKEchoWidget : ModuleWidget {
             addParam(c);
             return c;
         };
-        // a row of n equal cells across the screen, from column `first` of n
-        const float inner = OW - 2.f * es::kPad;
-        auto cw = [&](int n) { return (inner - (n - 1) * CG) / n; };
-        auto cx = [&](int n, int i) { return es::kPad + i * (cw(n) + CG); };
+        const float inner = OW - 2.f * es::kPad;   // the cells' width across the screen
 
-        for (int k = 0; k < ET_NUM; k++) {
-            int r = k / 6, c = k % 6;
-            oled::Cell* tc = cell(cx(6, c), es::yType + r * (CH + es::kGap), cw(6), EC::TYPE_PARAM, kEchoTypeName[k]);
-            tc->setTo = k; tc->fontSize = 6.f;
+        // the looper's two left rows and the delay's left column share one width: REC / PLAY and ON / MODE match
+        const float leftW = inner - es::kLenW - 1.5f;   // the two rows' width
+        const float lenX = es::kPad + leftW + 1.5f;
+        const float tw = (leftW - 4.f * CG) / 5.f;      // a transport cell's width
+
+        // ---- delay: left, ON | MODE over FREEZE | KILL DRY; right, the page MODE shows ----
+        // (no TAP cell or jack: the tempo comes from CLOCK, else the TIME knob)
+        // FREEZE and KILL DRY in ice blue (dim until on), apart from the amber cells
+        const float yOM = es::yBlk, yFK = es::yBlk + es::kTransH + es::kGap;
+        static const int fkParam[2] = {EC::FREEZE_PARAM, EC::KILLDRY_PARAM};
+        static const char* const fkName[2] = {"FREEZE", "KILL DRY"};
+        for (int i = 0; i < 2; i++) {
+            EchoTintCell* t = createParam<EchoTintCell>(mm2px(Vec(OX + es::kPad + i * (tw + CG), OY + yFK)), module, fkParam[i]);
+            t->box.size = mm2px(Vec(tw, CH)); t->module = module; t->label = fkName[i];
+            t->latch = true; t->fontSize = 5.5f; t->tint = nvgRGB(0x5c, 0xc8, 0xf2);
+            if (i == 0) t->jack = EC::FREEZE_INPUT;
+            addParam(t);
         }
-        // FREEZE | KILL DRY | ON (no TAP cell or jack: the tempo comes from CLOCK, else the TIME knob)
-        oled::Cell* fz = cell(cx(3, 0), es::yFx, cw(3), EC::FREEZE_PARAM, "FREEZE");
-        fz->latch = true; fz->jack = EC::FREEZE_INPUT;
-        cell(cx(3, 1), es::yFx, cw(3), EC::KILLDRY_PARAM, "KILL DRY")->latch = true;
-        oled::Cell* on = cell(cx(3, 2), es::yFx, cw(3), EC::ON_PARAM, "ON");
-        on->latch = true; on->green = true; on->jack = EC::BYPASS_INPUT;
+        oled::Cell* on = cell(es::kPad, yOM, tw, EC::ON_PARAM, "ON");
+        on->box.size = mm2px(Vec(tw, es::kTransH));
+        on->latch = true; on->green = true; on->jack = EC::BYPASS_INPUT; on->fontSize = 7.f;
+        EchoModeCell* mode = createParam<EchoModeCell>(mm2px(Vec(OX + es::kPad + tw + CG, OY + yOM)), module, EC::PAGE_PARAM);
+        mode->box.size = mm2px(Vec(tw, es::kTransH)); mode->module = module; mode->label = "MODE"; mode->fontSize = 7.f;
+        addParam(mode);
 
-        for (int b = 0; b < 3; b++) cell(cx(6, 3 + b), es::yPreset, cw(6), EC::BANK_PARAM, kBankName[b])->setTo = b;
+        const float px0 = es::kPad + 2.f * tw + CG + 1.5f, pW = es::kPad + inner - px0;   // the page's area
+        // TYPES: the 12 delay types, 4 x 3
+        const float tcw = (pW - 3.f * CG) / 4.f;
+        for (int k = 0; k < ET_NUM; k++) {
+            oled::Cell* tc = cell(px0 + (k % 4) * (tcw + CG), es::yBlk + (k / 4) * (CH + es::kGap), tcw, EC::TYPE_PARAM, kEchoTypeName[k]);
+            tc->setTo = k; tc->fontSize = 6.f;
+            typeCell[k] = tc;
+        }
+        // a bank: its 6 presets, 3 x 2, and STORE under them
+        const float pw = (pW - 2.f * CG) / 3.f;
         static const char* const num[6] = {"1", "2", "3", "4", "5", "6"};
-        const float storeW = 14.f, w6 = (inner - storeW - 6.f * CG) / 6.f;
         for (int s = 0; s < 6; s++) {
-            oled::Cell* c = cell(es::kPad + s * (w6 + CG), es::yPresetCells, w6, EC::SLOT_PARAM + s, num[s]);
+            oled::Cell* c = cell(px0 + (s % 3) * (pw + CG), es::yBlk + (s / 3) * (CH + es::kGap), pw, EC::SLOT_PARAM + s, num[s]);
             if (module) c->flash = &module->slotLit[s];
             slotCell[s] = c;
         }
-        cell(es::kPad + 6.f * (w6 + CG), es::yPresetCells, storeW, EC::STORE_PARAM, "STORE")->latch = true;
+        storeCell = cell(px0, es::yBlk + 2.f * (CH + es::kGap), pW, EC::STORE_PARAM, "STORE");
+        storeCell->latch = true;
 
-        cell(cx(6, 3), es::yLen, cw(6), EC::LENDN_PARAM, "/2");
-        cell(cx(6, 4), es::yLen, cw(6), EC::LENUP_PARAM, "x2");
-        cell(cx(6, 5), es::yLen, cw(6), EC::LEN_PARAM, "FULL")->setTo = 0;
+        // record length, 3 x 3: FREE (until REC again) | 1-4 beats | 1-4 bars. 4 BT and 1 BAR are the same
+        // length, so both light.
+        static const char* const lenName[9] = {"FREE", "1 BT", "2 BT", "3 BT", "4 BT", "1 BAR", "2 BAR", "3 BAR", "4 BAR"};
+        static const int lenBeats[9] = {0, 1, 2, 3, 4, 4, 8, 12, 16};
+        const float lw = (es::kLenW - 2.f * CG) / 3.f;
+        for (int i = 0; i < 9; i++) {
+            oled::Cell* c = cell(lenX + (i % 3) * (lw + CG), es::yGrid + (i / 3) * (CH + es::kGap), lw, EC::LEN_PARAM, lenName[i]);
+            c->setTo = lenBeats[i]; c->fontSize = 5.5f;
+        }
 
+        // REC | PLAY | ONCE | UNDO | CLEAR: tall, near-square cells along the bottom. REC red and PLAY green
+        // (dim until engaged, bright while they are)
         struct LC { const char* label; int param, jack; };
         const LC lc[5] = {{"REC", EC::REC_PARAM, EC::REC_INPUT}, {"PLAY", EC::PLAY_PARAM, EC::PLAY_INPUT},
                           {"ONCE", EC::ONCE_PARAM, EC::ONCE_INPUT}, {"UNDO", EC::UNDO_PARAM, EC::UNDO_INPUT},
                           {"CLEAR", EC::CLEAR_PARAM, EC::CLEAR_INPUT}};
         for (int i = 0; i < 5; i++) {
-            oled::Cell* c = cell(cx(5, i), es::yTrans, cw(5), lc[i].param, lc[i].label);
-            c->jack = lc[i].jack;
+            float x = es::kPad + i * (tw + CG);
+            oled::Cell* c;
+            if (i < 2) {
+                EchoTintCell* t = createParam<EchoTintCell>(mm2px(Vec(OX + x, OY + es::yTrans)), module, lc[i].param);
+                t->module = module; t->label = lc[i].label;
+                t->tint = i == 0 ? nvgRGB(0xff, 0x32, 0x28) : oled::green();
+                addParam(t);
+                c = t;
+            } else c = cell(x, es::yTrans, tw, lc[i].param, lc[i].label);
+            c->box.size = mm2px(Vec(tw, es::kTransH));
+            c->jack = lc[i].jack; c->fontSize = 7.f;
             if (module) {
                 if (i == 0) c->flash = &module->recFlash;
-                if (i == 1) { c->flash = &module->playFlash; c->green = true; }
+                if (i == 1) c->flash = &module->playFlash;
                 if (i == 2) { c->flash = &module->onceFlash; c->green = true; }
             }
             if (i == 3) undoCell = c;
         }
 
-        static const char* const gridName[3] = {"FREE", "BEAT", "BAR"};
-        for (int g = 0; g < 3; g++) cell(cx(6, g), es::yGrid, cw(6), EC::QUANT_PARAM, gridName[g])->setTo = g;
-        cell(cx(6, 3), es::yGrid, 3.f * cw(6) + 2.f * CG, EC::PREFX_PARAM, "LOOP BEFORE DELAY")->latch = true;
+        // COUNT-IN | LOOP BEFORE DELAY (the looper works to the beat whenever there is a clock: no grid cells)
+        const float halfW = (leftW - CG) / 2.f;
+        EchoCountCell* cc = createParam<EchoCountCell>(mm2px(Vec(OX + es::kPad, OY + es::yGrid)), module, EC::COUNTIN_PARAM);
+        cc->box.size = mm2px(Vec(halfW, CH)); cc->module = module;
+        addParam(cc);
+        cell(es::kPad + halfW + CG, es::yGrid, halfW, EC::PREFX_PARAM, "LOOP BEFORE DELAY")->latch = true;
 
         // ---------------- knobs ----------------
         auto col = [&](int n, int i) { return 2.f + (PW - 4.f) * (i + 0.5f) / n; };
@@ -1019,8 +1078,6 @@ struct SynTHBloKEchoWidget : ModuleWidget {
         jack(xL + 4.f * PL, Y2, EC::CLEAR_INPUT, false, "CLEAR");
         plateKnob(xK, Y1, EC::LOOP_LEVEL_PARAM);
         label(xK + 11.f, Y1, "LOOP");   // beside the knob: the jack labels take the line below it
-        plateKnob(54.f, Y1, EC::LENKNOB_PARAM);   // LENGTH: drives the LEN line on the screen
-        label(66.5f, Y1, "LENGTH");
         plateKnob(xO + 0.5f * P, Y1, EC::MASTER_PARAM);   // MASTER: no label, it heads the outputs
         jack(xO, Y2, EC::OUT_L_OUTPUT, true, "OUT L");
         jack(xO + P, Y2, EC::OUT_R_OUTPUT, true, "OUT R");
@@ -1036,6 +1093,11 @@ struct SynTHBloKEchoWidget : ModuleWidget {
             slotCell[s]->label = b > 0 ? kGenre[b - 1][s].cell : num[s];
             slotCell[s]->fontSize = b > 0 ? 5.5f : 6.5f;
         }
+        // MODE's page: the delay types, or a bank's presets + STORE (the browser shows the types)
+        int page = m ? clamp((int)std::round(m->params[EC::PAGE_PARAM].getValue()), 0, 3) : 0;
+        for (int k = 0; k < ET_NUM; k++) if (typeCell[k]) typeCell[k]->visible = page == 0;
+        for (int s = 0; s < 6; s++) if (slotCell[s]) slotCell[s]->visible = page > 0;
+        if (storeCell) storeCell->visible = page > 0;
         ModuleWidget::step();
     }
 

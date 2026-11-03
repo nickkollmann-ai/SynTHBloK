@@ -287,6 +287,13 @@ struct EchoLooper {
     float tempoBeat = 0.f;            // samples per beat of the tempo even off the grid (0: none): free loops snap to it
     int seamF = 0, seamAt = 0;        // head samples to crossfade with the live run-on after a close
     bool closeOnce = false;           // the recording that runs on to its length then plays once
+    int closeBeatsN = 0;              // a free take snapped to the tempo: its beats, for closeAt()
+    // a new take with a tempo starts on a beat: countIn beats after REC, then on the next grid edge
+    int countIn = 0, gridBeats = 1;   // set by the module (gridBeats: 4 on the bar grid, else 1)
+    int recWait = 0;                  // beat edges until the waiting take starts (0: none waiting)
+    int sinceBeat = 1 << 30, gIdx = 0;   // samples since the last beat edge; that beat's place in the grid
+    std::vector<float> pl, pr;        // the input just before now: a take started late gets its head from here
+    int preCap = 1, preW = 0;
     double beatLen = 0.0;    // samples per beat of the recording (0: recorded free)
     float curBeat = 0.f;     // samples per beat now (0: no tempo)
     int xf = 0, xfPos = 0;
@@ -295,13 +302,17 @@ struct EchoLooper {
         sr = sampleRate;
         cap = (int)(sec * sr);
         l.assign((size_t)cap, 0.f); r.assign(l.size(), 0.f); ul.assign(l.size(), 0.f); ur.assign(l.size(), 0.f);
+        preCap = std::max(1, (int)(0.1f * sr));
+        pl.assign((size_t)preCap, 0.f); pr.assign(pl.size(), 0.f); preW = 0;
         clear();
     }
     void clear() {
         st = EMPTY; len = pos = recTarget = layers = 0; undoOk = undone = false; std::fill(peak, peak + kPeaks, 0.f);
         arm = A_NONE; beats = loopBeats = playLen = beatIdx = xf = 0; beatLen = 0.0; dubMix = 0.f;
-        seamF = seamAt = 0; closeOnce = false; loopSub = 0;
+        seamF = seamAt = 0; closeOnce = false; loopSub = 0; recWait = 0; closeBeatsN = 0;
     }
+    // beats left of the count-in (0: not counting)
+    int counting() const { return arm == A_REC && recWait > 0 ? recWait : 0; }
     bool playing() const { return st == PLAY || st == DUB || st == ONCE; }
     void rebuildPeaks() {
         std::fill(peak, peak + kPeaks, 0.f);
@@ -325,6 +336,8 @@ struct EchoLooper {
         rebuildPeaks();
         st = closeOnce ? ONCE : PLAY; closeOnce = false;
         playLen = len; beats = loopBeats = beatIdx = xf = loopSub = 0; beatLen = 0.0;
+        if (closeBeatsN > 0) { beats = loopBeats = closeBeatsN; beatLen = (double)n / closeBeatsN; }   // free, in whole beats
+        closeBeatsN = 0;
     }
     // end a tempo-locked recording of n samples (a whole number of beats)
     void closeBeats(int n) {
@@ -340,6 +353,7 @@ struct EchoLooper {
             int b = std::max(1, (int)std::round(pos / beat));
             while (b > 1 && b * beat > cap) b--;
             n = std::min(cap, (int)std::round(b * beat));
+            if (tempoBeat > 0.f) closeBeatsN = b;   // MATRIX-ECHO: the loop keeps its beats (LEN steps in beats)
             if (n > pos) { recTarget = n; closeOnce = then == ONCE; return; }
         }
         closeOnce = then == ONCE;
@@ -386,6 +400,13 @@ struct EchoLooper {
     void sync(bool beatEdge, bool gridEdge, float beatSamples, bool restart = false) {
         locked = beatSamples > 0.f;
         curBeat = beatSamples;
+        if (beatEdge) { sinceBeat = 0; gIdx = gridEdge || gridBeats <= 1 ? 0 : gIdx + 1; }
+        else if (sinceBeat < (1 << 30)) sinceBeat++;
+        if (counting()) {   // a new take waits for its beat
+            if (locked) { if (gridEdge) sinceGrid = 0; else if (sinceGrid < (1 << 30)) sinceGrid++; }
+            if (tempoBeat <= 0.f || (beatEdge && --recWait == 0)) fire(0);   // (the tempo went away: start now)
+            return;
+        }
         bool dubWait = arm == A_DUB && playing();   // an overdub waits for the top of the loop, not the grid
         if (!locked) { if (arm != A_NONE && !dubWait) fire(0); return; }
         if (gridEdge) sinceGrid = 0;
@@ -428,8 +449,16 @@ struct EchoLooper {
             case STOP: a = b == B_REC ? A_REC : b == B_PLAY ? A_PLAY : A_ONCE; break;   // REC: a new take, the old loop stays silent
         }
         if (a == A_NONE) return;
-        if (a == arm) { arm = A_NONE; return; }
+        if (a == arm) { arm = A_NONE; recWait = 0; return; }
         arm = a;
+        if (a == A_REC && tempoBeat > 0.f) {   // a new take starts on a beat: after the count-in, on the grid
+            int late = (int)std::min(0.08f * sr, 0.125f * tempoBeat);   // just after a beat: that beat counts
+            int k = sinceBeat <= late ? countIn : countIn + 1;          // beat edges on from the last one
+            int g = locked ? std::max(1, gridBeats) : 1;
+            while ((gIdx + k) % g) k++;
+            if (k == 0) fire(sinceBeat); else recWait = k;
+            return;
+        }
         if (!locked) { fire(0); return; }
         int late = (int)std::min(0.08f * sr, 0.125f * curBeat);   // just after an edge: act now, counted from it
         if (sinceGrid <= late) fire(sinceGrid);
@@ -437,17 +466,29 @@ struct EchoLooper {
     // off = samples since the grid edge the action belongs to
     void fire(int off) {
         int a = arm;
-        arm = A_NONE;
+        arm = A_NONE; recWait = 0;
         switch (a) {
-            case A_REC:
+            case A_REC: {
                 st = REC; len = recTarget = 0; layers = 1; undoOk = undone = false;
                 std::fill(peak, peak + kPeaks, 0.f);
                 pos = std::min(off, cap);
-                std::fill(l.begin(), l.begin() + pos, 0.f); std::fill(r.begin(), r.begin() + pos, 0.f);
+                // started late: the head is what came in since the beat (zeros past the pre-roll)
+                int got = std::min(pos, preCap);
+                for (int i = 0; i < pos; i++) {
+                    int back = pos - i;   // samples before now
+                    if (back > got) { l[i] = r[i] = 0.f; continue; }
+                    int j = ((preW - back) % preCap + preCap) % preCap;
+                    l[i] = pl[j]; r[i] = pr[j];
+                }
                 beats = loopBeats = playLen = recCount = 0; beatLen = 0.0; closeOnce = false;
                 // off the grid with a tempo: the take starts now and closes itself after exactly recBeats beats
-                if (!locked && recBeats > 0 && tempoBeat > 0.f) recTarget = std::min(cap, (int)std::lround(recBeats * tempoBeat));
+                closeBeatsN = 0;
+                if (!locked && recBeats > 0 && tempoBeat > 0.f) {
+                    recTarget = std::min(cap, (int)std::lround(recBeats * tempoBeat));
+                    closeBeatsN = recBeats;
+                }
                 break;
+            }
             case A_CLOSE: case A_CLOSE_ONCE: {
                 if (st != REC) break;
                 // off the grid: stops now, or (with a tempo) at the nearest whole beat from the start
@@ -486,6 +527,7 @@ struct EchoLooper {
 
     void process(float inL, float inR, float& oL, float& oR) {
         oL = oR = 0.f;
+        if (st != REC) { pl[preW] = inL; pr[preW] = inR; if (++preW >= preCap) preW = 0; }
         if (st == REC) {
             if (pos < cap) { l[pos] = inL; r[pos] = inR; pos++; }
             if (recTarget && pos >= recTarget) closeAt(recTarget);
