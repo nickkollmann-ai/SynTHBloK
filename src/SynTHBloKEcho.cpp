@@ -119,6 +119,7 @@ struct SynTHBloKEcho : Module {
     bool btnPrev[8] = {}, slotPrev[kSlots] = {};
     float slots[kSlots][kPresetN] = {};
     bool slotUsed[kSlots] = {};
+    bool slotMine[kSlots] = {};   // stored into by STORE (not a factory default): drawn darker orange
     int curSlot = -1, curBank = 0;   // the preset last loaded or stored, and its bank
     float slotLit[kSlots] = {};
     // DRUMS voicing of the repeats
@@ -246,7 +247,7 @@ struct SynTHBloKEcho : Module {
     }
     void storeSlot(int s) {   // always into USER
         for (int i = 0; i < kPresetN; i++) slots[s][i] = params[i].getValue();
-        slotUsed[s] = true;
+        slotUsed[s] = slotMine[s] = true;
         curSlot = s; curBank = 0;
     }
 
@@ -465,6 +466,9 @@ struct SynTHBloKEcho : Module {
             json_array_append_new(arr, v);
         }
         json_object_set_new(root, "presets", arr);
+        json_t* mine = json_array();
+        for (int s = 0; s < kSlots; s++) json_array_append_new(mine, json_boolean(slotMine[s]));
+        json_object_set_new(root, "stored", mine);
         json_object_set_new(root, "curSlot", json_integer(curSlot));
         json_object_set_new(root, "curBank", json_integer(curBank));
         json_object_set_new(root, "clockDiv", json_integer(clockDiv));
@@ -481,6 +485,9 @@ struct SynTHBloKEcho : Module {
                     for (int i = 0; i < kPresetN; i++) slots[s][i] = (float)json_number_value(json_array_get(v, i));
             }
         }
+        if (json_t* mine = json_object_get(root, "stored"))
+            for (int s = 0; s < kSlots && s < (int)json_array_size(mine); s++)
+                slotMine[s] = slotUsed[s] && json_is_true(json_array_get(mine, s));
         if (json_t* j = json_object_get(root, "curSlot")) curSlot = clamp((int)json_integer_value(j), -1, kSlots - 1);
         if (json_t* j = json_object_get(root, "curBank")) curBank = clamp((int)json_integer_value(j), 0, kBanks - 1);
         if (json_t* j = json_object_get(root, "clockDiv")) clockDiv = clamp((int)json_integer_value(j), 0, 2);
@@ -889,6 +896,31 @@ struct EchoTintCell : oled::Cell {
     }
 };
 
+// A preset slot: the amber cell; once you have stored a preset into it (USER), filled a darker orange
+// while not loaded (loaded, it lights as any cell)
+struct EchoSlotCell : oled::Cell {
+    const bool* stored = NULL;
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (!(stored && *stored) || lit() || layer != 1) { oled::Cell::drawLayer(args, layer); return; }
+        ParamWidget::drawLayer(args, layer);
+        float W = box.size.x, H = box.size.y;
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, W, H, 1.2f);
+        nvgFillColor(args.vg, nvgRGB(0x8a, 0x3c, 0x06));
+        nvgFill(args.vg);
+        nvgStrokeColor(args.vg, nvgRGB(0xc8, 0x5a, 0x0a));
+        nvgStrokeWidth(args.vg, 0.7f);
+        nvgStroke(args.vg);
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgFontSize(args.vg, fontSize);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, oled::amber());
+        nvgText(args.vg, W * 0.5f, H * 0.5f, label, NULL);
+    }
+};
+
 // MODE: steps the page CLASSICS > USER > DRUMS > SYNTH > CINEMATIC > DUB > LO-FI > RHYTHM (click; scroll both
 // ways; right-click lists them). Lit
 // while pressed; the page shows in the line above the cells.
@@ -972,7 +1004,7 @@ struct EchoCountCell : oled::Cell {
 
 struct SynTHBloKEchoWidget : ModuleWidget {
     oled::Cell* undoCell = NULL;
-    oled::Cell* slotCell[EC::kSlots] = {};
+    EchoSlotCell* slotCell[EC::kSlots] = {};
     oled::Cell* typeCell[ET_NUM] = {};
     oled::Cell* storeCell = NULL;
 
@@ -1053,7 +1085,10 @@ struct SynTHBloKEchoWidget : ModuleWidget {
         // a bank: its presets on the CLASSICS grid (4 x 3: USER 11, a factory bank 8), STORE in the last cell
         static const char* const num[EC::kSlots] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"};
         for (int s = 0; s < EC::kSlots; s++) {
-            oled::Cell* c = cell(px0 + (s % 4) * (tcw + CG), es::yBlk + (s / 4) * (CH + es::kGap), tcw, EC::slotParam(s), num[s]);
+            EchoSlotCell* c = createParam<EchoSlotCell>(mm2px(Vec(OX + px0 + (s % 4) * (tcw + CG), OY + es::yBlk + (s / 4) * (CH + es::kGap))),
+                                                        module, EC::slotParam(s));
+            c->box.size = mm2px(Vec(tcw, CH)); c->module = module; c->label = num[s];
+            addParam(c);
             if (module) c->flash = &module->slotLit[s];
             slotCell[s] = c;
         }
@@ -1163,6 +1198,7 @@ struct SynTHBloKEchoWidget : ModuleWidget {
             if (!slotCell[s]) continue;
             slotCell[s]->label = b > 0 && s < kGenreN ? kGenre[b - 1][s].cell : num[s];
             slotCell[s]->fontSize = b > 0 ? 5.5f : 6.5f;
+            slotCell[s]->stored = m && b == 0 ? &m->slotMine[s] : NULL;   // USER: darker orange once stored into
         }
         // MODE's page: the delay types, or a bank's presets + STORE (the browser shows the types)
         int page = m ? clamp((int)std::round(m->params[EC::PAGE_PARAM].getValue()), 0, kBanks) : 0;
