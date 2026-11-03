@@ -16,7 +16,22 @@ header{display:flex;align-items:center;gap:14px;padding:8px 14px;border-bottom:1
 header b{color:var(--mg);letter-spacing:.16em;font-weight:600}
 header span{color:var(--mut)}
 #live{margin-left:auto;color:var(--cy)}
-main{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(320px,1fr);min-height:0}
+main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) minmax(280px,.9fr);grid-template-areas:"design asm comp";min-height:0}
+#p-design{grid-area:design}#p-asm{grid-area:asm}#p-comp{grid-area:comp}
+@media(max-width:1200px){main{grid-template-columns:minmax(0,1fr) minmax(280px,1fr);grid-template-rows:1fr 1fr;grid-template-areas:"design comp" "asm asm"}#p-asm{border-top:1px solid var(--line);border-right:0}}
+/* LIVE.ASSEMBLY window: replays each save, typing the changed lines and drawing new SVG pieces one at a time */
+#asm{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr)}
+#asm.svg{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}
+#code{margin:0;overflow:auto;padding:8px 0;font-size:11px;line-height:1.55;background:#070b10;white-space:pre}
+#code div{padding:0 10px 0 0}#code u{display:inline-block;width:44px;padding-right:10px;text-align:right;color:#2c4652;text-decoration:none;user-select:none}
+#code .ctx{color:#4f6a76}#code .del{color:var(--bad);text-decoration:line-through;opacity:.7}#code .add{color:var(--tx);background:#00e5ff12}
+#code .add.typing::after{content:"▌";color:var(--mg)}#code .more{color:var(--mut);font-style:italic;padding-left:54px}
+#draw{display:none;align-items:center;justify-content:center;padding:12px;min-height:0;border-left:1px solid var(--line);background:repeating-conic-gradient(#0a1016 0 25%,#0c131a 0 50%) 0 0/24px 24px}
+#asm.svg #draw{display:flex}
+#draw svg{width:100%;height:100%}
+#draw .pc{visibility:hidden}#draw .pc.on{visibility:visible;animation:pc 1s ease}
+@keyframes pc{0%{filter:drop-shadow(0 0 4px #ff00aa) brightness(1.8)}100%{filter:none}}
+#asm-meta{color:var(--mut)}#replay{background:transparent;border:1px solid var(--line);color:var(--cy);font:inherit;font-size:10px;letter-spacing:.12em;padding:1px 8px;cursor:pointer}
 .pane{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
 .pane:last-child{border-right:0}
 .head{display:flex;justify-content:space-between;gap:10px;padding:7px 12px;border-bottom:1px solid var(--line);background:var(--card);letter-spacing:.12em;font-size:11px}
@@ -55,11 +70,15 @@ footer button em{display:block;font-style:normal;background:var(--cy);color:#070
   <div class="modes"><button type="button" class="on" data-s="mod">MODULES <span id="nmod"></span></button><button type="button" data-s="file">FILES</button></div>
   <span id="live">● watching</span></header>
 <main>
-  <section class="pane">
+  <section class="pane" id="p-design">
     <div class="head"><span>DESIGN <b id="name">-</b></span><span id="pin">FOLLOWING LATEST</span></div>
     <div id="stage"><img id="view" alt=""><div id="mod"></div></div>
   </section>
-  <section class="pane">
+  <section class="pane" id="p-asm">
+    <div class="head"><span>LIVE.ASSEMBLY <b id="asm-file">waiting for a save</b> <span id="asm-meta"></span></span><button type="button" id="replay">REPLAY</button></div>
+    <div id="asm"><pre id="code"><div class="more">Save an SVG in res/ or a file in src/ and it is rebuilt here, piece by piece.</div></pre><div id="draw"></div></div>
+  </section>
+  <section class="pane" id="p-comp">
     <div class="head"><span>COMPILER <b>build.log</b></span><span id="state">IDLE</span></div>
     <pre id="log">No build.log yet. It fills in when a build starts.</pre>
     <div id="feed"></div>
@@ -79,15 +98,15 @@ const shotOf = slug => [...files.keys()].find(p => p.toLowerCase() === ('/web-im
 const modOf = p => mods.find(m => p === panelOf(m.slug) || p === shotOf(m.slug));
 const modTime = m => Math.max(files.get(panelOf(m.slug)) || 0, files.get(shotOf(m.slug)) || 0);
 
-async function list(dir, depth) {
+async function list(dir, depth, want = IMG) {
   const r = await fetch(dir, {cache: 'no-store'});
   if (!r.ok) return [];
   const html = await r.text(), out = [];
   for (const m of html.matchAll(/href="([^"?#]+)"/g)) {
     const h = decodeURIComponent(m[1]);
     if (h.startsWith('/') || h.startsWith('..')) continue;
-    if (h.endsWith('/') && depth < 2) out.push(...await list(dir + h, depth + 1));
-    else if (IMG.test(h)) out.push(dir + h);
+    if (h.endsWith('/') && depth < 2) out.push(...await list(dir + h, depth + 1, want));
+    else if (want.test(h)) out.push(dir + h);
   }
   return out;
 }
@@ -188,6 +207,7 @@ async function scanArt(first) {
   }));
   for (const p of [...files.keys()]) if (!paths.includes(p)) { files.delete(p); feed(`${short(p)} removed`); }
   if (first) return;
+  fresh.forEach(p => { if (isAsm(p)) asmChange(p); });
   const keys = [...fresh].sort((a, b) => files.get(b) - files.get(a)).map(keyFor);
   if (keys.length) { if (!pinned) show(keys[0], 'change'); else if (keys.includes(shown)) show(shown, 'change'); else drawStrip(fresh); }
 }
@@ -212,9 +232,116 @@ async function scanLog() {
   st.dataset.last = st.textContent;
 }
 
+// ---- LIVE.ASSEMBLY ----
+// Every res/*.svg and src/* file is cached, so a save can be compared with the version before it.
+// The changed lines are typed out, and SVG pieces that are new in this save appear one at a time.
+const CODE = /\.(cpp|hpp|h)$/i, texts = new Map(), codeStamps = new Map(), queue = [];
+let running = null, last = null;
+const getText = async p => { const r = await fetch(encodeURI(p) + '?t=' + Date.now(), {cache: 'no-store'}); return r.ok ? r.text() : null; };
+const isAsm = p => (p.startsWith('/res/') && /\.svg$/i.test(p)) || p.startsWith('/src/');
+
+async function cacheAll() {
+  const ps = [...files.keys()].filter(isAsm).concat([...codeStamps.keys()]);
+  await Promise.all(ps.map(async p => texts.set(p, await getText(p))));
+}
+async function scanCode(first) {
+  const ps = await list('/src/', 0, CODE);
+  await Promise.all(ps.map(async p => {
+    const t = await stamp(p), old = codeStamps.get(p);
+    codeStamps.set(p, t);
+    if (!first && old !== t) { feed(`<b>${p.slice(1)}</b> ${old ? 'changed' : 'added'}`); asmChange(p); }
+  }));
+}
+async function asmChange(p) {
+  const now = await getText(p);
+  if (now === null) return;
+  const before = texts.get(p);
+  texts.set(p, now);
+  if (before === now) return;
+  queue.push({p, before, now});
+  if (queue.length > 3) queue.splice(0, queue.length - 1);      // falling behind: jump to the newest save
+  if (!running) nextReplay();
+}
+function nextReplay() { const job = queue.shift(); if (job) { last = job; replay(job); } }
+document.getElementById('replay').onclick = () => { if (last) { queue.length = 0; replay(last); } };
+
+function lineDiff(a, b) {
+  const A = a.split('\n'), B = b.split('\n');
+  let i = 0; while (i < A.length && i < B.length && A[i] === B[i]) i++;
+  let j = 0; while (j < A.length - i && j < B.length - i && A[A.length - 1 - j] === B[B.length - 1 - j]) j++;
+  return {B, start: i, removed: A.slice(i, A.length - j), added: B.slice(i, B.length - j), end: B.length - j};
+}
+function leaves(root) {
+  const out = [], skip = /^(defs|style|title|desc|metadata|script|lineargradient|radialgradient|clippath|mask|pattern|filter|symbol)$/i;
+  (function walk(n) { for (const c of n.children) { if (skip.test(c.tagName)) continue; if (/^(g|a|svg|switch)$/i.test(c.tagName)) walk(c); else out.push(c); } })(root);
+  return out;
+}
+
+function replay({p, before, now}) {
+  clearInterval(running);
+  const asm = document.getElementById('asm'), code = document.getElementById('code'), draw = document.getElementById('draw');
+  const isSvg = /\.svg$/i.test(p), d = lineDiff(before || '', now);
+  if (!before) { d.start = 0; d.removed = []; d.added = d.B; d.end = d.B.length; }
+  document.getElementById('asm-file').textContent = p.slice(1);
+  document.getElementById('asm-meta').textContent = `+${d.added.length} / -${d.removed.length} lines` + (before ? '' : ' · new file');
+  asm.classList.toggle('svg', isSvg);
+
+  // Code: 3 lines of context, removed lines struck through, then the added lines typed out.
+  const MAX = 300, row = (n, cls, s) => `<div class="${cls}"><u>${n}</u>${s.replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]))}</div>`;
+  let html = '';
+  for (let k = Math.max(0, d.start - 3); k < d.start; k++) html += row(k + 1, 'ctx', d.B[k]);
+  d.removed.slice(0, MAX).forEach(s => html += row('-', 'del', s));
+  code.innerHTML = html;
+  const typed = d.added.slice(0, MAX), rows = typed.map((_, k) => { const el = document.createElement('div'); el.className = 'add'; el.innerHTML = `<u>${d.start + k + 1}</u>`; el.appendChild(document.createTextNode('')); return el; });
+  const tail = d.B.slice(d.end, d.end + 3).map((s, k) => row(d.end + k + 1, 'ctx', s)).join('') + (d.added.length > MAX ? `<div class="more">… ${d.added.length - MAX} more lines in this save</div>` : '');
+
+  // Drawing: the whole new SVG, with only the pieces that are new in this save hidden until their turn.
+  let pieces = [];
+  draw.innerHTML = '';
+  if (isSvg) {
+    const doc = new DOMParser().parseFromString(now, 'image/svg+xml'), svg = doc.documentElement;
+    if (svg.tagName.toLowerCase() === 'svg') {
+      const old = {};
+      if (before) leaves(new DOMParser().parseFromString(before, 'image/svg+xml').documentElement).forEach(e => old[e.outerHTML] = (old[e.outerHTML] || 0) + 1);
+      const live = document.importNode(svg, true);
+      if (!live.getAttribute('viewBox') && live.getAttribute('width')) live.setAttribute('viewBox', `0 0 ${parseFloat(live.getAttribute('width'))} ${parseFloat(live.getAttribute('height'))}`);
+      live.removeAttribute('width'); live.removeAttribute('height');
+      const src = leaves(svg), dst = leaves(live);
+      src.forEach((e, k) => { const h = e.outerHTML; if (old[h]) old[h]--; else { dst[k].classList.add('pc'); pieces.push(dst[k]); } });
+      draw.appendChild(live);
+    }
+  }
+
+  // One clock for both: about 25 ms a character, between 1.5 and 9 seconds in all.
+  const chars = typed.reduce((n, s) => n + s.length + 1, 0), total = Math.min(9000, Math.max(1500, chars * 25)), t0 = performance.now();
+  let li = 0, ci = 0, shownPieces = 0;
+  running = setInterval(() => {
+    const f = Math.min(1, (performance.now() - t0) / total), want = Math.round(chars * f);
+    let done = typed.slice(0, li).reduce((n, s) => n + s.length + 1, 0) + ci;
+    while (done < want && li < typed.length) {
+      if (ci === 0) { code.appendChild(rows[li]); rows[li].classList.add('typing'); }
+      const take = Math.min(typed[li].length + 1 - ci, want - done);
+      ci += take; done += take;
+      rows[li].lastChild.textContent = typed[li].slice(0, ci);
+      if (ci >= typed[li].length + 1) { rows[li].classList.remove('typing'); li++; ci = 0; }
+    }
+    code.scrollTop = code.scrollHeight;
+    const wantPieces = Math.round(pieces.length * f);
+    while (shownPieces < wantPieces) pieces[shownPieces++].classList.add('on');
+    if (f >= 1) {
+      clearInterval(running); running = null;
+      rows.forEach(r => r.classList.remove('typing'));
+      code.insertAdjacentHTML('beforeend', tail);
+      const first = code.querySelector('.add, .del'); if (first) code.scrollTop = Math.max(0, first.offsetTop - 60);
+      nextReplay();
+    }
+  }, 30);
+}
+
 async function tick(first) {
   try {
-    await Promise.all([scanArt(first), scanModules(first), scanLog()]);
+    await Promise.all([scanArt(first), scanModules(first), scanLog(), scanCode(first)]);
+    if (first) await cacheAll();
     if (first) show(latest());
     document.getElementById('live').textContent = '● watching';
   }
