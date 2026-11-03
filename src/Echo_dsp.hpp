@@ -257,16 +257,39 @@ struct EchoEngine {
 };
 
 // Stereo looper: REC -> PLAY -> OVERDUB, STOP, PLAY ONCE, one level of UNDO / REDO (the buffer before
-// the last overdub pass is kept and swapped), CLEAR. Optional length snap to a beat.
+// the last overdub pass is kept and swapped), CLEAR. Optional length snap to a beat (rec / play / once).
+// Tempo lock (MATRIX-ECHO): call sync() every sample with the beat and grid (beat or bar) edges and use
+// press() for the buttons. REC start / stop, PLAY, ONCE and STOP then land on the next grid edge (or
+// at once, counted from the edge, when pressed just after one), playback re-syncs to every beat, and
+// setLoopBeats() plays only the first n beats of the recording. Off the grid the transport acts at once;
+// with tempoBeat set, a free take's length still snaps to whole beats of the tempo. recBeats > 0 ends a tempo-locked
+// recording on its own after that many beats; REC on a stopped loop records a new take.
 struct EchoLooper {
     enum State { EMPTY, REC, PLAY, DUB, STOP, ONCE };
+    enum Arm { A_NONE, A_REC, A_CLOSE, A_CLOSE_ONCE, A_PLAY, A_ONCE, A_STOP, A_DUB };
+    enum Button { B_REC, B_PLAY, B_ONCE };
     static const int kPeaks = 96;
+    static const int kXf = 96;   // samples of crossfade when a re-sync moves the playhead
     std::vector<float> l, r, ul, ur;
     int cap = 0, len = 0, pos = 0, recTarget = 0, layers = 0;
     State st = EMPTY;
     bool undoOk = false, undone = false;
     float gain = 0.f, sr = 44100.f;
     float peak[kPeaks] = {};
+    // tempo lock
+    bool locked = false;     // a tempo grid drives the transport (set by sync())
+    int arm = A_NONE;        // the action waiting for the next grid edge
+    int beats = 0, loopBeats = 0, playLen = 0, beatIdx = 0, sinceGrid = 0, takes = 0;
+    int recBeats = 0, recCount = 0;   // beats to record before the take closes itself (0: until REC / PLAY / ONCE)
+    int loopSub = 0;                  // playing 1 / 2^loopSub of a beat (0: whole beats)
+    bool replace = false;             // REC on a playing loop replaces the audio instead of layering (MATRIX-ECHO)
+    float dubMix = 0.f;
+    float tempoBeat = 0.f;            // samples per beat of the tempo even off the grid (0: none): free loops snap to it
+    int seamF = 0, seamAt = 0;        // head samples to crossfade with the live run-on after a close
+    bool closeOnce = false;           // the recording that runs on to its length then plays once
+    double beatLen = 0.0;    // samples per beat of the recording (0: recorded free)
+    float curBeat = 0.f;     // samples per beat now (0: no tempo)
+    int xf = 0, xfPos = 0;
 
     void init(float sampleRate, float sec) {
         sr = sampleRate;
@@ -274,7 +297,11 @@ struct EchoLooper {
         l.assign((size_t)cap, 0.f); r.assign(l.size(), 0.f); ul.assign(l.size(), 0.f); ur.assign(l.size(), 0.f);
         clear();
     }
-    void clear() { st = EMPTY; len = pos = recTarget = layers = 0; undoOk = undone = false; std::fill(peak, peak + kPeaks, 0.f); }
+    void clear() {
+        st = EMPTY; len = pos = recTarget = layers = 0; undoOk = undone = false; std::fill(peak, peak + kPeaks, 0.f);
+        arm = A_NONE; beats = loopBeats = playLen = beatIdx = xf = 0; beatLen = 0.0; dubMix = 0.f;
+        seamF = seamAt = 0; closeOnce = false; loopSub = 0;
+    }
     bool playing() const { return st == PLAY || st == DUB || st == ONCE; }
     void rebuildPeaks() {
         std::fill(peak, peak + kPeaks, 0.f);
@@ -283,15 +310,27 @@ struct EchoLooper {
             peak[k] = std::max(peak[k], std::max(std::fabs(l[i]), std::fabs(r[i])));
         }
     }
+    // end the recording at n samples. The seam has no fade to silence: the loop's first 3 ms are crossfaded
+    // into what was played right after its end (already recorded past n, else the live input as it plays),
+    // so the end runs on into the start as it did when it was played.
     void closeAt(int n) {
+        int run = pos - n;   // samples recorded past the end
         len = n; pos = 0; recTarget = 0;
-        int f = std::min(len / 4, (int)(0.003f * sr));   // 3 ms fades at the seam
-        for (int i = 0; i < f; i++) {
-            float g = (float)i / f;
-            l[i] *= g; r[i] *= g; l[len - 1 - i] *= g; r[len - 1 - i] *= g;
+        seamF = std::min(len / 4, (int)(0.003f * sr));
+        seamAt = clamp(run, 0, seamF);
+        for (int i = 0; i < seamAt; i++) {
+            float g = (float)i / seamF;
+            l[i] = l[i] * g + l[n + i] * (1.f - g); r[i] = r[i] * g + r[n + i] * (1.f - g);
         }
         rebuildPeaks();
-        st = PLAY;
+        st = closeOnce ? ONCE : PLAY; closeOnce = false;
+        playLen = len; beats = loopBeats = beatIdx = xf = loopSub = 0; beatLen = 0.0;
+    }
+    // end a tempo-locked recording of n samples (a whole number of beats)
+    void closeBeats(int n) {
+        int b = std::max(1, (int)std::lround(n / curBeat));
+        closeAt(n);
+        beats = loopBeats = b; beatLen = (double)n / b; takes++;
     }
     // end the first recording; beat > 0 snaps the length to whole beats (recording on to reach it)
     void close(float beat, State then) {
@@ -301,10 +340,10 @@ struct EchoLooper {
             int b = std::max(1, (int)std::round(pos / beat));
             while (b > 1 && b * beat > cap) b--;
             n = std::min(cap, (int)std::round(b * beat));
-            if (n > pos) { recTarget = n; return; }
+            if (n > pos) { recTarget = n; closeOnce = then == ONCE; return; }
         }
+        closeOnce = then == ONCE;
         closeAt(n);
-        if (then == ONCE) st = ONCE;
     }
     void startDub() {
         std::copy(l.begin(), l.begin() + len, ul.begin());
@@ -340,23 +379,164 @@ struct EchoLooper {
         layers += undone ? -1 : 1;
         rebuildPeaks();
     }
+    // ---- tempo lock ----
+    void jump(int to) { xfPos = pos; xf = kXf; pos = to; }
+    // every sample, before process(): beatSamples = samples per beat (0: no tempo, the transport acts at once);
+    // restart = this beat is the downbeat of a (re)started clock: a playing loop starts again from its top
+    void sync(bool beatEdge, bool gridEdge, float beatSamples, bool restart = false) {
+        locked = beatSamples > 0.f;
+        curBeat = beatSamples;
+        bool dubWait = arm == A_DUB && playing();   // an overdub waits for the top of the loop, not the grid
+        if (!locked) { if (arm != A_NONE && !dubWait) fire(0); return; }
+        if (gridEdge) sinceGrid = 0;
+        else if (sinceGrid < (1 << 30)) sinceGrid++;
+        if (gridEdge && arm != A_NONE && !dubWait) { fire(0); return; }
+        if (beatEdge && st == REC && recBeats > 0 && ++recCount >= recBeats) {   // the take reached its length
+            arm = arm == A_CLOSE_ONCE ? A_CLOSE_ONCE : A_CLOSE;
+            fire(0);
+            return;
+        }
+        if (beatEdge && beats > 0 && playing()) {
+            if (restart || ++beatIdx >= loopBeats) {   // the top of the loop
+                beatIdx = 0;
+                if (arm == A_DUB) { arm = A_NONE; startDub(); }
+                else if (st == ONCE) { st = STOP; return; }
+            }
+            int want = (int)std::llround(beatIdx * beatLen);
+            if (want != pos) jump(want);
+        }
+    }
+    // REC / PLAY / ONCE: arm the action for the next grid edge; a second press disarms it
+    void press(int b) {
+        int a = A_NONE;
+        switch (st) {
+            case EMPTY: if (b == B_REC) a = A_REC; break;
+            case REC: a = b == B_ONCE ? A_CLOSE_ONCE : A_CLOSE; break;
+            case PLAY: case ONCE:
+                if (b == B_REC) {   // overdub from the top of the loop (at once when just past it)
+                    if (arm == A_DUB) { arm = A_NONE; return; }
+                    int late = (int)(locked ? std::min(0.08f * sr, 0.125f * curBeat) : 0.08f * sr);
+                    if (pos <= late) { arm = A_NONE; startDub(); }
+                    else arm = A_DUB;
+                    return;
+                }
+                if (b == B_PLAY && st == ONCE) { st = PLAY; return; }   // keep looping
+                a = b == B_PLAY ? A_STOP : A_ONCE; break;
+            case DUB:
+                if (b == B_REC) { st = PLAY; return; }
+                a = b == B_PLAY ? A_STOP : A_ONCE; break;
+            case STOP: a = b == B_REC ? A_REC : b == B_PLAY ? A_PLAY : A_ONCE; break;   // REC: a new take, the old loop stays silent
+        }
+        if (a == A_NONE) return;
+        if (a == arm) { arm = A_NONE; return; }
+        arm = a;
+        if (!locked) { fire(0); return; }
+        int late = (int)std::min(0.08f * sr, 0.125f * curBeat);   // just after an edge: act now, counted from it
+        if (sinceGrid <= late) fire(sinceGrid);
+    }
+    // off = samples since the grid edge the action belongs to
+    void fire(int off) {
+        int a = arm;
+        arm = A_NONE;
+        switch (a) {
+            case A_REC:
+                st = REC; len = recTarget = 0; layers = 1; undoOk = undone = false;
+                std::fill(peak, peak + kPeaks, 0.f);
+                pos = std::min(off, cap);
+                std::fill(l.begin(), l.begin() + pos, 0.f); std::fill(r.begin(), r.begin() + pos, 0.f);
+                beats = loopBeats = playLen = recCount = 0; beatLen = 0.0; closeOnce = false;
+                // off the grid with a tempo: the take starts now and closes itself after exactly recBeats beats
+                if (!locked && recBeats > 0 && tempoBeat > 0.f) recTarget = std::min(cap, (int)std::lround(recBeats * tempoBeat));
+                break;
+            case A_CLOSE: case A_CLOSE_ONCE: {
+                if (st != REC) break;
+                // off the grid: stops now, or (with a tempo) at the nearest whole beat from the start
+                if (!locked) { close(tempoBeat, a == A_CLOSE_ONCE ? ONCE : PLAY); break; }
+                int n = pos - off;
+                if (n < 0.5f * curBeat) { arm = a; break; }   // under half a beat: wait for the next edge
+                closeBeats(n);
+                pos = off;
+                if (a == A_CLOSE_ONCE) st = ONCE;
+                break;
+            }
+            case A_PLAY: case A_ONCE: case A_DUB:
+                if (len <= 0) break;
+                pos = off; beatIdx = 0; xf = 0;
+                if (a == A_DUB) startDub();
+                else st = a == A_PLAY ? PLAY : ONCE;
+                break;
+            case A_STOP: if (playing()) st = STOP; break;
+        }
+    }
+    // play the first n beats of a tempo-locked recording (n <= 0: all of it); sub > 0: the first 1 / 2^sub of
+    // a beat, repeated 2^sub times a beat and re-synced on every beat
+    void setLoopBeats(int n, int sub = 0) {
+        if (beats <= 0 || st == REC) return;
+        int b = sub > 0 ? 1 : n <= 0 ? beats : std::min(n, beats);
+        if (b == loopBeats && sub == loopSub) return;
+        loopBeats = b; loopSub = sub;
+        playLen = std::max(1, std::min(len, (int)std::llround(b * beatLen / (1 << sub))));
+        if (beatIdx >= b) {   // same place in the beat, in the shorter loop
+            int nb = beatIdx % b;
+            int np = pos - (int)std::llround((beatIdx - nb) * beatLen);
+            beatIdx = nb;
+            jump(((np % playLen) + playLen) % playLen);
+        } else if (pos >= playLen) jump(pos % playLen);
+    }
+
     void process(float inL, float inR, float& oL, float& oR) {
         oL = oR = 0.f;
         if (st == REC) {
             if (pos < cap) { l[pos] = inL; r[pos] = inR; pos++; }
             if (recTarget && pos >= recTarget) closeAt(recTarget);
-            else if (pos >= cap) closeAt(cap);
+            else if (pos >= cap) {
+                int n = locked ? (int)(std::floor(cap / curBeat) * curBeat) : 0;
+                arm = A_NONE;
+                if (n > 0) closeBeats(n); else closeAt(cap);
+            }
             return;
         }
         gain += ((playing() ? 1.f : 0.f) - gain) * (1.f - std::exp(-1.f / (0.004f * sr)));   // click-free start / stop
-        if (len <= 0 || (!playing() && gain < 1e-4f)) return;
-        oL = l[pos] * gain; oR = r[pos] * gain;
-        if (st == DUB) {
+        int L = playLen > 0 ? std::min(playLen, len) : len;
+        if (L <= 0 || (!playing() && gain < 1e-4f)) return;
+        if (pos >= L) pos = 0;
+        if (seamAt < seamF) {   // the seam: blend the head with the live run-on as it plays
+            if (pos == seamAt && playing()) {
+                float g = (float)pos / seamF;
+                l[pos] = l[pos] * g + inL * (1.f - g); r[pos] = r[pos] * g + inR * (1.f - g);
+                seamAt++;
+            } else seamAt = seamF;   // the playhead moved away: leave the rest
+        }
+        float a = l[pos], b = r[pos];
+        if (xf > 0) {   // the old head runs on (into the recording past a shortened loop) and fades out
+            if (xfPos >= len) xfPos = 0;
+            float g = (float)xf / kXf;
+            a += (l[xfPos] - a) * g; b += (r[xfPos] - b) * g;
+            xfPos++; xf--;
+        }
+        if (replace) {   // REC writes over the loop: the old audio fades out as the new fades in (3 ms)
+            dubMix = st == DUB ? std::min(1.f, dubMix + 1.f / (0.003f * sr)) : std::max(0.f, dubMix - 1.f / (0.003f * sr));
+            a *= 1.f - dubMix; b *= 1.f - dubMix;
+        }
+        oL = a * gain; oR = b * gain;
+        if (replace && dubMix > 0.f) {
+            l[pos] += (inL - l[pos]) * dubMix; r[pos] += (inR - r[pos]) * dubMix;
+            int k = (int)((int64_t)pos * kPeaks / len);
+            // a bucket being replaced starts fresh, so the waveform shows the new audio (silence too)
+            if (st == DUB && (pos == 0 || (int)((int64_t)(pos - 1) * kPeaks / len) != k)) peak[k] = 0.f;
+            peak[k] = std::max(peak[k], std::max(std::fabs(l[pos]), std::fabs(r[pos])));
+        } else if (st == DUB) {
             l[pos] += inL; r[pos] += inR;
             int k = (int)((int64_t)pos * kPeaks / len);
             peak[k] = std::max(peak[k], std::max(std::fabs(l[pos]), std::fabs(r[pos])));
         }
-        if (++pos >= len) { pos = 0; if (st == ONCE) st = STOP; }
+        if (++pos >= L) {   // the top of the loop (a beat-synced loop's top is the beat edge in sync())
+            if (L < len && xf == 0) jump(0);   // a shortened loop: crossfade its end into its start (2 ms)
+            else pos = 0;
+            if (arm == A_DUB && (st == ONCE || !(locked && beats > 0))) { arm = A_NONE; startDub(); }
+            else if (st == ONCE) st = STOP;
+        }
+        if (!locked && beatLen > 0.0) beatIdx = (int)(pos / beatLen);
     }
 };
 
