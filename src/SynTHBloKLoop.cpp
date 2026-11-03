@@ -213,8 +213,129 @@ struct SynTHBloKLoop : Module {
         }
     }
 
+    // a new sample rate: each loop is kept, resampled to it (a take still recording is lost)
     void onSampleRateChange(const SampleRateChangeEvent& e) override {
-        for (int t = 0; t < kTracks; t++) if (e.sampleRate != loop[t].sr) { loop[t].init(e.sampleRate, kLoopSec); stereo[t] = false; }
+        for (int t = 0; t < kTracks; t++) {
+            EchoLooper& lp = loop[t];
+            if (e.sampleRate == lp.sr) continue;
+            const bool keep = lp.len > 0 && lp.st != EchoLooper::REC, wasPlaying = lp.playing();
+            const int n = lp.len, beats = lp.beats, loopBeats = lp.loopBeats, pl = lp.playLen, layers = lp.layers;
+            const double beatLen = lp.beatLen;
+            const float oldSr = lp.sr;
+            std::vector<float> L, R;
+            L.swap(lp.l); R.swap(lp.r);
+            lp.init(e.sampleRate, kLoopSec);
+            stereo[t] = keep && stereo[t];
+            if (keep) {
+                restoreLoop(t, L.data(), R.data(), n, oldSr, stereo[t], beats, loopBeats, pl, beatLen, layers);
+                if (wasPlaying) lp.st = EchoLooper::PLAY;
+            }
+        }
+    }
+
+    // ---- the loops' audio, kept with the patch: a file per track in its storage folder, written as the patch
+    // is saved (Rack's autosave too, so as Rack closes), read back as it loads ----
+    enum { kKeyN = 7 };
+    int savedKey[kTracks][kKeyN];   // the loop each file holds (len -1: none written yet)
+    int loadPlay = -1;              // the tracks playing as the patch was saved (from its JSON; -1: none given)
+    bool audioLoaded = false;
+    void loopKey(int t, int* k) {
+        const EchoLooper& lp = loop[t];
+        const int v[kKeyN] = {takeGen[t], lp.layers, lp.undone ? 1 : 0, lp.len, lp.beats, lp.loopBeats, lp.playLen};
+        std::copy(v, v + kKeyN, k);
+    }
+    std::string loopPath(const std::string& dir, int t) { return system::join(dir, string::f("track%d.loop", t + 1)); }
+    // track t's loop from n samples at srcSr (resampled to the engine's), stopped
+    void restoreLoop(int t, const float* L, const float* R, int n, float srcSr, bool st2, int beats, int loopBeats,
+                     int pl, double beatLen, int layers) {
+        EchoLooper& lp = loop[t];
+        lp.clear();
+        const double k = (double)lp.sr / srcSr;
+        const int m = std::min(lp.cap, (int)std::lround(n * k));
+        if (n < 1 || m < 1) return;
+        for (int i = 0; i < m; i++) {
+            const double x = std::min((double)i / k, (double)(n - 1));
+            const int a = (int)x, b = std::min(a + 1, n - 1);
+            const float f = (float)(x - a);
+            lp.l[i] = L[a] + (L[b] - L[a]) * f;
+            lp.r[i] = R[a] + (R[b] - R[a]) * f;
+        }
+        lp.len = m; lp.pos = 0; lp.layers = std::max(1, layers);
+        lp.beats = beats; lp.loopBeats = loopBeats; lp.beatLen = beatLen * k;
+        lp.playLen = pl > 0 ? std::min(m, (int)std::lround(pl * k)) : 0;
+        lp.st = EchoLooper::STOP;
+        lp.rebuildPeaks();
+        stereo[t] = st2; prevSt[t] = EchoLooper::STOP; takeGen[t]++;
+    }
+    // the loops playing as the patch was saved play again (once both the audio and the JSON are in)
+    // (only as the patch loads: a later preset or undo leaves the transport alone)
+    bool playRestored = false;
+    void applyLoadPlay() {
+        if (!audioLoaded || loadPlay < 0 || playRestored) return;
+        for (int t = 0; t < kTracks; t++)
+            if ((loadPlay >> t & 1) && loop[t].st == EchoLooper::STOP) loop[t].st = EchoLooper::PLAY;
+        loadPlay = -1;
+        playRestored = true;
+    }
+    // a file: "SBLP", version, sample rate, samples, stereo, beats, loop beats, play length, layers, beat length
+    // (double), then the left samples and (stereo) the right
+    void onAdd(const AddEvent& e) override {
+        for (int t = 0; t < kTracks; t++) savedKey[t][3] = -1;
+        std::string dir;
+        try { dir = getPatchStorageDirectory(); } catch (Exception&) { return; }
+        for (int t = 0; t < kTracks; t++) {
+            const std::string path = loopPath(dir, t);
+            if (!system::exists(path)) continue;
+            std::vector<uint8_t> d;
+            try { d = system::readFile(path); } catch (Exception&) { continue; }
+            const size_t kHead = 4 + 8 * 4 + 8;
+            if (d.size() < kHead || std::memcmp(d.data(), "SBLP", 4) != 0) continue;
+            int32_t h[8];
+            float fsr;
+            double beatLen;
+            std::memcpy(h, d.data() + 4, sizeof h);
+            std::memcpy(&fsr, &h[1], 4);
+            std::memcpy(&beatLen, d.data() + 4 + sizeof h, 8);
+            const int n = h[2];
+            const bool st2 = h[3] != 0;
+            if (h[0] != 1 || n < 1 || !(fsr > 1000.f) || d.size() < kHead + (size_t)n * 4 * (st2 ? 2 : 1)) continue;
+            std::vector<float> L((size_t)n), R;
+            std::memcpy(L.data(), d.data() + kHead, (size_t)n * 4);
+            if (st2) { R.resize((size_t)n); std::memcpy(R.data(), d.data() + kHead + (size_t)n * 4, (size_t)n * 4); }
+            restoreLoop(t, L.data(), st2 ? R.data() : L.data(), n, fsr, st2, h[4], h[5], h[6], beatLen, h[7]);
+            if (fsr == loop[t].sr) loopKey(t, savedKey[t]);   // as in the file: no need to write it again
+        }
+        audioLoaded = true;
+        applyLoadPlay();
+    }
+    // write each loop that changed since its file was written (a take still recording keeps the last one)
+    void onSave(const SaveEvent& e) override {
+        for (int t = 0; t < kTracks; t++) {
+            EchoLooper& lp = loop[t];
+            if (lp.st == EchoLooper::REC || lp.st == EchoLooper::DUB) continue;
+            int key[kKeyN];
+            loopKey(t, key);
+            if (std::equal(key, key + kKeyN, savedKey[t])) continue;
+            try {
+                const std::string path = loopPath(lp.len > 0 ? createPatchStorageDirectory() : getPatchStorageDirectory(), t);
+                if (lp.len <= 0) { if (system::exists(path)) system::remove(path); }
+                else {
+                    const bool st2 = stereo[t];
+                    const size_t n = (size_t)lp.len;
+                    float fsr = lp.sr;
+                    int32_t h[8] = {1, 0, lp.len, st2 ? 1 : 0, lp.beats, lp.loopBeats, lp.playLen, lp.layers};
+                    std::memcpy(&h[1], &fsr, 4);
+                    std::vector<uint8_t> d(4 + sizeof h + 8 + n * 4 * (st2 ? 2 : 1));
+                    std::memcpy(d.data(), "SBLP", 4);
+                    std::memcpy(d.data() + 4, h, sizeof h);
+                    std::memcpy(d.data() + 4 + sizeof h, &lp.beatLen, 8);
+                    std::memcpy(d.data() + 4 + sizeof h + 8, lp.l.data(), n * 4);
+                    if (st2) std::memcpy(d.data() + 4 + sizeof h + 8 + n * 4, lp.r.data(), n * 4);
+                    system::writeFile(path, d);
+                }
+                std::copy(key, key + kKeyN, savedKey[t]);
+            } catch (Exception&) {}
+        }
     }
     void onReset() override {
         for (int t = 0; t < kTracks; t++) {
@@ -467,6 +588,22 @@ struct SynTHBloKLoop : Module {
             lastSlice[t] = -1;
         }
         randChanged();
+    }
+    // one RAND effect (mode m) on every lane, each keeping its amount: a pad in RAND on the screen
+    void setAllRand(int m) {
+        for (int t = 0; t < kTracks; t++) {
+            randOn[t] = true;
+            randMode[t] = clamp(m, 0, RM_LEN - 1);
+            rReps[t] = rBack[t] = 0;
+            lastSlice[t] = -1;
+        }
+        randChanged();
+    }
+    // the effect every lane shares (-1: they differ, or one has none)
+    int sharedRand() const {
+        for (int t = 0; t < kTracks; t++)
+            if (!randOn[t] || randMode[t] != randMode[0]) return -1;
+        return randMode[0];
     }
     // RAND on / off (the button, the JAM); switched on, the lanes load the selected scene's RAND set (blank until
     // RAND on the screen deals one)
@@ -977,6 +1114,9 @@ struct SynTHBloKLoop : Module {
         }
         json_object_set_new(root, "sceneRand", sr);
         json_object_set_new(root, "autoMon", json_boolean(autoMon));
+        int playing = 0;   // the loops playing, to play again as the patch loads (their audio: onSave)
+        for (int t = 0; t < kTracks; t++) if (loop[t].st == EchoLooper::PLAY || loop[t].st == EchoLooper::DUB) playing |= 1 << t;
+        json_object_set_new(root, "playing", json_integer(playing));
         json_t* go = json_array();   // each track's eighths gated off, and accented (bit c: eighth c)
         json_t* ac = json_array();
         for (int t = 0; t < kTracks; t++) { json_array_append_new(go, json_integer(gateOff[t])); json_array_append_new(ac, json_integer(accent[t])); }
@@ -1019,6 +1159,7 @@ struct SynTHBloKLoop : Module {
             if (ra && strlen(ra) >= (size_t)kTracks) randAmt[t] = clamp(ra[t] - '0', 0, 2);
         }
         if (json_t* j = json_object_get(root, "autoMon")) autoMon = json_boolean_value(j);
+        if (json_t* j = json_object_get(root, "playing")) { loadPlay = (int)json_integer_value(j) & 0xff; applyLoadPlay(); }
         json_t* go = json_object_get(root, "gateOff");
         json_t* ac = json_object_get(root, "accent");
         for (int t = 0; t < kTracks; t++) {
@@ -1488,7 +1629,7 @@ const float yLanes = yInfo + oled::kRow + 0.4f;             // the 8 loops (tall
 const float kLaneH = 5.2f + (oled::kCellH + kGap) / kTracks;
 const float yScene = yLanes + kTracks * kLaneH + 0.6f;      // U1 .. U8 | STORE
 // the info row's cells (mm from the screen's left): COUNT, then the record lengths
-const float kInfoCellH = 3.8f, xCount = 21.f, kCountW = 13.f, kLenW = 11.5f;
+const float kInfoCellH = 3.8f, xCount = 26.5f, kCountW = 12.f, kLenW = 10.8f;   // after RAND and its pads
 const float yTiles = yScene + oled::kCellH + 1.2f;          // 01 .. 08, 2 rows of 4
 const float kTileH = 8.f;
 const float yTrans = yTiles + 2.f * kTileH + 2.f * kGap;   // REC | PLAY | ONCE | UNDO | CLEAR, tall cells
@@ -1521,6 +1662,8 @@ struct LScreen : TransparentWidget {
     float statBand[kTracks][kBands] = {}, liveBand[kTracks][kBands] = {}, liveHold[kTracks][kBands] = {};
     int statKey[kTracks][4];   // takeGen, len, layers, undone the static spectrum was measured at
     float viewX0 = 0.f, viewX1 = 0.f, randX0 = 0.f, randX1 = 0.f;   // the VIEW and RAND tags, for clicks
+    float padX0 = 0.f, padY0 = 0.f, padW = 1.f, padH = 1.f;          // RAND's 4 x 2 pads: the grid's corner, one step
+    int hoverPad = -1;                                               // the RAND pad under the mouse (-1: none)
     double viewPressT = -1.0, randPressT = -1.0;   // when each was last clicked (its glow)
     LScreen() {
         for (int i = 0; i < kFft; i++) win[i] = 0.5f - 0.5f * std::cos(2.f * (float)M_PI * i / kFft);
@@ -1700,15 +1843,19 @@ struct LScreen : TransparentWidget {
         nvgFill(args.vg);
     }
 
-    // RAND (as VIEW, green), from x: lit while RAND is on. Click (RAND on): deal every lane an effect, kept by the
-    // selected scene; right-click: the selected lane's menu.
+    // RAND (as VIEW, green), from x: lit while RAND is on; RAND and a 4 x 2 of pads, one per effect (1/8 .. ORD),
+    // the one every lane shares lit. Click RAND (RAND on): deal every lane an effect, kept by the selected scene;
+    // click a pad: that effect on every lane; right-click: the selected lane's menu. Over a pad, its name
+    // stands in for RAND.
     void drawRandTag(const DrawArgs& args, float x, float yc) {
         const bool all = module && module->randAll;
-        const float h = mm2px(3.6f), y = yc - h * 0.5f, pad = mm2px(1.f);
+        const int shared = module ? module->sharedRand() : -1;
+        const float h = mm2px(3.6f), y = yc - h * 0.5f, pad = mm2px(0.7f), cw = 3.4f, ch = (h - 2.f * pad - 0.8f) * 0.5f;
         NVGcolor g = oled::green();
         float b[4];
         nvgFontSize(args.vg, 5.5f);
-        const float w = nvgTextBounds(args.vg, 0.f, 0.f, "RAND", NULL, b) + 2.f * pad;
+        const float tw = nvgTextBounds(args.vg, 0.f, 0.f, "RAND", NULL, b);
+        const float w = pad + tw + mm2px(0.9f) + 4.f * cw + 3.f * 0.8f + pad;
         randX0 = x; randX1 = x + w;
         pressGlow(args, randPressT, x, y, w, h, g);
         nvgBeginPath(args.vg);
@@ -1717,9 +1864,32 @@ struct LScreen : TransparentWidget {
         nvgStrokeWidth(args.vg, 0.6f);
         nvgStroke(args.vg);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgFillColor(args.vg, all ? g : nvgTransRGBA(g, 110));
-        nvgText(args.vg, x + pad, yc + 0.2f, "RAND", NULL);
+        nvgFillColor(args.vg, all || hoverPad >= 0 ? g : nvgTransRGBA(g, 110));
+        nvgText(args.vg, x + pad, yc + 0.2f, hoverPad >= 0 ? kRandLabel[clamp(hoverPad, 0, LP::RM_LEN - 1)] : "RAND", NULL);
+        padX0 = x + w - pad - 4.f * cw - 3.f * 0.8f; padY0 = y + pad; padW = cw + 0.8f; padH = ch + 0.8f;
+        for (int i = 0; i < LP::RM_LEN; i++) {
+            nvgBeginPath(args.vg);
+            nvgRoundedRect(args.vg, padX0 + (i % 4) * padW, padY0 + (i / 4) * padH, cw, ch, 0.4f);
+            if (i == shared) { nvgFillColor(args.vg, all ? g : nvgTransRGBA(g, 150)); nvgFill(args.vg); }
+            else {
+                nvgStrokeColor(args.vg, nvgTransRGBA(g, i == hoverPad ? 230 : all ? 100 : 70));
+                nvgStrokeWidth(args.vg, 0.4f);
+                nvgStroke(args.vg);
+            }
+        }
     }
+    // the RAND pad at p (-1: none)
+    int padAt(Vec p) {
+        int c = (int)std::floor((p.x - padX0) / padW), r = (int)std::floor((p.y - padY0) / padH);
+        if (p.x < padX0 || p.y < padY0 || c > 3 || r > 1) return -1;
+        return r * 4 + c;
+    }
+    // over a pad: its name in the tag (consumed there only, so the panel under the screen still gets the rest)
+    void onHover(const HoverEvent& e) override {
+        hoverPad = module ? padAt(e.pos) : -1;
+        if (hoverPad >= 0) e.consume(this);
+    }
+    void onLeave(const LeaveEvent& e) override { hoverPad = -1; }
 
     // MON | LVL (as the buttons), what is heard: the selected one lit, the other dim; right-aligned to xRight,
     // returns its width
@@ -2085,7 +2255,12 @@ struct LScreen : TransparentWidget {
         bool info = module && e.pos.y >= mm2px(ls::yInfo) && e.pos.y < mm2px(ls::yInfo + oled::kRow);
         if (info && e.pos.x >= randX0 && e.pos.x <= randX1) {
             const int s = module->sel();
+            const int p = padAt(e.pos);
             if (e.button == GLFW_MOUSE_BUTTON_RIGHT) randMenu(module, s);
+            else if (e.button == GLFW_MOUSE_BUTTON_LEFT && p >= 0) {   // a pad: its effect on every lane
+                randPressT = system::getTime();
+                module->setAllRand(p);
+            }
             else if (e.button == GLFW_MOUSE_BUTTON_LEFT && module->randAll) {   // deal every lane an effect, kept by the scene
                 randPressT = system::getTime();
                 module->dealRand();
@@ -2308,14 +2483,15 @@ struct LCountCell : oled::Cell {
     }
 };
 
-// The JAM display, narrow, in the bottom-left corner: MIDI IN and MIDI OUT, each a dim title over its device
-// (click = the port menu); then the JAM cell (laid over it by the widget) and whether this module has the JAM now.
-// Heights in mm from the top:
+// The JAM display, small, in the bottom-left corner: the square MIDI cell (on / off, laid over it by the widget)
+// at the left; right of it MIDI IN over MIDI OUT, each a dim title over its device (click = the port menu).
+// In mm:
 namespace lm {
-const float kPort = 8.f;                    // a port: title + device
-const float yCell = 2.f * kPort + 1.f;      // the JAM cell
-const float yState = yCell + oled::kCellH;  // ACTIVE / ELSEWHERE / OFF
-const float kH = yState + 4.f;
+const float kPort = 5.5f;                   // a port: title + device
+const float kH = 2.f * kPort + 1.f;
+const float kSq = oled::kCellH + 2.f;       // the MIDI cell's side, centred top to bottom
+const float xCell = 1.5f, yCell = (kH - kSq) * 0.5f;
+const float xText = xCell + kSq + 1.5f;     // the ports
 }
 struct LMidiDisplay : TransparentWidget {
     LP* module = NULL;
@@ -2323,41 +2499,34 @@ struct LMidiDisplay : TransparentWidget {
         std::string dev = "(no device)";
         if (p) { if (p->getDeviceId() >= 0) dev = p->getDeviceName(p->getDeviceId()); }
         else dev = "Maschine Jam - 1";
+        const float x = mm2px(lm::xText);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgFontSize(args.vg, 6.f);
+        nvgFontSize(args.vg, 5.f);
         nvgFillColor(args.vg, oled::dim());
-        nvgText(args.vg, 4.f, mm2px(y0 + 2.3f), title, NULL);
-        nvgFontSize(args.vg, 6.5f);
+        nvgText(args.vg, x, mm2px(y0 + 1.9f), title, NULL);
+        nvgFontSize(args.vg, 5.5f);
         nvgFillColor(args.vg, oled::amber());
-        nvgText(args.vg, 4.f, mm2px(y0 + 5.5f), dev.c_str(), NULL);
+        nvgText(args.vg, x, mm2px(y0 + 4.2f), dev.c_str(), NULL);
     }
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
         float W = box.size.x, H = box.size.y;
         oled::box(args, W, H);
         nvgBeginPath(args.vg);
-        oled::divider(args, 4.f, mm2px(lm::kPort), W - 4.f, mm2px(lm::kPort));
-        oled::divider(args, 4.f, mm2px(2.f * lm::kPort), W - 4.f, mm2px(2.f * lm::kPort));
+        oled::divider(args, mm2px(lm::xText), mm2px(0.5f + lm::kPort), W - 3.f, mm2px(0.5f + lm::kPort));
         oled::dividerStroke(args);
         std::shared_ptr<window::Font> font = APP->window->uiFont;
         if (!font) return;
         nvgFontFaceId(args.vg, font->handle);
-        nvgScissor(args.vg, 0, 0, W, H);
-        port(args, module ? &module->midiIn : NULL, "MIDI IN", 0.f);
-        port(args, module ? &module->midiOut : NULL, "MIDI OUT", lm::kPort);
-        bool on = module ? module->params[LP::MIDI_ON_PARAM].getValue() > 0.5f : true;
-        const char* st = !on ? "OFF" : !module || module->jam.active ? "ACTIVE" : "ELSEWHERE";
-        nvgFontSize(args.vg, 6.f);
-        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFillColor(args.vg, on && (!module || module->jam.active) ? oled::green() : oled::dim());
-        nvgText(args.vg, W * 0.5f, mm2px(lm::yState + 2.f), st, NULL);
+        nvgScissor(args.vg, 0, 0, W - 2.f, H);   // a long device name stops at the edge
+        port(args, module ? &module->midiIn : NULL, "MIDI IN", 0.5f);
+        port(args, module ? &module->midiOut : NULL, "MIDI OUT", 0.5f + lm::kPort);
         nvgResetScissor(args.vg);
     }
     void onButton(const ButtonEvent& e) override {
-        if (e.button != GLFW_MOUSE_BUTTON_LEFT || e.action != GLFW_PRESS || !module) return;
-        if (e.pos.y < mm2px(lm::kPort)) oled::midiMenu(&module->midiIn, "MIDI IN port (the JAM)");
-        else if (e.pos.y < mm2px(2.f * lm::kPort)) oled::midiMenu(&module->midiOut, "MIDI OUT port (the JAM's lights)");
-        else return;
+        if (e.button != GLFW_MOUSE_BUTTON_LEFT || e.action != GLFW_PRESS || !module || e.pos.x < mm2px(lm::xText)) return;
+        if (e.pos.y < mm2px(0.5f + lm::kPort)) oled::midiMenu(&module->midiIn, "MIDI IN port (the JAM)");
+        else oled::midiMenu(&module->midiOut, "MIDI OUT port (the JAM's lights)");
         e.consume(this);
     }
 };
@@ -2495,14 +2664,15 @@ struct SynTHBloKLoopWidget : ModuleWidget {
             tl->box.size = mm2px(Vec(tw, ls::kTileH)); tl->module = module; tl->t = t;
             addChild(tl);
         }
-        // REC | PLAY | ONCE | UNDO | CLEAR for the selected track: tall cells, REC red, PLAY green, CLEAR yellow
+        // REC | PLAY | CLEAR | ONCE | UNDO for the selected track: tall cells, REC red, PLAY green, CLEAR yellow
         const NVGcolor kClearYellow = nvgRGB(0xff, 0xe1, 0x3a);
         struct TC { const char* label; int param; };
         const TC tc[5] = {{"REC", LP::REC_PARAM}, {"PLAY", LP::PLAY_PARAM}, {"ONCE", LP::ONCE_PARAM},
                           {"UNDO", LP::UNDO_PARAM}, {"CLEAR", LP::CLEAR_PARAM}};
+        static const int kSlot[5] = {0, 1, 3, 4, 2};   // each cell's place in the row: CLEAR right of PLAY
         const float xw = (inner - 4.f * CG) / 5.f;
         for (int i = 0; i < 5; i++) {
-            float x = ls::kPad + i * (xw + CG);
+            float x = ls::kPad + kSlot[i] * (xw + CG);
             oled::Cell* c;
             if (i < 2 || i == 4) {
                 LTintCell* t = createParam<LTintCell>(mm2px(Vec(OX + x, OY + ls::yTrans)), module, tc[i].param);
@@ -2532,7 +2702,7 @@ struct SynTHBloKLoopWidget : ModuleWidget {
         }
         // ALL, inside PLAY's and CLEAR's lower halves: play / clear all 8 tracks at once
         for (int k = 0; k < 2; k++) {
-            const float ax = OX + ls::kPad + (k == 0 ? 1.f : 4.f) * (xw + CG) + 0.9f, ay = OY + ls::yTrans + ls::kTransH * 0.5f;
+            const float ax = OX + ls::kPad + (k == 0 ? 1.f : 2.f) * (xw + CG) + 0.9f, ay = OY + ls::yTrans + ls::kTransH * 0.5f;
             LTintCell* a = createParam<LTintCell>(mm2px(Vec(ax, ay)), module, k == 0 ? LP::PLAY_ALL_PARAM : LP::CLEAR_ALL_PARAM);
             a->box.size = mm2px(Vec(xw - 1.8f, ls::kTransH * 0.5f - 0.9f));
             a->module = module; a->label = "ALL 8"; a->fontSize = 5.5f; a->inset = true;
@@ -2573,14 +2743,14 @@ struct SynTHBloKLoopWidget : ModuleWidget {
             label(x, YL, kJackName[i]);
             addInput(createInputCentered<SmallJack>(mm2px(Vec(x, Y)), module, LP::REC_INPUT + i));
         }
-        // the JAM, bottom-left corner under the inputs: MIDI IN / OUT (click: the port), the JAM cell (on / off)
-        // and who has the JAM
+        // the JAM, bottom-left corner under the inputs: the square MIDI cell (the JAM on / off), then MIDI IN / OUT
+        // (click: the port)
         const float MX = 2.5f, MW = 21.f, MY = 124.8f - lm::kH;
         LMidiDisplay* md = createWidget<LMidiDisplay>(mm2px(Vec(MX, MY)));
         md->box.size = mm2px(Vec(MW, lm::kH)); md->module = module;
         addChild(md);
-        oled::Cell* jc = createParam<oled::Cell>(mm2px(Vec(MX + 2.f, MY + lm::yCell)), module, LP::MIDI_ON_PARAM);
-        jc->box.size = mm2px(Vec(MW - 4.f, oled::kCellH)); jc->module = module; jc->label = "JAM";
+        oled::Cell* jc = createParam<oled::Cell>(mm2px(Vec(MX + lm::xCell, MY + lm::yCell)), module, LP::MIDI_ON_PARAM);
+        jc->box.size = mm2px(Vec(lm::kSq, lm::kSq)); jc->module = module; jc->label = "MIDI";
         jc->latch = true; jc->green = true;
         addParam(jc);
         plateKnob(DX + 196.f, LP::MASTER_PARAM, "MASTER");
@@ -2616,7 +2786,6 @@ struct SynTHBloKLoopWidget : ModuleWidget {
                     [=]() { m->toggle(m->params[LP::MON_PARAM + t]); }));
         }));
         menu->addChild(createBoolPtrMenuItem("Auto monitor-off after recording (REC turns it back on)", "", &m->autoMon));
-        menu->addChild(createMenuLabel("The loop audio is not saved with the patch"));
     }
     void onButton(const ButtonEvent& e) override {   // clicking the module hands it the JAM
         LP* m = getModule<LP>();
