@@ -17,7 +17,8 @@ $env:MSYSTEM = 'MINGW64'
 $env:CHERE_INVOKING = '1'
 
 function Make([string]$target) {
-    & $bash -lc "cd ~/SynTHBloK && export RACK_DIR=~/Rack-SDK && make -j4 $target 2>&1 | tee build.log; exit `${PIPESTATUS[0]}"
+    # Out-Host shows make's output live; without it the output would become this function's return value.
+    & $bash -lc "cd ~/SynTHBloK && export RACK_DIR=~/Rack-SDK && make -j4 $target 2>&1 | tee build.log; exit `${PIPESTATUS[0]}" | Out-Host
     return $LASTEXITCODE -eq 0
 }
 

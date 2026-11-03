@@ -1,0 +1,227 @@
+<!doctype html>
+<!-- Live workflow view for SynTHBloK: panel art (res/ and web-images/) and the compiler log (build.log).
+     Served from the repo root by the "design-watch" entry in .claude/launch.json:
+       http://127.0.0.1:8766/tools/design_watch.html
+     It polls the files every 1.5 s, so a saved SVG or a running build shows up without a reload. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SynTHBloK Workbench</title>
+<style>
+:root{--bg:#0d0d14;--card:#0d161d;--line:#0e2f39;--cy:#00e5ff;--mg:#ff00aa;--or:#ff7a00;--tx:#e8f4f8;--mut:#5a7a8a;--ok:#3dff9a;--bad:#ff3b5c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:12px/1.5 ui-monospace,Consolas,monospace;height:100vh;display:grid;grid-template-rows:auto 1fr auto}
+header{display:flex;align-items:center;gap:14px;padding:8px 14px;border-bottom:1px solid var(--line);background:#070b10}
+header b{color:var(--mg);letter-spacing:.16em;font-weight:600}
+header span{color:var(--mut)}
+#live{margin-left:auto;color:var(--cy)}
+main{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(320px,1fr);min-height:0}
+.pane{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
+.pane:last-child{border-right:0}
+.head{display:flex;justify-content:space-between;gap:10px;padding:7px 12px;border-bottom:1px solid var(--line);background:var(--card);letter-spacing:.12em;font-size:11px}
+.head b{color:var(--cy);font-weight:500}
+#stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:16px;background:repeating-conic-gradient(#0a1016 0 25%,#0c131a 0 50%) 0 0/24px 24px;position:relative}
+#stage img{max-width:100%;max-height:100%;object-fit:contain;box-shadow:0 0 0 1px var(--line),0 20px 60px #000c}
+#stage.flash::after{content:"UPDATED";position:absolute;top:12px;right:14px;background:var(--mg);color:#070b10;padding:2px 8px;letter-spacing:.14em;font-size:11px}
+#name{color:var(--tx)}
+#state{padding:1px 8px}
+#state.run{background:var(--or);color:#070b10}#state.ok{background:var(--ok);color:#070b10}#state.bad{background:var(--bad);color:#070b10}
+#log{flex:1;min-height:0;overflow:auto;margin:0;padding:10px 12px;white-space:pre-wrap;word-break:break-word;color:#9fb6c0;font-size:11px}
+#log .e{color:var(--bad)}#log .w{color:var(--or)}#log .c{color:var(--cy)}
+#feed{max-height:120px;overflow:auto;border-top:1px solid var(--line);padding:6px 12px;font-size:11px;color:var(--mut)}
+#feed b{color:var(--cy);font-weight:500}
+footer{display:flex;gap:8px;overflow-x:auto;padding:8px 12px;border-top:1px solid var(--line);background:#070b10}
+footer button{flex:none;width:86px;background:var(--card);border:1px solid var(--line);color:var(--mut);padding:4px;cursor:pointer;font:inherit;font-size:10px;text-align:center}
+footer button img{display:block;width:100%;height:70px;object-fit:contain;margin-bottom:3px}
+footer button.on{border-color:var(--mg);color:var(--tx)}
+footer button.new{border-color:var(--cy)}
+footer button i{display:block;font-style:normal;color:var(--mut);font-size:9px;letter-spacing:.08em}
+footer button i.miss{color:var(--bad)}
+footer button em{display:block;font-style:normal;background:var(--cy);color:#070b10;font-size:9px;letter-spacing:.12em;margin-bottom:3px}
+.modes{display:flex;gap:0;margin-left:18px}
+.modes button{background:transparent;border:1px solid var(--line);color:var(--mut);font:inherit;font-size:11px;letter-spacing:.12em;padding:2px 10px;cursor:pointer}
+.modes button.on{background:var(--mg);border-color:var(--mg);color:#070b10}
+#mod{display:none;gap:18px;align-items:stretch;justify-content:center;width:100%;height:100%}
+#stage.module #view{display:none}#stage.module #mod{display:flex}
+#mod figure{margin:0;display:flex;flex-direction:column;min-width:0;max-width:50%}
+#mod figure img{flex:1;min-height:0;width:auto;max-width:100%;object-fit:contain;box-shadow:0 0 0 1px var(--line),0 20px 60px #000c}
+#mod figcaption{margin-top:6px;font-size:10px;letter-spacing:.14em;color:var(--mut);text-align:center}
+#mod .none{flex:1;display:flex;align-items:center;justify-content:center;border:1px dashed var(--line);color:var(--bad);padding:20px;min-width:160px;text-align:center}
+</style>
+</head>
+<body>
+<header><b>SYNTHBLOK.WORKBENCH</b><span>panel art + compiler, live</span>
+  <div class="modes"><button type="button" class="on" data-s="mod">MODULES <span id="nmod"></span></button><button type="button" data-s="file">FILES</button></div>
+  <span id="live">● watching</span></header>
+<main>
+  <section class="pane">
+    <div class="head"><span>DESIGN <b id="name">-</b></span><span id="pin">FOLLOWING LATEST</span></div>
+    <div id="stage"><img id="view" alt=""><div id="mod"></div></div>
+  </section>
+  <section class="pane">
+    <div class="head"><span>COMPILER <b>build.log</b></span><span id="state">IDLE</span></div>
+    <pre id="log">No build.log yet. It fills in when a build starts.</pre>
+    <div id="feed"></div>
+  </section>
+</main>
+<footer id="strip"></footer>
+<script>
+const ROOTS = ['/res/', '/web-images/'], IMG = /\.(svg|png|webp|jpe?g)$/i, POLL = 1500;
+const files = new Map();          // path -> last-modified ms
+let shown = null, pinned = false, logStamp = '';
+// MODULES view: one tile per module in plugin.json, so a new module shows up as soon as it is added there.
+let mods = [], modText = '', strip = 'mod';
+const KNOWN = 'wb-known-modules';
+const known = new Set((() => { try { return JSON.parse(localStorage.getItem(KNOWN)) || []; } catch (e) { return []; } })());
+const panelOf = slug => [...files.keys()].find(p => p.toLowerCase() === ('/res/' + slug + '.svg').toLowerCase());
+const shotOf = slug => [...files.keys()].find(p => p.toLowerCase() === ('/web-images/screenshots/' + slug + '.png').toLowerCase());
+const modOf = p => mods.find(m => p === panelOf(m.slug) || p === shotOf(m.slug));
+const modTime = m => Math.max(files.get(panelOf(m.slug)) || 0, files.get(shotOf(m.slug)) || 0);
+
+async function list(dir, depth) {
+  const r = await fetch(dir, {cache: 'no-store'});
+  if (!r.ok) return [];
+  const html = await r.text(), out = [];
+  for (const m of html.matchAll(/href="([^"?#]+)"/g)) {
+    const h = decodeURIComponent(m[1]);
+    if (h.startsWith('/') || h.startsWith('..')) continue;
+    if (h.endsWith('/') && depth < 2) out.push(...await list(dir + h, depth + 1));
+    else if (IMG.test(h)) out.push(dir + h);
+  }
+  return out;
+}
+async function stamp(p) {
+  const r = await fetch(encodeURI(p), {method: 'HEAD', cache: 'no-store'});
+  return r.ok ? Date.parse(r.headers.get('Last-Modified')) : 0;
+}
+const short = p => p.replace(/^\/(res|web-images)\//, (_, d) => d === 'res' ? '' : 'web-images/');
+const time = t => new Date(t).toLocaleTimeString();
+
+const src = p => encodeURI(p) + '?t=' + files.get(p);
+
+// shown is a file path, or "mod:<slug>" for a module (its panel SVG next to its Rack screenshot).
+function show(key, why) {
+  shown = key;
+  const stage = document.getElementById('stage'), m = key.startsWith('mod:') && mods.find(x => 'mod:' + x.slug === key);
+  stage.classList.toggle('module', !!m);
+  if (m) {
+    const panel = panelOf(m.slug), shot = shotOf(m.slug);
+    document.getElementById('mod').innerHTML =
+      (panel ? `<figure><img src="${src(panel)}" alt=""><figcaption>PANEL SVG · ${short(panel)}</figcaption></figure>` : `<div class="none">No res/${m.slug}.svg<br>(panel may be drawn in code)</div>`) +
+      (shot ? `<figure><img src="${src(shot)}" alt=""><figcaption>RACK SCREENSHOT · ${time(files.get(shot))}</figcaption></figure>` : `<div class="none">No Rack screenshot yet<br>web-images/screenshots/${m.slug}.png</div>`);
+    document.getElementById('name').textContent = m.name + '  (' + m.slug + ')';
+  } else {
+    document.getElementById('view').src = src(key);
+    document.getElementById('name').textContent = short(key);
+  }
+  document.getElementById('pin').textContent = pinned ? 'PINNED · click it again to follow latest' : 'FOLLOWING LATEST';
+  if (why === 'change') { stage.classList.remove('flash'); void stage.offsetWidth; stage.classList.add('flash'); setTimeout(() => stage.classList.remove('flash'), 2500); }
+  drawStrip();
+}
+function tile(key, cls, title, inner) {
+  const b = document.createElement('button');
+  b.className = (key === shown ? 'on ' : '') + cls;
+  b.title = title;
+  b.innerHTML = inner;
+  b.onclick = () => { pinned = !(pinned && key === shown); show(pinned ? key : latest()); };
+  document.getElementById('strip').appendChild(b);
+}
+function drawStrip(fresh = new Set()) {
+  document.getElementById('strip').innerHTML = '';
+  if (strip === 'mod') {
+    [...mods].sort((a, b) => (b.isNew - a.isNew) || (modTime(b) - modTime(a))).forEach(m => {
+      const panel = panelOf(m.slug), shot = shotOf(m.slug), thumb = shot || panel, hot = [panel, shot].some(p => fresh.has(p));
+      tile('mod:' + m.slug, m.isNew || hot ? 'new' : '', m.name + ' · ' + (m.tags || []).join(', '),
+        (m.isNew ? '<em>NEW</em>' : '') + (thumb ? `<img loading="lazy" src="${src(thumb)}" alt="">` : '<img alt="">') + m.name.replace(/^SynTHBloK[- ]?/, '') +
+        `<i class="${panel ? '' : 'miss'}">${panel ? 'SVG ✓' : 'NO SVG'}</i><i class="${shot ? '' : 'miss'}">${shot ? 'SHOT ✓' : 'NO SHOT'}</i>`);
+    });
+  } else {
+    [...files].sort((a, b) => b[1] - a[1]).forEach(([p, t]) => tile(p, fresh.has(p) ? 'new' : '', short(p) + ' · ' + time(t),
+      `<img loading="lazy" src="${src(p)}" alt="">${short(p).replace(/^.*\//, '').replace(IMG, '')}`));
+  }
+}
+const latestFile = () => [...files].sort((a, b) => b[1] - a[1])[0]?.[0];
+const latest = () => {
+  if (strip !== 'mod' || !mods.length) return latestFile();
+  const m = mods.find(x => x.isNew) || [...mods].sort((a, b) => modTime(b) - modTime(a))[0];
+  return 'mod:' + m.slug;
+};
+// A changed file is shown on its own in FILES, or as its module in MODULES.
+const keyFor = p => { const m = strip === 'mod' && modOf(p); return m ? 'mod:' + m.slug : p; };
+document.querySelectorAll('.modes button').forEach(b => b.onclick = () => {
+  strip = b.dataset.s;
+  document.querySelectorAll('.modes button').forEach(x => x.classList.toggle('on', x === b));
+  pinned = false; show(latest());
+});
+
+async function scanModules(first) {
+  const r = await fetch('/plugin.json', {cache: 'no-store'});
+  if (!r.ok) return;
+  const text = await r.text();
+  if (text === modText) return;
+  let list;
+  try { list = JSON.parse(text).modules || []; } catch (e) { return; }   // half-saved plugin.json: wait for the next poll
+  modText = text;
+  const firstEver = known.size === 0, added = [];
+  mods = list.map(m => ({slug: m.slug, name: m.name || m.slug, tags: m.tags, isNew: !firstEver && !known.has(m.slug)}));
+  mods.forEach(m => { if (!known.has(m.slug)) { known.add(m.slug); if (!firstEver) added.push(m); } });
+  try { localStorage.setItem(KNOWN, JSON.stringify([...known])); } catch (e) {}
+  document.getElementById('nmod').textContent = mods.length;
+  added.forEach(m => feed(`new module <b>${m.name}</b> in plugin.json`));
+  if (!first && added.length && !pinned && strip === 'mod') show('mod:' + added[0].slug, 'change');
+  else if (!first) drawStrip();
+}
+function feed(msg) {
+  const f = document.getElementById('feed');
+  f.insertAdjacentHTML('afterbegin', `<div>${time(Date.now())} ${msg}</div>`);
+  while (f.children.length > 40) f.lastChild.remove();
+}
+
+async function scanArt(first) {
+  const paths = (await Promise.all(ROOTS.map(d => list(d, 0)))).flat();
+  const fresh = new Set();
+  await Promise.all(paths.map(async p => {
+    const t = await stamp(p), old = files.get(p);
+    files.set(p, t);
+    if (!first && old !== t) { fresh.add(p); feed(`<b>${short(p)}</b> ${old ? 'changed' : 'added'}`); }
+  }));
+  for (const p of [...files.keys()]) if (!paths.includes(p)) { files.delete(p); feed(`${short(p)} removed`); }
+  if (first) return;
+  const keys = [...fresh].sort((a, b) => files.get(b) - files.get(a)).map(keyFor);
+  if (keys.length) { if (!pinned) show(keys[0], 'change'); else if (keys.includes(shown)) show(shown, 'change'); else drawStrip(fresh); }
+}
+
+async function scanLog() {
+  const r = await fetch('/build.log', {cache: 'no-store'});
+  if (!r.ok) return;
+  const s = r.headers.get('Last-Modified') + r.headers.get('Content-Length');
+  if (s === logStamp) return;
+  const wasRunning = logStamp !== '';
+  logStamp = s;
+  const text = await r.text(), lines = text.split('\n').slice(-400);
+  const esc = l => l.replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
+  const log = document.getElementById('log'), atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+  log.innerHTML = lines.map(l => /error|Error \d|\*\*\*/.test(l) ? `<span class="e">${esc(l)}</span>` : /warning/.test(l) ? `<span class="w">${esc(l)}</span>` : /^(g\+\+|gcc|cp |mkdir|Linking|Compiling)/.test(l) ? `<span class="c">${esc(l)}</span>` : esc(l)).join('\n');
+  if (atEnd) log.scrollTop = log.scrollHeight;
+  const st = document.getElementById('state'), age = Date.now() - Date.parse(r.headers.get('Last-Modified'));
+  const failed = /\*\*\*|error:/.test(text), done = /^(cp |mkdir).*plugins-win|Nothing to be done|is up to date/m.test(text) || age > 8000;
+  st.className = failed ? 'bad' : done ? 'ok' : 'run';
+  st.textContent = failed ? 'FAILED' : done ? 'BUILD OK' : 'COMPILING…';
+  if (wasRunning && st.dataset.last !== st.textContent) feed(`compiler: <b>${st.textContent}</b>`);
+  st.dataset.last = st.textContent;
+}
+
+async function tick(first) {
+  try {
+    await Promise.all([scanArt(first), scanModules(first), scanLog()]);
+    if (first) show(latest());
+    document.getElementById('live').textContent = '● watching';
+  }
+  catch (e) { document.getElementById('live').textContent = '○ server not reachable'; }
+  setTimeout(tick, POLL);
+}
+tick(true);
+</script>
+</body>
+</html>
