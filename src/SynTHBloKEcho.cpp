@@ -1,6 +1,6 @@
 // SynTHBloK MATRIX-ECHO: the MATRIX FINAL-stage DELAY / SPACE as a standalone stereo delay and looper.
 // 12 delay engines (CLASSIC = the MATRIX ping-pong), tap tempo / clock with 11 subdivisions (3 dual),
-// freeze, kill dry, bypass with trails, a SPACE reverb on the repeats, 6 presets, and a 60 s stereo
+// freeze, kill dry, bypass with trails, a SPACE reverb on the repeats, 11 user + 48 factory presets, and a 60 s stereo
 // looper (REC / REPLACE, PLAY / STOP, PLAY ONCE, UNDO / REDO, CLEAR) locked to the tempo: the transport
 // lands on the beat or bar grid, playback re-syncs to every beat, and the loop plays 1 .. all its beats.
 // One screen holds the delay, preset and looper controls.
@@ -21,24 +21,63 @@ const EchoSub kEchoSub[11] = {{"1/2", 2.f, 0.f}, {"1/4.", 1.5f, 0.f}, {"1/4", 1.
                               {"1/8.", 0.75f, 0.f}, {"1/8", 0.5f, 0.f}, {"1/8T", 1.f / 3.f, 0.f}, {"1/16", 0.25f, 0.f},
                               {"1/4+1/8.", 1.f, 0.75f}, {"1/4+1/8T", 1.f, 1.f / 3.f}, {"1/8.+1/16", 0.75f, 0.25f}};
 
-// Preset banks: USER (stored), DRUMS and SYNTH (factory, one per genre). A preset = TYPE, TIME, SUBDIV,
-// FEEDBACK, LEVEL, TONE, MOD, SPACE. DRUMS also voices the repeats for beats (see process()), so the
-// presets sit back: short, darker, modest feedback, the repeats ducked under the hits.
-const char* const kBankName[3] = {"USER", "DRUMS", "SYNTH"};
+// Preset banks: USER (stored, 11 slots), then the factory banks of 8: DRUMS, SYNTH, CINEMATIC, DUB, LO-FI,
+// RHYTHM. A preset = TYPE, TIME, SUBDIV, FEEDBACK, LEVEL, TONE, MOD, SPACE (TIME is the free-running time,
+// near the subdivision at 120 BPM). Feedback stays at 0.65 or under, so nothing runs away. DRUMS also voices
+// the repeats for beats (see process()), so the presets sit back: short, darker, modest feedback, the
+// repeats ducked under the hits.
+const int kBanks = 7, kGenreN = 8;
+const char* const kBankName[kBanks] = {"USER", "DRUMS", "SYNTH", "CINEMATIC", "DUB", "LO-FI", "RHYTHM"};
 struct EchoGenre { const char* name; const char* cell; float v[8]; };
-const EchoGenre kGenre[2][6] = {
+const EchoGenre kGenre[kBanks - 1][kGenreN] = {
     {{"HOUSE", "HOUSE", {1, 0.5f, 4, 0.30f, 0.30f, 0.55f, 0.00f, 0.10f}},      // 2290, 1/8. offbeat bounce
      {"TECHNO", "TECHNO", {3, 0.5f, 7, 0.35f, 0.25f, 0.45f, 0.10f, 0.15f}},    // ANALOG, 1/16 rolling texture
      {"HIP-HOP", "HIPHOP", {4, 0.5f, 6, 0.25f, 0.30f, 0.35f, 0.25f, 0.05f}},   // TAPE, 1/8T lazy swing
      {"DRUM&BASS", "DNB", {8, 0.5f, 5, 0.30f, 0.25f, 0.60f, 0.00f, 0.10f}},  // PING-PONG, 1/8 width
      {"DUB", "DUB", {11, 0.5f, 1, 0.50f, 0.35f, 0.40f, 0.20f, 0.30f}},         // SPACE heads, 1/4. throws
-     {"TRAP", "TRAP", {6, 0.5f, 6, 0.30f, 0.30f, 0.65f, 0.00f, 0.10f}}},       // DYNAMIC, 1/8T hat rolls
+     {"TRAP", "TRAP", {6, 0.5f, 6, 0.30f, 0.30f, 0.65f, 0.00f, 0.10f}},        // DYNAMIC, 1/8T hat rolls
+     {"BREAKBEAT", "BREAKS", {9, 0.45f, 7, 0.30f, 0.30f, 0.50f, 0.05f, 0.10f}},  // SLAP ~68 ms, a fat snare double
+     {"GARAGE", "GARAGE", {2, 0.36f, 6, 0.30f, 0.28f, 0.55f, 0.20f, 0.10f}}},   // 2290 MOD, 1/8T shuffle
     {{"AMBIENT", "AMBNT", {10, 0.5f, 1, 0.60f, 0.45f, 0.60f, 0.30f, 0.50f}},   // CRYSTAL, 1/4. shimmer
      {"SYNTHWAVE", "WAVE", {2, 0.5f, 4, 0.45f, 0.40f, 0.55f, 0.35f, 0.30f}},   // 2290 MOD, 1/8. chorus
      {"TRANCE", "TRANCE", {8, 0.5f, 4, 0.50f, 0.40f, 0.60f, 0.10f, 0.25f}},    // PING-PONG, 1/8. gate echoes
      {"LEAD", "LEAD", {3, 0.5f, 2, 0.40f, 0.35f, 0.45f, 0.20f, 0.15f}},        // ANALOG, 1/4 warm repeats
      {"PAD", "PAD", {11, 0.5f, 0, 0.55f, 0.45f, 0.40f, 0.25f, 0.60f}},         // SPACE, 1/2 wash
-     {"ARP", "ARP", {0, 0.5f, 10, 0.40f, 0.35f, 0.55f, 0.10f, 0.20f}}}};       // CLASSIC, 1/8.+1/16 cascade
+     {"ARP", "ARP", {0, 0.5f, 10, 0.40f, 0.35f, 0.55f, 0.10f, 0.20f}},         // CLASSIC, 1/8.+1/16 cascade
+     {"PLUCK", "PLUCK", {8, 0.43f, 5, 0.35f, 0.35f, 0.65f, 0.05f, 0.15f}},     // PING-PONG, 1/8 bright bounce
+     {"BASS", "BASS", {9, 0.35f, 5, 0.15f, 0.20f, 0.35f, 0.00f, 0.00f}}},      // SLAP ~52 ms, dark thickener
+    {{"SHIMMER", "SHIMMR", {10, 0.62f, 1, 0.60f, 0.45f, 0.65f, 0.25f, 0.60f}}, // CRYSTAL, 1/4. octave bloom
+     {"CATHEDRAL", "CATHDR", {11, 0.67f, 0, 0.55f, 0.40f, 0.45f, 0.20f, 0.75f}}, // SPACE, 1/2 huge wash
+     {"GLACIER", "GLACIR", {2, 0.67f, 0, 0.60f, 0.40f, 0.70f, 0.45f, 0.50f}},  // 2290 MOD, 1/2 slow icy chorus
+     {"DRONE", "DRONE", {4, 0.62f, 8, 0.62f, 0.45f, 0.35f, 0.40f, 0.55f}},     // TAPE, 1/4+1/8. dark smear
+     {"SWELL", "SWELL", {7, 0.55f, 2, 0.45f, 0.50f, 0.50f, 0.15f, 0.45f}},     // REVERSE, 1/4 rising swells
+     {"STARFIELD", "STARS", {8, 0.55f, 3, 0.55f, 0.35f, 0.75f, 0.20f, 0.40f}}, // PING-PONG, 1/4T sparkle
+     {"HORIZON", "HRZN", {3, 0.62f, 1, 0.55f, 0.40f, 0.30f, 0.30f, 0.45f}},    // ANALOG, 1/4. warm distance
+     {"TRAILER", "TRAILR", {6, 0.67f, 0, 0.55f, 0.50f, 0.40f, 0.10f, 0.65f}}}, // DYNAMIC, 1/2 blooms between hits
+    {{"SKANK", "SKANK", {4, 0.50f, 4, 0.50f, 0.40f, 0.40f, 0.25f, 0.15f}},     // TAPE, 1/8. offbeat chops
+     {"STEPPERS", "STEPPR", {11, 0.55f, 2, 0.55f, 0.40f, 0.35f, 0.20f, 0.25f}}, // SPACE, 1/4 heads
+     {"ROOTS", "ROOTS", {3, 0.62f, 1, 0.55f, 0.40f, 0.30f, 0.20f, 0.20f}},     // ANALOG, 1/4. dark throws
+     {"SIREN", "SIREN", {4, 0.43f, 5, 0.62f, 0.45f, 0.50f, 0.60f, 0.20f}},     // TAPE, 1/8 heavy wobble
+     {"ROCKERS", "ROCKRS", {1, 0.48f, 3, 0.50f, 0.35f, 0.45f, 0.05f, 0.15f}},  // 2290, 1/4T tight repeats
+     {"SPRING", "SPRING", {9, 0.55f, 2, 0.45f, 0.35f, 0.55f, 0.10f, 0.50f}},   // SLAP ~89 ms into the SPACE: a spring
+     {"DUBSTEP", "DSTEP", {8, 0.36f, 6, 0.45f, 0.35f, 0.40f, 0.10f, 0.20f}},   // PING-PONG, 1/8T half-time
+     {"ECHO CHAMBER", "CHAMBR", {11, 0.62f, 9, 0.50f, 0.40f, 0.40f, 0.25f, 0.40f}}}, // SPACE, 1/4+1/8T
+    {{"CASSETTE", "CASSET", {4, 0.50f, 4, 0.40f, 0.40f, 0.30f, 0.50f, 0.10f}}, // TAPE, 1/8. warbly
+     {"VHS", "VHS", {2, 0.43f, 5, 0.40f, 0.35f, 0.30f, 0.65f, 0.15f}},         // 2290 MOD, 1/8 seasick chorus
+     {"8-BIT", "8-BIT", {5, 0.43f, 5, 0.40f, 0.35f, 0.60f, 0.00f, 0.00f}},     // LO-FI, 1/8 crunchy
+     {"VINYL", "VINYL", {5, 0.55f, 2, 0.35f, 0.35f, 0.25f, 0.20f, 0.20f}},     // LO-FI, 1/4 dusty
+     {"BUCKET BRIGADE", "BBD", {3, 0.48f, 3, 0.45f, 0.40f, 0.35f, 0.25f, 0.05f}}, // ANALOG, 1/4T murky
+     {"AM RADIO", "RADIO", {5, 0.31f, 7, 0.30f, 0.30f, 0.45f, 0.10f, 0.05f}},  // LO-FI, 1/16 thin
+     {"ROCKABILLY", "ROCKBL", {9, 0.62f, 2, 0.20f, 0.40f, 0.55f, 0.05f, 0.00f}}, // SLAP ~108 ms, one bright slap
+     {"WORN TAPE", "WORN", {4, 0.62f, 1, 0.55f, 0.40f, 0.20f, 0.70f, 0.20f}}}, // TAPE, 1/4. dark, wobbling
+    {{"DOTTED 8TH", "DOTTED", {1, 0.50f, 4, 0.45f, 0.40f, 0.60f, 0.00f, 0.05f}}, // 2290, 1/8. clean
+     {"TRIPLET", "TRIPLT", {8, 0.36f, 6, 0.45f, 0.35f, 0.55f, 0.00f, 0.05f}},  // PING-PONG, 1/8T
+     {"CASCADE", "CASCAD", {0, 0.50f, 10, 0.45f, 0.40f, 0.55f, 0.05f, 0.10f}}, // CLASSIC, 1/8.+1/16
+     {"GALLOP", "GALLOP", {1, 0.55f, 8, 0.40f, 0.40f, 0.55f, 0.00f, 0.05f}},   // 2290, 1/4+1/8.
+     {"SHUFFLE", "SHUFFL", {3, 0.55f, 9, 0.40f, 0.35f, 0.45f, 0.10f, 0.05f}},  // ANALOG, 1/4+1/8T
+     {"16TH ROLL", "ROLL", {6, 0.31f, 7, 0.50f, 0.40f, 0.55f, 0.00f, 0.05f}},  // DYNAMIC, 1/16 ducked roll
+     {"WIDE PING", "WIDE", {8, 0.55f, 2, 0.50f, 0.40f, 0.60f, 0.10f, 0.15f}},  // PING-PONG, 1/4
+     {"QUARTER TRIPLET", "QTR-T", {0, 0.48f, 3, 0.45f, 0.40f, 0.50f, 0.05f, 0.10f}}}}; // CLASSIC, 1/4T
 
 const char* const kLoopStateName[6] = {"EMPTY", "REC", "PLAY", "REPLACE", "STOP", "ONCE"};
 const char* const kArmName[8] = {"", "> REC", "> PLAY", "> ONCE", "> PLAY", "> ONCE", "> STOP", "> DUB"};
@@ -48,19 +87,30 @@ const char* const kClockDivName[3] = {"1/16 (MATRIX steps)", "1/8", "1/4 (beats)
 struct EchoLenQuantity : ParamQuantity {
     std::string getDisplayValueString() override;
 };
+// TEMPO: 40 .. 240 BPM, with FREE (the TIME knob sets the delay) at the bottom
+const float kTempoFree = 39.f;
+struct EchoTempoQuantity : ParamQuantity {
+    std::string getDisplayValueString() override {
+        float v = getValue();
+        return v < kTempoFree + 0.5f ? "Free (the TIME knob)" : string::f("%.0f BPM", v);
+    }
+};
 } // namespace
 
 struct SynTHBloKEcho : Module {
     enum ParamId { TYPE_PARAM, TIME_PARAM, SUBDIV_PARAM, FEEDBACK_PARAM, LEVEL_PARAM, TONE_PARAM, MOD_PARAM, SPACE_PARAM,
                    LOOP_LEVEL_PARAM, TAP_PARAM, FREEZE_PARAM, KILLDRY_PARAM, ON_PARAM,
                    REC_PARAM, PLAY_PARAM, ONCE_PARAM, UNDO_PARAM, CLEAR_PARAM, QUANT_PARAM, PREFX_PARAM,
-                   STORE_PARAM, ENUMS(SLOT_PARAM, 6), LEN_PARAM, LENDN_PARAM, LENUP_PARAM, BANK_PARAM, MASTER_PARAM, LENKNOB_PARAM, COUNTIN_PARAM, PAGE_PARAM, PARAMS_LEN };
+                   STORE_PARAM, ENUMS(SLOT_PARAM, 6), LEN_PARAM, LENDN_PARAM, LENUP_PARAM, BANK_PARAM, MASTER_PARAM, LENKNOB_PARAM, COUNTIN_PARAM, PAGE_PARAM,
+                   ENUMS(SLOT2_PARAM, 5),   // USER slots 7-11 (added after the rest: old patches keep their ids)
+                   TEMPO_PARAM, PARAMS_LEN };   // the tempo with no clock (bottom = FREE: the TIME knob)
     enum InputId { IN_L_INPUT, IN_R_INPUT, CLOCK_INPUT, TAP_INPUT, FREEZE_INPUT, BYPASS_INPUT,
                    REC_INPUT, PLAY_INPUT, ONCE_INPUT, UNDO_INPUT, CLEAR_INPUT, INPUTS_LEN };
     enum OutputId { OUT_L_OUTPUT, OUT_R_OUTPUT, OUTPUTS_LEN };
     enum LightId { LIGHTS_LEN };
     static const int kPresetN = 8;   // a preset = the first 8 params (TYPE .. SPACE)
-    static const int kSlots = 6;
+    static const int kSlots = 11;   // USER holds 11, the factory banks kGenreN
+    static int slotParam(int s) { return s < 6 ? SLOT_PARAM + s : SLOT2_PARAM + s - 6; }
 
     EchoEngine echo;
     EchoLooper looper;
@@ -87,7 +137,7 @@ struct SynTHBloKEcho : Module {
     int barPos = 0;   // the beat of the bar that comes next
     // for the display
     float timeNow = 0.375f, beatNow = 0.f;
-    int source = 0;   // 0 free (TIME knob), 1 tap, 2 clock
+    int source = 0;   // 0 free (TIME knob), 1 tap, 2 clock, 3 the TEMPO knob
     bool onNow = true, freezeNow = false;
 
     SynTHBloKEcho() {
@@ -96,7 +146,7 @@ struct SynTHBloKEcho : Module {
                      {"CLASSIC (MATRIX ping-pong)", "2290 (clean digital)", "2290 MOD (chorused)", "ANALOG (BBD)", "TAPE (wow, flutter)",
                       "LO-FI (crushed)", "DYNAMIC (ducking)", "REVERSE", "PING-PONG", "SLAP (20-300 ms)", "CRYSTAL (octave shimmer)",
                       "SPACE (multi-head echo + reverb)"});
-        configParam(TIME_PARAM, 0.f, 1.f, 0.5f, "Delay time (no clock / tap; SLAP: 20-300 ms)", " ms", 350.f, 20.f);
+        configParam(TIME_PARAM, 0.f, 1.f, 0.5f, "Delay time (no clock and TEMPO at FREE; SLAP: 20-300 ms)", " ms", 350.f, 20.f);
         std::vector<std::string> subs;
         for (const EchoSub& s : kEchoSub) subs.push_back(s.name);
         configSwitch(SUBDIV_PARAM, 0.f, 10.f, 4.f, "Subdivision of the clock / tapped beat", subs);
@@ -118,7 +168,7 @@ struct SynTHBloKEcho : Module {
         configParam(QUANT_PARAM, 0.f, 2.f, 1.f, "(not used: the looper always works to the beat)");
         configSwitch(PREFX_PARAM, 0.f, 1.f, 0.f, "Looper position", {"After the delay", "Before the delay (loops get echoed)"});
         configSwitch(STORE_PARAM, 0.f, 1.f, 0.f, "Store (then click a preset slot)", {"Off", "On"});
-        for (int i = 0; i < kSlots; i++) configButton(SLOT_PARAM + i, string::f("Preset %d (click: load; STORE lit: save)", i + 1));
+        for (int i = 0; i < kSlots; i++) configButton(slotParam(i), string::f("Preset %d (click: load; STORE lit: save)", i + 1));
         configParam<EchoLenQuantity>(LEN_PARAM, 0.f, 256.f, 0.f, "Record length (with a clock; free: until REC again)");
         getParamQuantity(LEN_PARAM)->snapEnabled = true;
         configButton(LENDN_PARAM, "(not used)");   // the old /2 and x2 cells and LENGTH knob: ids kept for old patches
@@ -126,14 +176,18 @@ struct SynTHBloKEcho : Module {
         // the final stage: a little boost by default (+2 dB), up to +6 dB, softly held under 10 V
         configParam(MASTER_PARAM, 0.f, 2.f, 1.26f, "Master output (OUT L / R)", " dB", -10.f, 20.f);
         configParam(LENKNOB_PARAM, 0.f, 1.f, 1.f, "(not used)");
-        configSwitch(BANK_PARAM, 0.f, 2.f, 0.f, "Preset bank",
-                     {"User (STORE saves here)", "Drums (genre presets; repeats tucked under the beat)", "Synth (genre presets)"});
+        configSwitch(BANK_PARAM, 0.f, kBanks - 1, 0.f, "Preset bank",
+                     {"User (STORE saves here)", "Drums (genre presets; repeats tucked under the beat)", "Synth (genre presets)",
+                      "Cinematic (ambient)", "Dub (reggae)", "Lo-fi (vintage)", "Rhythm (ping, dotted, triplets)"});
+        configParam<EchoTempoQuantity>(TEMPO_PARAM, kTempoFree, 240.f, 120.f, "Tempo (with no clock)");
+        getParamQuantity(TEMPO_PARAM)->snapEnabled = true;
         configSwitch(COUNTIN_PARAM, 0.f, 4.f, 0.f, "Count-in before a new take (with a clock)",
                      {"Off (starts on the next beat)", "1 beat", "2 beats", "3 beats", "4 beats"});
         // MODE: which page the screen's readout shows: the delay types, or a bank's presets (that bank is the one used)
-        configSwitch(PAGE_PARAM, 0.f, 3.f, 0.f, "Mode (the readout beside it)",
-                     {"Delay types", "User presets", "Drums presets", "Synth presets"});
-        for (int id : {FREEZE_PARAM, KILLDRY_PARAM, ON_PARAM, QUANT_PARAM, PREFX_PARAM, STORE_PARAM, TYPE_PARAM, LEN_PARAM, BANK_PARAM, LENKNOB_PARAM, COUNTIN_PARAM, PAGE_PARAM})
+        configSwitch(PAGE_PARAM, 0.f, kBanks, 0.f, "Mode (the readout beside it)",
+                     {"Classics (delay types)", "User presets", "Drums presets", "Synth presets", "Cinematic presets", "Dub presets",
+                      "Lo-fi presets", "Rhythm presets"});
+        for (int id : {FREEZE_PARAM, KILLDRY_PARAM, ON_PARAM, QUANT_PARAM, PREFX_PARAM, STORE_PARAM, TYPE_PARAM, LEN_PARAM, BANK_PARAM, LENKNOB_PARAM, COUNTIN_PARAM, PAGE_PARAM, TEMPO_PARAM})
             getParamQuantity(id)->randomizeEnabled = false;
         configInput(IN_L_INPUT, "Left / mono");
         configInput(IN_R_INPUT, "Right (normalled to left)");
@@ -152,11 +206,12 @@ struct SynTHBloKEcho : Module {
         configBypass(IN_R_INPUT, OUT_R_OUTPUT);
 
         // factory presets: TYPE, TIME, SUBDIV, FEEDBACK, LEVEL, TONE, MOD, SPACE
-        static const float kFactory[kSlots][kPresetN] = {
+        static const float kFactory[][kPresetN] = {
             {ET_2290, 0.5f, 2, 0.4f, 0.5f, 0.55f, 0.f, 0.f},     {ET_TAPE, 0.5f, 4, 0.45f, 0.55f, 0.45f, 0.3f, 0.1f},
             {ET_ANALOG, 0.5f, 5, 0.55f, 0.5f, 0.4f, 0.2f, 0.f},  {ET_REVERSE, 0.5f, 2, 0.35f, 0.6f, 0.5f, 0.f, 0.2f},
             {ET_CRYSTAL, 0.5f, 1, 0.6f, 0.45f, 0.6f, 0.2f, 0.4f}, {ET_SPACE, 0.5f, 4, 0.5f, 0.5f, 0.45f, 0.3f, 0.3f}};
-        for (int s = 0; s < kSlots; s++) {
+        static const int kFactoryN = sizeof(kFactory) / sizeof(kFactory[0]);   // the rest start empty
+        for (int s = 0; s < kFactoryN; s++) {
             for (int i = 0; i < kPresetN; i++) slots[s][i] = kFactory[s][i];
             slotUsed[s] = true;
         }
@@ -174,9 +229,11 @@ struct SynTHBloKEcho : Module {
         tapActive = false;
     }
 
-    int bank() { return clamp((int)params[BANK_PARAM].getValue(), 0, 2); }
-    // the preset values of a slot in a bank (NULL: an empty user slot)
+    int bank() { return clamp((int)params[BANK_PARAM].getValue(), 0, kBanks - 1); }
+    static int bankSlots(int b) { return b > 0 ? kGenreN : kSlots; }
+    // the preset values of a slot in a bank (NULL: an empty user slot, or past the end of a factory bank)
     const float* preset(int b, int s) {
+        if (s < 0 || s >= bankSlots(b)) return NULL;
         if (b > 0) return kGenre[b - 1][s].v;
         return slotUsed[s] ? slots[s] : NULL;
     }
@@ -246,8 +303,12 @@ struct SynTHBloKEcho : Module {
         }
         sinceTap += dt;
         if (tapActive && std::fabs(params[TIME_PARAM].getValue() - tapKnob) > 0.01f) tapActive = false;
-        float beat = clockOn ? (clkBeat > 0.f ? clkBeat : clockPeriod * kPpq[clockDiv]) : tapActive ? tapBeat : 0.f;
-        source = clockOn ? 2 : tapActive ? 1 : 0;
+        // no clock: the TEMPO knob, unless it is down at FREE
+        float tempo = params[TEMPO_PARAM].getValue();
+        bool internal = !clockOn && !tapActive && tempo >= kTempoFree + 0.5f;
+        float beat = clockOn ? (clkBeat > 0.f ? clkBeat : clockPeriod * kPpq[clockDiv]) : tapActive ? tapBeat
+                   : internal ? 60.f / tempo : 0.f;
+        source = clockOn ? 2 : tapActive ? 1 : internal ? 3 : 0;
         beatNow = beat;
 
         // ---- type change: fade the repeats out, switch, fade in ----
@@ -303,11 +364,11 @@ struct SynTHBloKEcho : Module {
 
         // ---- presets ----
         // MODE on a preset page uses that bank; STORE saves to USER (the page follows)
-        int page = clamp((int)std::round(params[PAGE_PARAM].getValue()), 0, 3);
+        int page = clamp((int)std::round(params[PAGE_PARAM].getValue()), 0, kBanks);
         if (params[STORE_PARAM].getValue() > 0.5f && page != 1) { params[PAGE_PARAM].setValue(1.f); page = 1; }
         if (page > 0 && bank() != page - 1) params[BANK_PARAM].setValue((float)(page - 1));
         for (int s = 0; s < kSlots; s++) {
-            bool b = params[SLOT_PARAM + s].getValue() > 0.5f;
+            bool b = params[slotParam(s)].getValue() > 0.5f;
             if (b && !slotPrev[s]) {
                 if (params[STORE_PARAM].getValue() > 0.5f) { storeSlot(s); params[STORE_PARAM].setValue(0.f); }
                 else loadSlot(s);
@@ -408,6 +469,7 @@ struct SynTHBloKEcho : Module {
         json_object_set_new(root, "curBank", json_integer(curBank));
         json_object_set_new(root, "clockDiv", json_integer(clockDiv));
         json_object_set_new(root, "trails", json_boolean(trails));
+        json_object_set_new(root, "tempoKnob", json_true());
         return root;
     }
     void dataFromJson(json_t* root) override {
@@ -420,9 +482,11 @@ struct SynTHBloKEcho : Module {
             }
         }
         if (json_t* j = json_object_get(root, "curSlot")) curSlot = clamp((int)json_integer_value(j), -1, kSlots - 1);
-        if (json_t* j = json_object_get(root, "curBank")) curBank = clamp((int)json_integer_value(j), 0, 2);
+        if (json_t* j = json_object_get(root, "curBank")) curBank = clamp((int)json_integer_value(j), 0, kBanks - 1);
         if (json_t* j = json_object_get(root, "clockDiv")) clockDiv = clamp((int)json_integer_value(j), 0, 2);
         if (json_t* j = json_object_get(root, "trails")) trails = json_boolean_value(j);
+        // a patch from before the TEMPO knob: keep it free running, as it was
+        if (!json_object_get(root, "tempoKnob")) params[TEMPO_PARAM].setValue(kTempoFree);
     }
 };
 
@@ -575,14 +639,14 @@ struct EchoScreen : TransparentWidget {
         nvgText(args.vg, W - 4.f, y, val, NULL);
     }
     void drawPage(const DrawArgs& args, float W, float y) {
-        if (!module) { pageLine(args, W, y, "TYPES", "2290", oled::amber()); return; }
-        int page = clamp((int)std::round(module->params[EC::PAGE_PARAM].getValue()), 0, 3);
+        if (!module) { pageLine(args, W, y, "CLASSICS", "2290", oled::amber()); return; }
+        int page = clamp((int)std::round(module->params[EC::PAGE_PARAM].getValue()), 0, kBanks);
         if (module->params[EC::STORE_PARAM].getValue() > 0.5f) {
             pageLine(args, W, y, "STORE", "CLICK A PRESET TO SAVE INTO", oled::litFill());
             return;
         }
         if (page == 0) {
-            pageLine(args, W, y, "TYPES", kEchoTypeName[clamp((int)module->params[EC::TYPE_PARAM].getValue(), 0, ET_NUM - 1)], oled::amber());
+            pageLine(args, W, y, "CLASSICS", kEchoTypeName[clamp((int)module->params[EC::TYPE_PARAM].getValue(), 0, ET_NUM - 1)], oled::amber());
             return;
         }
         char val[48] = "--";
@@ -825,7 +889,8 @@ struct EchoTintCell : oled::Cell {
     }
 };
 
-// MODE: steps the page TYPES > USER > DRUMS > SYNTH (click; scroll both ways; right-click lists them). Lit
+// MODE: steps the page CLASSICS > USER > DRUMS > SYNTH > CINEMATIC > DUB > LO-FI > RHYTHM (click; scroll both
+// ways; right-click lists them). Lit
 // while pressed; the page shows in the line above the cells.
 struct EchoModeCell : oled::Cell {
     bool held = false;
@@ -840,7 +905,8 @@ struct EchoModeCell : oled::Cell {
         ParamQuantity* pq = getParamQuantity();
         if (!pq) return;
         int v = (int)std::round(pq->getValue()) + d;
-        pq->setValue((float)(wrap ? (v % 4 + 4) % 4 : clamp(v, 0, 3)));
+        const int n = kBanks + 1;   // CLASSICS and the banks
+        pq->setValue((float)(wrap ? (v % n + n) % n : clamp(v, 0, n - 1)));
     }
     void drawLayer(const DrawArgs& args, int layer) override {
         ParamWidget::drawLayer(args, layer);
@@ -906,7 +972,7 @@ struct EchoCountCell : oled::Cell {
 
 struct SynTHBloKEchoWidget : ModuleWidget {
     oled::Cell* undoCell = NULL;
-    oled::Cell* slotCell[6] = {};
+    oled::Cell* slotCell[EC::kSlots] = {};
     oled::Cell* typeCell[ET_NUM] = {};
     oled::Cell* storeCell = NULL;
 
@@ -926,13 +992,15 @@ struct SynTHBloKEchoWidget : ModuleWidget {
             l->box.size = mm2px(Vec(24.f, 4.f)); l->text = text;
             addChild(l);
         };
+        // a trimpot with the knob dress scaled down to it: ticks and ring, the name under it
         auto smallKnob = [&](float x, float y, int param, const char* name) {
-            addChild(KnobTicks::create(Vec(x, y)));
-            EchoRing* r = createWidget<EchoRing>(mm2px(Vec(x - 5.5f, y - 5.5f)));
-            r->box.size = mm2px(Vec(11.f, 11.f)); r->module = module; r->param = param;
+            const float k = 0.78f, rs = 11.f * k;
+            addChild(KnobTicks::create(Vec(x, y), k));
+            EchoRing* r = createWidget<EchoRing>(mm2px(Vec(x - 0.5f * rs, y - 0.5f * rs)));
+            r->box.size = mm2px(Vec(rs, rs)); r->module = module; r->param = param; r->width = 1.5f;
             addChild(r);
-            addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(x, y)), module, param));
-            label(x, y + 7.f, name);
+            addParam(createParamCentered<Trimpot>(mm2px(Vec(x, y)), module, param));
+            label(x, y + 6.2f, name);
         };
 
         // ---------------- the screen ----------------
@@ -975,23 +1043,27 @@ struct SynTHBloKEchoWidget : ModuleWidget {
         addParam(mode);
 
         const float px0 = es::kPad + 2.f * tw + CG + 1.5f, pW = es::kPad + inner - px0;   // the page's area
-        // TYPES: the 12 delay types, 4 x 3
+        // CLASSICS: the 12 delay types, 4 x 3
         const float tcw = (pW - 3.f * CG) / 4.f;
         for (int k = 0; k < ET_NUM; k++) {
             oled::Cell* tc = cell(px0 + (k % 4) * (tcw + CG), es::yBlk + (k / 4) * (CH + es::kGap), tcw, EC::TYPE_PARAM, kEchoTypeName[k]);
             tc->setTo = k; tc->fontSize = 6.f;
             typeCell[k] = tc;
         }
-        // a bank: its 6 presets, 3 x 2, and STORE under them
-        const float pw = (pW - 2.f * CG) / 3.f;
-        static const char* const num[6] = {"1", "2", "3", "4", "5", "6"};
-        for (int s = 0; s < 6; s++) {
-            oled::Cell* c = cell(px0 + (s % 3) * (pw + CG), es::yBlk + (s / 3) * (CH + es::kGap), pw, EC::SLOT_PARAM + s, num[s]);
+        // a bank: its presets on the CLASSICS grid (4 x 3: USER 11, a factory bank 8), STORE in the last cell
+        static const char* const num[EC::kSlots] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"};
+        for (int s = 0; s < EC::kSlots; s++) {
+            oled::Cell* c = cell(px0 + (s % 4) * (tcw + CG), es::yBlk + (s / 4) * (CH + es::kGap), tcw, EC::slotParam(s), num[s]);
             if (module) c->flash = &module->slotLit[s];
             slotCell[s] = c;
         }
-        storeCell = cell(px0, es::yBlk + 2.f * (CH + es::kGap), pW, EC::STORE_PARAM, "STORE");
-        storeCell->latch = true;
+        // STORE in ice blue as FREEZE / KILL DRY (dim until armed), apart from the amber presets
+        EchoTintCell* st = createParam<EchoTintCell>(mm2px(Vec(OX + px0 + 3.f * (tcw + CG), OY + es::yBlk + 2.f * (CH + es::kGap))),
+                                                     module, EC::STORE_PARAM);
+        st->box.size = mm2px(Vec(tcw, CH)); st->module = module; st->label = "STORE";
+        st->latch = true; st->fontSize = 6.f; st->tint = nvgRGB(0x5c, 0xc8, 0xf2);
+        addParam(st);
+        storeCell = st;
 
         // record length, 3 x 3: FREE (until REC again) | 1-4 beats | 1-4 bars. 4 BT and 1 BAR are the same
         // length, so both light.
@@ -1038,23 +1110,21 @@ struct SynTHBloKEchoWidget : ModuleWidget {
 
         // ---------------- knobs ----------------
         auto col = [&](int n, int i) { return 2.f + (PW - 4.f) * (i + 0.5f) / n; };
-        const float KA = 77.f, KB = 91.f;
-        smallKnob(col(4, 0), KA, EC::TIME_PARAM, "TIME");
-        smallKnob(col(4, 1), KA, EC::FEEDBACK_PARAM, "FEEDBACK");
-        smallKnob(col(4, 2), KA, EC::TONE_PARAM, "TONE");
-        smallKnob(col(4, 3), KA, EC::LEVEL_PARAM, "MIX");
-        smallKnob(col(4, 0), KB, EC::SUBDIV_PARAM, "SUBDIV");
-        smallKnob(col(4, 1), KB, EC::MOD_PARAM, "MOD");
-        smallKnob(col(4, 2), KB, EC::SPACE_PARAM, "SPACE");
-        // ---------------- jacks: CLOCK | the looper plate | the output plate (plates drawn in the SVG) ----------------
+        // one row of knobs: TEMPO (used with no clock) and the six delay knobs
+        const float KA = 77.f;
+        static const int knobParam[7] = {EC::TEMPO_PARAM, EC::TIME_PARAM, EC::SUBDIV_PARAM, EC::FEEDBACK_PARAM, EC::TONE_PARAM, EC::MOD_PARAM, EC::SPACE_PARAM};
+        static const char* const knobName[7] = {"TEMPO", "TIME", "SUBDIV", "FEEDBACK", "TONE", "MOD", "SPACE"};
+        for (int i = 0; i < 7; i++) smallKnob(col(7, i), KA, knobParam[i], knobName[i]);
+        // ---------------- jacks: the input plate | the looper plate | the output plate (plates drawn in the SVG) ----------------
         // (TAP, FREEZE and BYPASS have no jacks: their input ids stay so old patches keep their cables in place)
-        const float P = 10.5f, Y1 = 108.5f, Y2 = 120.5f, YM = 0.5f * (Y1 + Y2);
-        const float xC = 11.f;               // CLOCK, left of the looper plate
-        const float xL = 25.95f, PL = 11.f;  // the 5 looper jacks in one row along the bottom of the plate (x 20.5 .. 75.4)
-        const float xK = 30.f;               // the LOOP knob, at the left of the plate, in the MASTER row
-        const float xO = 83.f;               // OUT L (plate x 77.4 .. 99.1)
+        const float P = 10.f, Y1 = 108.5f, Y2 = 120.5f;   // P: the jack pitch on the input and output plates
+        const float xI = 8.25f;              // IN L (plate x 2.4 .. 24.1, as wide as the output plate): MIX over IN L / R
+        const float xL = 31.75f, PL = 9.5f;  // the 5 looper jacks in one row along the bottom of the plate (x 26.1 .. 75.4)
+        const float xC = xL + 4.f * PL;      // CLOCK, top right of the looper plate (over CLEAR), mirroring the LOOP knob
+        const float xK = 34.f;               // the LOOP knob, at the left of the plate, in the MASTER row
+        const float xO = 83.25f;             // OUT L (plate x 77.4 .. 99.1)
         auto jack = [&](float x, float y, int id, bool out, const char* name, bool labelBelow = false) {
-            label(x, labelBelow ? y + 7.f : y - 4.6f, name);
+            label(x, labelBelow ? y + 6.2f : y - 4.6f, name);
             if (out) {
                 addOutput(createOutputCentered<SmallJack>(mm2px(Vec(x, y)), module, id));
                 addChild(JackLed::create(Vec(x + 3.9f, y), module, id, true));
@@ -1067,10 +1137,11 @@ struct SynTHBloKEchoWidget : ModuleWidget {
             addChild(r);
             addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(x, y)), module, param));
         };
-        // IN L / R where the 4th knob would be, over OUT L / R: the signal runs down the right edge, IN -> MASTER -> OUT
-        jack(xO, KB, EC::IN_L_INPUT, false, "IN L", true);
-        jack(xO + P, KB, EC::IN_R_INPUT, false, "IN R", true);
-        jack(xC, YM, EC::CLOCK_INPUT, false, "CLOCK");
+        // the input plate: MIX (no label, as MASTER) over IN L / R; the signal runs IN -> looper -> OUT along the bottom
+        plateKnob(xI + 0.5f * P, Y1, EC::LEVEL_PARAM);
+        jack(xI, Y2, EC::IN_L_INPUT, false, "IN L");
+        jack(xI + P, Y2, EC::IN_R_INPUT, false, "IN R");
+        jack(xC, Y1 + 1.f, EC::CLOCK_INPUT, false, "CLOCK");   // the label above it, as on the jacks below
         jack(xL, Y2, EC::REC_INPUT, false, "REC");
         jack(xL + PL, Y2, EC::PLAY_INPUT, false, "PLAY");
         jack(xL + 2.f * PL, Y2, EC::ONCE_INPUT, false, "ONCE");
@@ -1086,17 +1157,17 @@ struct SynTHBloKEchoWidget : ModuleWidget {
     void step() override {
         EC* m = getModule<EC>();
         if (undoCell) undoCell->label = m && m->looper.undone ? "REDO" : "UNDO";
-        static const char* const num[6] = {"1", "2", "3", "4", "5", "6"};
+        static const char* const num[EC::kSlots] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"};
         int b = m ? m->bank() : 0;
-        for (int s = 0; s < 6; s++) {   // the slots show the genres in DRUMS / SYNTH
+        for (int s = 0; s < EC::kSlots; s++) {   // the slots show the genres in the factory banks
             if (!slotCell[s]) continue;
-            slotCell[s]->label = b > 0 ? kGenre[b - 1][s].cell : num[s];
+            slotCell[s]->label = b > 0 && s < kGenreN ? kGenre[b - 1][s].cell : num[s];
             slotCell[s]->fontSize = b > 0 ? 5.5f : 6.5f;
         }
         // MODE's page: the delay types, or a bank's presets + STORE (the browser shows the types)
-        int page = m ? clamp((int)std::round(m->params[EC::PAGE_PARAM].getValue()), 0, 3) : 0;
+        int page = m ? clamp((int)std::round(m->params[EC::PAGE_PARAM].getValue()), 0, kBanks) : 0;
         for (int k = 0; k < ET_NUM; k++) if (typeCell[k]) typeCell[k]->visible = page == 0;
-        for (int s = 0; s < 6; s++) if (slotCell[s]) slotCell[s]->visible = page > 0;
+        for (int s = 0; s < EC::kSlots; s++) if (slotCell[s]) slotCell[s]->visible = page > 0 && s < EC::bankSlots(page - 1);
         if (storeCell) storeCell->visible = page > 0;
         ModuleWidget::step();
     }
