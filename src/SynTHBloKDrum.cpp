@@ -130,7 +130,7 @@ struct SynTHBloKDrum : Module {
     DrumVoice voice[8] = {DrumVoice(1), DrumVoice(2), DrumVoice(3), DrumVoice(4), DrumVoice(5), DrumVoice(6), DrumVoice(7), DrumVoice(8)};
     int choke[8] = {0, 0, 0, 1, 1, 0, 0, 0};   // choke group per row, 0 = none
     bool leaveMix = false;        // a patched voice out takes that row out of OUT L / R
-    float lvlSm[8], panSm[8];
+    float lvlSm[8], panSm[8], voicePk[8] = {};   // voicePk: each voice's out (V), held peak for its level strip
     float trigV[8] = {};
     dsp::PulseGenerator trigPulse[8], clockPulse;
     // each voice's last hit for the voice OLED: the audio from the hit on, at about 48 kHz (higher rates are
@@ -206,8 +206,8 @@ struct SynTHBloKDrum : Module {
         configParam(ONC_PARAM, 0.f, 127.f, 127.f, "LED colour: active step");
         configParam(HEADC_PARAM, 0.f, 127.f, 30.f, "LED colour: playhead over empty step");
         configParam(HITC_PARAM, 0.f, 127.f, 90.f, "LED colour: playhead over active step");
-        configParam(BONC_PARAM, 0.f, 127.f, 127.f, "LED colour: selected bank button");
-        configParam(BOFFC_PARAM, 0.f, 127.f, 20.f, "LED colour: other bank buttons");
+        configParam(BONC_PARAM, 0.f, 127.f, 127.f, "LED colour: A-H, muted voice");
+        configParam(BOFFC_PARAM, 0.f, 127.f, 20.f, "LED colour: A-H, playing voice");
         for (int id = OFFC_PARAM; id <= BOFFC_PARAM; id++) paramQuantities[id]->snapEnabled = true;
         configSwitch(MIDI_ON_PARAM, 0.f, 1.f, 1.f, "JAM MIDI (off = ignore the JAM, its lights dark)", {"Off", "On"});
         configSwitch(FX_ON_PARAM, 0.f, 1.f, 1.f, "FORGE FX (off = OUT L / R dry)", {"Off", "On"});
@@ -262,7 +262,7 @@ struct SynTHBloKDrum : Module {
             configOutput(TRIG_OUTPUT + r, "Row " + std::to_string(r + 1) + " trigger (hit 6 V, accent 10 V)");
             configOutput(VOICE_OUTPUT + r, "Row " + std::to_string(r + 1) + " audio");
         }
-        for (int i = 0; i < 8; i++) configOutput(STRIP_OUTPUT + i, "Strip " + std::to_string(i + 1) + " CV (the shown bank)");
+        for (int i = 0; i < 8; i++) configOutput(STRIP_OUTPUT + i, "Strip " + std::to_string(i + 1) + " CV (voice " + std::to_string(i + 1) + " level)");
         configOutput(KNOB_OUTPUT, "Knob CV (0..10 V: the JAM knob's page)");
         configOutput(CLOCK_OUTPUT, "Clock: a 10 V, 5 ms pulse per 1/16 step while running");
         configOutput(PRE_L_OUTPUT, "PRE left: the voice mix before the FINAL filter, DELAY, SPACE, FORGE FX and MASTER");
@@ -464,8 +464,9 @@ struct SynTHBloKDrum : Module {
         else s = s ? 0 : 1;
     }
     void toggleAccent(int r, int c) { uint8_t& s = pat[curPat()][r][c]; s = s == 2 ? 1 : 2; }
-    float stripGet(int i) { return params[vp(i, bank())].getValue(); }
-    void stripSet(int i, float x) { params[vp(i, bank())].setValue(clamp(x, 0.f, 1.f)); }
+    // the strips (panel, JAM, STRIP CV) are the voices' levels, as on MATRIX-LOOP
+    float stripGet(int i) { return params[vp(i, DK_LEVEL)].getValue(); }
+    void stripSet(int i, float x) { params[vp(i, DK_LEVEL)].setValue(clamp(x, 0.f, 1.f)); }
     bool anySolo() { for (int r = 0; r < 8; r++) if (solo[r]) return true; return false; }
     bool anyMute() { for (int r = 0; r < 8; r++) if (mute[r]) return true; return false; }
     bool trackOn(int r) { return !mute[r] && (!anySolo() || solo[r]); }
@@ -532,8 +533,6 @@ struct SynTHBloKDrum : Module {
             case CC_SONG: toggle(params[FX_ON_PARAM]); break;
             case CC_UP: stepParam(LEN_PARAM, 1, 1, 8, false); break;
             case CC_DOWN: stepParam(LEN_PARAM, -1, 1, 8, false); break;
-            case CC_LEFT: stepParam(BANK_PARAM, -1, 1, 8, false); break;
-            case CC_RIGHT: stepParam(BANK_PARAM, 1, 1, 8, false); break;
             case CC_PLAY: toggle(params[RUN_PARAM]); break;
             case CC_REC: toggle(params[LEARN_PARAM]); break;
             case CC_PREV: stepParam(PAT_PARAM, -1, 1, 8, true); break;
@@ -578,7 +577,7 @@ struct SynTHBloKDrum : Module {
                 }
                 else if (a == kKnobPushCC && b > 0) paramQuantities[knobParam()]->reset();
                 else if (a >= 0 && a < 8 && b > 0) params[PAT_PARAM].setValue((float)(a + 1));
-                else if (a >= 8 && a < 16 && b > 0) params[BANK_PARAM].setValue((float)(a - 8 + 1));
+                else if (a >= 8 && a < 16 && b > 0) mute[a - 8] = !mute[a - 8];
                 else if (a >= 48 && a < 112) {
                     stripPage = (a - 48) / 8;
                     stripSet((a - 48) % 8, b / 127.f);
@@ -610,7 +609,7 @@ struct SynTHBloKDrum : Module {
                 return s == 2 ? kJamBright[p] : s ? kJamBright[p] - 1 : 0;
             }
             int i = idx < 72 ? idx - 64 : idx - 80;
-            bool on = idx < 72 ? i == curPat() : i == bank();
+            bool on = idx < 72 ? i == curPat() : mute[i];   // A-H: lit while its voice is muted
             return on ? kJamBright[i] : kJamDim[i];
         }
         if (idx < 72) {
@@ -625,7 +624,7 @@ struct SynTHBloKDrum : Module {
             return (idx - 64) == curPat() ? on : off;
         }
         if (idx < 80) return (int)std::round(stripGet(idx - 72) * 127.f);
-        return (idx - 80) == bank() ? (int)params[BONC_PARAM].getValue() : (int)params[BOFFC_PARAM].getValue();
+        return mute[idx - 80] ? (int)params[BONC_PARAM].getValue() : (int)params[BOFFC_PARAM].getValue();
     }
     void sendLed(int idx, int d) {
         if (!jam.active) return;
@@ -734,6 +733,7 @@ struct SynTHBloKDrum : Module {
         float l = 0.f, r = 0.f;
         int dec = std::max(1, (int)std::round(sr / 48000.f));
         rawRate = sr / dec;
+        const float pkFall = std::exp(-args.sampleTime / 0.3f);
         for (int v = 0; v < 8; v++) {
             float p[DK_NUM];
             for (int b = 0; b < DK_NUM; b++) p[b] = params[vp(v, b)].getValue();
@@ -741,6 +741,7 @@ struct SynTHBloKDrum : Module {
             panSm[v] += (p[DK_PAN] - panSm[v]) * km;
             float s = voice[v].process(sr, model(v), p) * lvlSm[v];
             outputs[VOICE_OUTPUT + v].setVoltage(clamp(5.f * s, -10.f, 10.f));
+            voicePk[v] = std::max(std::fabs(5.f * s), voicePk[v] * pkFall);
             if (rawPos[v] < kRawN) {
                 rawAcc[v] += s;
                 if (++rawCnt[v] >= dec) { raw[v][rawPos[v]++] = rawAcc[v] / dec; rawCnt[v] = 0; rawAcc[v] = 0.f; }
@@ -806,7 +807,7 @@ struct SynTHBloKDrum : Module {
         outputs[OUT_L_OUTPUT].setVoltage((dryL + (5.f * fxL - dryL) * fxOnSm) * masterVol);
         outputs[OUT_R_OUTPUT].setVoltage((dryR + (5.f * fxR - dryR) * fxOnSm) * masterVol);
 
-        // ---- STRIP CV = the shown bank's strips, KNOB CV = the knob's page ----
+        // ---- STRIP CV = the strips (the voices' levels), KNOB CV = the knob's page ----
         bool bip = params[RANGE_PARAM].getValue() > 0.5f;
         for (int i = 0; i < 8; i++) {
             stripSm[i] += (stripGet(i) * 10.f - (bip ? 5.f : 0.f) - stripSm[i]) * km;
@@ -989,28 +990,44 @@ struct DRPatBtn : OpaqueWidget {
     }
 };
 
-// Touch strip: the selected bank's macro for row idx.
+// Level strip (as MATRIX-LOOP's): voice idx's LEVEL, in its column's colour (faded while muted).
 struct DRStrip : OpaqueWidget {
     DR* module = NULL;
     int idx = 0;
-    float get() { return module ? module->stripGet(idx) : 0.25f + 0.08f * idx; }
+    float get() { return module ? module->stripGet(idx) : kKitVal[idx][DK_LEVEL]; }
     void set(float v) { if (module) module->stripSet(idx, v); }
     void draw(const DrawArgs& args) override {
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.6f);
         nvgFillColor(args.vg, nvgRGB(0x14, 0x14, 0x14));
         nvgFill(args.vg);
-        NVGcolor col = kPatOnColor[module ? module->bank() : 0];
+        NVGcolor col = kPatOnColor[idx];
         float v = get(), h = (box.size.y - 3.f) * v;
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, 1.5f, box.size.y - 1.5f - h, box.size.x - 3.f, h, 1.f);
-        nvgFillColor(args.vg, col);
+        nvgFillColor(args.vg, nvgLerpRGBA(kIdle, col, module && module->mute[idx] ? 0.35f : 0.8f));
         nvgFill(args.vg);
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.6f);
         nvgStrokeColor(args.vg, nvgLerpRGBA(kIdle, col, 0.45f));
         nvgStrokeWidth(args.vg, 0.8f);
         nvgStroke(args.vg);
+    }
+    // the voice's out level (as MATRIX-LOOP's strips): a translucent wash rising from the bottom, -48 .. +6 dB
+    // (0 dB = 5 V), faint at the bottom, strongest at the level; red past +4 dB
+    void drawLayer(const DrawArgs& args, int layer) override {
+        OpaqueWidget::drawLayer(args, layer);
+        if (layer != 1) return;
+        float pk = module ? module->voicePk[idx] : 0.2f + 0.08f * idx;
+        float n = clamp((20.f * std::log10(pk + 1e-6f) + 48.f) / 54.f, 0.f, 1.f);
+        if (n <= 0.f) return;
+        float x = 1.5f, y = 1.5f, w = box.size.x - 3.f, hh = box.size.y - 3.f;
+        float lh = hh * n, top = y + hh - lh;
+        NVGcolor c = pk > 1.6f ? nvgRGB(0xff, 0x32, 0x28) : nvgLerpRGBA(kPatOnColor[idx], nvgRGB(0xff, 0xff, 0xff), 0.3f);
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, x, top, w, lh, std::min(1.f, w * 0.5f));
+        nvgFillPaint(args.vg, nvgLinearGradient(args.vg, 0.f, y + hh, 0.f, top, nvgTransRGBA(c, 30), nvgTransRGBA(c, 160)));
+        nvgFill(args.vg);
     }
     void onButton(const ButtonEvent& e) override {
         if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
@@ -1024,15 +1041,24 @@ struct DRStrip : OpaqueWidget {
     }
 };
 
-struct DRBankSq : OpaqueWidget {
+// MUTE (as MATRIX-LOOP's), one over each level strip: mute voice b (lit: muted).
+struct DRMuteSq : OpaqueWidget {
     DR* module = NULL;
     int b = 0;
     void draw(const DrawArgs& args) override {
-        drawColorButton(args, box.size, b, module ? module->bank() == b : b == 0, (char)('A' + b), 9.f);
+        bool on = module && module->mute[b];
+        drawColorButton(args, box.size, b, on, 0, 9.f);
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, on ? nvgRGB(0x10, 0x10, 0x10) : kPatColor[b]);
+        nvgFontSize(args.vg, 5.5f);
+        nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, "MUTE", NULL);
     }
     void onButton(const ButtonEvent& e) override {
         if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
-            if (module) module->params[DR::BANK_PARAM].setValue((float)(b + 1));
+            if (module) module->mute[b] = !module->mute[b];
             e.consume(this);
         }
     }
@@ -1091,8 +1117,7 @@ static const float kMuteW = 4.6f, kMuteIn = 0.7f;   // the MUTE square inside th
 static float vsColX(int b) { return 98.6f + 9.4f * b; }
 static float vsRowY(int r) { return 22.8f + 7.4f * r; }
 
-// Column heads (an OLED strip over the rows): MODEL, the 8 macros (the selected strip bank's lit), OUT.
-// Click a macro to pick its strip bank.
+// Column heads (an OLED strip over the rows): MODEL, the 8 macros (each in its knob rings' colour), OUT. Labels only.
 struct DRColHead : OpaqueWidget {
     DR* module = NULL;
     void drawLayer(const DrawArgs& args, int layer) override {
@@ -1107,27 +1132,10 @@ struct DRColHead : OpaqueWidget {
         nvgFillColor(args.vg, oled::dim());
         nvgText(args.vg, mm2px(kMdlW * 0.5f), H * 0.5f, "MODEL", NULL);
         nvgText(args.vg, mm2px(kVsOutX - kVsX), H * 0.5f, "OUT", NULL);
-        int bk = module ? module->bank() : 0;
         for (int b = 0; b < DK_NUM; b++) {
-            float cx = mm2px(vsColX(b) - kVsX), w = mm2px(8.6f);
-            if (b == bk) {
-                nvgBeginPath(args.vg);
-                nvgRoundedRect(args.vg, cx - w * 0.5f, 2.f, w, H - 4.f, 1.2f);
-                nvgFillColor(args.vg, kPatOnColor[b]);
-                nvgFill(args.vg);
-            }
-            nvgFillColor(args.vg, b == bk ? oled::ink() : kPatOnColor[b]);
-            nvgText(args.vg, cx, H * 0.5f, kDrBankName[b], NULL);
+            nvgFillColor(args.vg, kPatOnColor[b]);
+            nvgText(args.vg, mm2px(vsColX(b) - kVsX), H * 0.5f, kDrBankName[b], NULL);
         }
-    }
-    void onButton(const ButtonEvent& e) override {
-        if (e.button != GLFW_MOUSE_BUTTON_LEFT || e.action != GLFW_PRESS) return;
-        for (int b = 0; b < DK_NUM; b++)
-            if (std::fabs(e.pos.x - mm2px(vsColX(b) - kVsX)) < mm2px(4.7f)) {
-                if (module) module->params[DR::BANK_PARAM].setValue((float)(b + 1));
-                e.consume(this);
-                return;
-            }
     }
 };
 
@@ -1727,14 +1735,13 @@ struct DRMasterDisplay : TransparentWidget {
         nvgScissor(args.vg, 0, 0, W, H);
         oled::midiLine(args, module ? &module->midiIn : NULL, "IN", 0.f);
         oled::midiLine(args, module ? &module->midiOut : NULL, "OUT", mm2px(kMoRow));
-        char bpm[24] = "120 BPM", info[16] = "1/8", bank[24] = "A TUNE";
+        char bpm[24] = "120 BPM", info[16] = "1/8";
         bool run = module ? module->running : true;
         if (module) {
             if (!module->inputs[DR::CLOCK_INPUT].isConnected()) snprintf(bpm, sizeof bpm, "%.0f BPM", module->params[DR::BPM_PARAM].getValue());
             else if (module->clockPeriod > 0.f && module->sinceClock < 2.f) snprintf(bpm, sizeof bpm, "%.1f BPM", 60.f / (module->clockPeriod * 4.f));
             else snprintf(bpm, sizeof bpm, "--- BPM");
             snprintf(info, sizeof info, "%d/%d", module->step + 1, clamp((int)module->params[DR::LEN_PARAM].getValue(), 1, 8));
-            snprintf(bank, sizeof bank, "%c %s", 'A' + module->bank(), kDrBankName[module->bank()]);
         }
         const float yi = mm2px(kMoInfo + kMoRow * 0.5f);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
@@ -1746,8 +1753,6 @@ struct DRMasterDisplay : TransparentWidget {
         nvgText(args.vg, W * 0.36f, yi, run ? "RUN" : "STOP", NULL);
         nvgFillColor(args.vg, oled::dim());
         nvgText(args.vg, W * 0.52f, yi, info, NULL);
-        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-        nvgText(args.vg, W - 4.f, yi, bank, NULL);
         // VOICE | ENV: a dim name, the value in amber
         int v = module ? module->sel() : 0;
         int tr = module ? clamp((int)module->params[DR::FLT_TRIG_PARAM].getValue(), 0, 5) : 0;
@@ -1880,7 +1885,7 @@ struct SynTHBloKDrumWidget : ModuleWidget {
         // ---------------- left: the JAM matrix, laid out like MATRIX FORGE ----------------
         auto colX = [](int c) { return 4.9f + 7.4f * c; };
         auto pageLed = [=](JackLed* l) { l->color = [=]() { return kPatOnColor[module ? module->curPat() : 0]; }; return l; };
-        auto bankLed = [=](JackLed* l) { l->color = [=]() { return kPatOnColor[module ? module->bank() : 0]; }; return l; };
+        auto stripLed = [=](JackLed* l, int i) { l->color = [=]() { return kPatOnColor[i]; }; return l; };
         for (int p = 0; p < 8; p++) {
             DRPatBtn* pb = createWidget<DRPatBtn>(mm2px(Vec(colX(p), 10.5f)));
             pb->box.size = mm2px(Vec(6.6f, 6.6f)); pb->module = module; pb->p = p;
@@ -1899,8 +1904,8 @@ struct SynTHBloKDrumWidget : ModuleWidget {
         }
         for (int i = 0; i < 8; i++) {
             addOutput(createOutputCentered<SmallJack>(mm2px(Vec(colX(i) + 3.3f, 81.6f)), module, DR::STRIP_OUTPUT + i));
-            addChild(bankLed(JackLed::create(Vec(colX(i) + 7.f, 81.6f), module, DR::STRIP_OUTPUT + i, true)));
-            DRBankSq* q = createWidget<DRBankSq>(mm2px(Vec(colX(i), 85.5f)));
+            addChild(stripLed(JackLed::create(Vec(colX(i) + 7.f, 81.6f), module, DR::STRIP_OUTPUT + i, true), i));
+            DRMuteSq* q = createWidget<DRMuteSq>(mm2px(Vec(colX(i), 85.5f)));
             q->box.size = mm2px(Vec(6.6f, 6.6f)); q->module = module; q->b = i;
             addChild(q);
             DRStrip* s = createWidget<DRStrip>(mm2px(Vec(colX(i) + 0.9f, 93.5f)));
@@ -2077,7 +2082,6 @@ struct SynTHBloKDrumWidget : ModuleWidget {
         };
         indexItem("Pattern length", DR::LEN_PARAM, {"1 step", "2 steps", "3 steps", "4 steps", "5 steps", "6 steps", "7 steps", "8 steps"});
         indexItem("JAM matrix page", DR::PAGE_PARAM, {"1", "2", "3", "4", "5", "6"});
-        indexItem("Strip bank", DR::BANK_PARAM, {"A TUNE", "B DECAY", "C TONE", "D SNAP", "E MOD", "F DRIVE", "G LEVEL", "H PAN"});
         ui::Slider* bpm = new ui::Slider;
         bpm->quantity = m->paramQuantities[DR::BPM_PARAM];
         bpm->box.size.x = 220.f;
