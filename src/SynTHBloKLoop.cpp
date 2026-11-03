@@ -38,6 +38,12 @@ const char* const kClockDivName[3] = {"1/16 (MATRIX steps)", "1/8", "1/4 (beats)
 const int kLenN = 7;
 const char* const kLenName[kLenN] = {"FREE", "1 BT", "2 BT", "1 BAR", "2 BAR", "4 BAR", "8 BAR"};
 const int kLenBeats[kLenN] = {0, 1, 2, 4, 8, 16, 32};
+// MON selected (the inputs heard): its button, LED and the screen's amber readouts turn cyan
+inline NVGcolor monCyan(int a = 255) { return nvgRGBA(0x3a, 0xd7, 0xff, (unsigned char)a); }
+// a track while it monitors: cyan, light to dark across the tracks as their own colours run yellow to red
+const NVGcolor kMonRamp[8] = {
+    nvgRGB(0xc4, 0xf7, 0xff), nvgRGB(0x96, 0xee, 0xff), nvgRGB(0x6b, 0xe3, 0xff), nvgRGB(0x3a, 0xd7, 0xff),
+    nvgRGB(0x1f, 0xbd, 0xf2), nvgRGB(0x12, 0xa0, 0xdd), nvgRGB(0x0c, 0x86, 0xc8), nvgRGB(0x0f, 0x8f, 0xd0)};
 
 // TEMPO: 40 .. 240 BPM, with FREE (no grid: the loops run free) at the bottom
 struct LoopTempoQuantity : ParamQuantity {
@@ -60,7 +66,7 @@ struct SynTHBloKLoop : Module {
     enum ParamId { SEL_PARAM, REC_PARAM, PLAY_PARAM, ONCE_PARAM, UNDO_PARAM, CLEAR_PARAM, COUNTIN_PARAM, TEMPO_PARAM,
                    MASTER_PARAM, ENUMS(LEN_PARAM, kTracks), ENUMS(GAIN_PARAM, kTracks), ENUMS(MON_PARAM, kTracks),
                    ENUMS(LEVEL_PARAM, kTracks), MIDI_ON_PARAM, PAGE_PARAM, ENUMS(MUTE_PARAM, kTracks), RUN_PARAM, RESET_PARAM,
-                   STRIP_PARAM, IN_MUTE_PARAM, REC_ALL_PARAM, CHOP_PARAM, PARAMS_LEN };
+                   STRIP_PARAM, IN_MUTE_PARAM, REC_ALL_PARAM, CHOP_PARAM, CLEAR_ALL_PARAM, PLAY_ALL_PARAM, PARAMS_LEN };
     // REC .. CLEAR jacks: mono = the selected track; poly = channel n plays track n
     enum InputId { ENUMS(IN_INPUT, kTracks), CLOCK_INPUT, REC_INPUT, PLAY_INPUT, ONCE_INPUT, UNDO_INPUT, CLEAR_INPUT,
                    RUN_INPUT, RESET_INPUT, INPUTS_LEN };
@@ -75,7 +81,7 @@ struct SynTHBloKLoop : Module {
     bool running = true, wasPlaying[kTracks] = {}, restartReq = false;
     float resetFlash = 0.f;
     dsp::SchmittTrigger runTrig, rstTrig, rstBtnTrig;
-    bool btnPrev[6] = {};
+    bool btnPrev[8] = {};
     dsp::SchmittTrigger clockTrig, trig[5][kTracks];
     // pads: a press jumps the track to that eighth (tempo-locked loops: on the next beat); RAND: at each eighth
     // the track may play another eighth instead (as many whole beats away, so it stays on the grid)
@@ -88,7 +94,7 @@ struct SynTHBloKLoop : Module {
     // for the display
     float beatNow = 0.f;
     int source = 0;   // 0 free, 1 the TEMPO knob, 2 clock
-    float blink = 0.f, recFlash = 0.f, playFlash = 0.f, onceFlash = 0.f, allRecFlash = 0.f;
+    float blink = 0.f, recFlash = 0.f, playFlash = 0.f, onceFlash = 0.f, allRecFlash = 0.f, allPlayFlash = 0.f;
     // scenes U1-U8: which tracks play (bit t); a click asks the audio thread to switch
     int sceneMask[8] = {};
     bool sceneUsed[8] = {};
@@ -161,6 +167,8 @@ struct SynTHBloKLoop : Module {
         configSwitch(STRIP_PARAM, 0.f, 1.f, 1.f, "Strips and audio", {"MON: input gain, hear the inputs", "LVL: track level, hear the loops"});
         getParamQuantity(STRIP_PARAM)->randomizeEnabled = false;
         configButton(REC_ALL_PARAM, "Record / replace on all 8 tracks at once");
+        configButton(CLEAR_ALL_PARAM, "Clear all 8 tracks at once");
+        configButton(PLAY_ALL_PARAM, "Play every stopped loop (all playing: stop them all)");
         configParam(CHOP_PARAM, 1.f, 8.f, 8.f, "Chop: every loop repeats this many eighths from where it plays (8: whole)", "/8");
         getParamQuantity(CHOP_PARAM)->snapEnabled = true;
         getParamQuantity(CHOP_PARAM)->randomizeEnabled = false;
@@ -326,8 +334,21 @@ struct SynTHBloKLoop : Module {
     // the strips' state: IN (input gain, input meters) or LVL (track level, meters of the loop playing alone,
     // without the input monitor): the two never show each other's audio
     bool stripLvl() { return params[STRIP_PARAM].getValue() > 0.5f; }
+    // every loop that holds audio is playing (and there is at least one)
+    bool allPlaying() const {
+        int n = 0;
+        for (int t = 0; t < kTracks; t++) {
+            const EchoLooper& lp = loop[t];
+            if (lp.len <= 0 || lp.st == EchoLooper::REC || lp.st == EchoLooper::DUB) continue;
+            if (lp.st != EchoLooper::PLAY) return false;
+            n++;
+        }
+        return n > 0;
+    }
     // the inputs are heard in place of the loops: MON selected (LVL not)
     bool hearIn() { return !stripLvl(); }
+    // track t shows as monitoring (cyan): MON selected and its input monitor on (a closed take turns it off)
+    bool trackMon(int t) { return hearIn() && params[MON_PARAM + t].getValue() > 0.5f; }
     int stripParam(int t) { return (stripLvl() ? LEVEL_PARAM : GAIN_PARAM) + t; }
     float stripPk(int t) { return stripLvl() ? playPk[t] : inPk[t]; }
 
@@ -609,6 +630,18 @@ struct SynTHBloKLoop : Module {
         }
         // ALL (inside REC): REC on every track, as if pressed on each (each take closes at its own LEN, plays)
         if (edge(5, REC_ALL_PARAM)) for (int t = 0; t < kTracks; t++) act(t, 0);
+        // ALL (inside CLEAR): CLEAR on every track
+        if (edge(6, CLEAR_ALL_PARAM)) for (int t = 0; t < kTracks; t++) act(t, 4);
+        // ALL (inside PLAY): every loop that is not playing starts (on the grid); all playing: they all stop
+        if (edge(7, PLAY_ALL_PARAM)) {
+            bool allOn = allPlaying();
+            for (int t = 0; t < kTracks; t++) {
+                const EchoLooper& lp = loop[t];
+                if (lp.len <= 0 || lp.st == EchoLooper::REC || lp.st == EchoLooper::DUB) continue;
+                if (allOn ? lp.playing() && lp.arm != EchoLooper::A_STOP
+                          : lp.st != EchoLooper::PLAY && lp.arm != EchoLooper::A_PLAY) act(t, 1);
+            }
+        }
         int rq = sceneReq.exchange(-1);
         if (rq >= 0 && rq < 8) recallScene(rq);
         // ---- pads: jump now, or on the next beat when on the grid ----
@@ -739,6 +772,8 @@ struct SynTHBloKLoop : Module {
             else if (lp.arm == EchoLooper::A_REC || lp.arm == EchoLooper::A_DUB) nArm++;
         }
         allRecFlash = nRec == kTracks ? 1.f : nRec + nArm == kTracks ? bl : 0.f;
+        // PLAY ALL: lit while every loop plays
+        allPlayFlash = allPlaying() ? 1.f : 0.f;
         if (jam.active) processJamLeds(args);
     }
 
@@ -981,7 +1016,7 @@ struct LInBtn : OpaqueWidget {
     bool mute = false;   // (the MON button)
     void draw(const DrawArgs& args) override {
         bool on = module ? (module->params[param].getValue() > 0.5f) != mute : mute;
-        NVGcolor col = mute ? nvgRGB(0xff, 0xb0, 0x50) : nvgRGB(0xff, 0x70, 0x0f);
+        NVGcolor col = mute ? monCyan() : nvgRGB(0xff, 0x70, 0x0f);
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.4f);
         nvgFillColor(args.vg, on ? col : kIdle);
@@ -1016,16 +1051,16 @@ struct LMonLed : TransparentWidget {
         nvgFill(args.vg);
     }
     void draw(const DrawArgs& args) override {
-        if (!lit()) dot(args, nvgRGB(0x3a, 0x2a, 0x18));
+        if (!lit()) dot(args, nvgRGB(0x14, 0x30, 0x38));
     }
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer == 1 && lit()) {
             nvgBeginPath(args.vg);
             nvgCircle(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, box.size.x * 1.4f);
             nvgFillPaint(args.vg, nvgRadialGradient(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, 0.f, box.size.x * 1.4f,
-                                                    nvgRGBA(0xff, 0xb0, 0x50, 0x70), nvgRGBA(0xff, 0xb0, 0x50, 0)));
+                                                    monCyan(0x70), monCyan(0)));
             nvgFill(args.vg);
-            dot(args, nvgRGB(0xff, 0xb0, 0x50));
+            dot(args, monCyan());
         }
         Widget::drawLayer(args, layer);
     }
@@ -1050,13 +1085,13 @@ struct LMuteBtn : OpaqueWidget {
     }
 };
 
-// A level meter as a translucent wash in track t's colour, rising in the box (x, y, w, h) from its bottom:
+// A level meter as a translucent wash in colour base (the track's), rising in the box (x, y, w, h) from its bottom:
 // -48 .. +6 dB (0 dB = 5 V), faint at the bottom, strongest at the level; red past +4 dB.
-void levelWash(const widget::Widget::DrawArgs& args, float x, float y, float w, float h, float pk, int t) {
+void levelWash(const widget::Widget::DrawArgs& args, float x, float y, float w, float h, float pk, NVGcolor base) {
     float n = clamp((20.f * std::log10(pk + 1e-6f) + 48.f) / 54.f, 0.f, 1.f);
     if (n <= 0.f) return;
     float lh = h * n, top = y + h - lh;
-    NVGcolor c = pk > 1.6f ? kRecRed : nvgLerpRGBA(kPatOnColor[t], nvgRGB(0xff, 0xff, 0xff), 0.3f);
+    NVGcolor c = pk > 1.6f ? kRecRed : nvgLerpRGBA(base, nvgRGB(0xff, 0xff, 0xff), 0.3f);
     nvgBeginPath(args.vg);
     nvgRoundedRect(args.vg, x, top, w, lh, std::min(1.f, w * 0.5f));
     nvgFillPaint(args.vg, nvgLinearGradient(args.vg, 0.f, y + h, 0.f, top, nvgTransRGBA(c, 30), nvgTransRGBA(c, 160)));
@@ -1077,12 +1112,14 @@ struct LGainStrip : app::ParamWidget {
         return pq ? pq->getValue() * 0.5f : 0.5f;
     }
     void set(float v) { if (ParamQuantity* pq = getParamQuantity()) pq->setValue(clamp(v, 0.f, 1.f) * 2.f); }
+    // the track's colour; its cyan while it monitors (back to its colour as its take closes)
+    NVGcolor colour() { return lmodule && lmodule->trackMon(t) ? kMonRamp[t] : kPatOnColor[t]; }
     void draw(const DrawArgs& args) override {
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.6f);
         nvgFillColor(args.vg, nvgRGB(0x14, 0x14, 0x14));
         nvgFill(args.vg);
-        NVGcolor col = kPatOnColor[t];
+        NVGcolor col = colour();
         float h = (box.size.y - 3.f) * get();
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, 1.5f, box.size.y - 1.5f - h, box.size.x - 3.f, h, 1.f);
@@ -1098,7 +1135,7 @@ struct LGainStrip : app::ParamWidget {
         ParamWidget::drawLayer(args, layer);
         if (layer != 1) return;
         // the input (IN) or output (LVL) level, over the fill (it brightens the fill, and shows faintly above it)
-        levelWash(args, 1.5f, 1.5f, box.size.x - 3.f, box.size.y - 3.f, lmodule ? lmodule->stripPk(t) : 0.2f + 0.08f * t, t);
+        levelWash(args, 1.5f, 1.5f, box.size.x - 3.f, box.size.y - 3.f, lmodule ? lmodule->stripPk(t) : 0.2f + 0.08f * t, colour());
     }
     void onButton(const ButtonEvent& e) override {
         if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
@@ -1199,6 +1236,8 @@ NVGcolor stateColor(int st) {
 
 struct LScreen : TransparentWidget {
     LP* module = NULL;
+    // the readouts: amber on LVL, cyan on MON
+    NVGcolor accent() { return module && module->hearIn() ? monCyan() : oled::amber(); }
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
         float W = box.size.x, H = box.size.y;
@@ -1227,7 +1266,7 @@ struct LScreen : TransparentWidget {
             nvgFillColor(args.vg, nvgRGBA(0, 0, 0, 210));
             nvgFill(args.vg);
             nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-            nvgFillColor(args.vg, oled::amber());
+            nvgFillColor(args.vg, accent());
             nvgText(args.vg, W - 4.f - zw * 0.5f, zy + 3.25f, z, NULL);
         }
         nvgResetScissor(args.vg);
@@ -1268,7 +1307,7 @@ struct LScreen : TransparentWidget {
         }
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
         nvgFontSize(args.vg, 8.f);
-        nvgFillColor(args.vg, oled::amber());
+        nvgFillColor(args.vg, accent());
         nvgText(args.vg, xr, yc, info, NULL);
         float b[4];
         float iw = nvgTextBounds(args.vg, 0.f, 0.f, info, NULL, b);
@@ -1300,7 +1339,7 @@ struct LScreen : TransparentWidget {
         for (int i = 0; i < 2; i++) {   // i = 1: MON (left), 0: LVL (right)
             bool on = (i == 1) == mon;
             float xi = x + (1 - i) * (w + gap);
-            NVGcolor col = i == 1 ? nvgRGB(0xff, 0xb0, 0x50) : nvgRGB(0xff, 0x70, 0x0f);
+            NVGcolor col = i == 1 ? monCyan() : nvgRGB(0xff, 0x70, 0x0f);
             nvgBeginPath(args.vg);
             nvgRoundedRect(args.vg, xi, y, w, h, 1.f);
             if (on) { nvgFillColor(args.vg, col); nvgFill(args.vg); }
@@ -1322,7 +1361,7 @@ struct LScreen : TransparentWidget {
             float b[4];
             float w = nvgTextBounds(args.vg, 0.f, 0.f, n, NULL, b);
             nvgFontSize(args.vg, 7.5f);
-            nvgFillColor(args.vg, oled::amber());
+            nvgFillColor(args.vg, accent());
             nvgText(args.vg, mm2px(xmm) + w + 4.f, yc, v, NULL);
         };
         char len[12] = "FREE", cnt[8] = "OFF", lvl[16] = "-12 dB", tmp[24] = "120 BPM";
@@ -1349,7 +1388,7 @@ struct LScreen : TransparentWidget {
         pair(40.f, "IN", lvl);
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
         nvgFontSize(args.vg, 8.f);
-        nvgFillColor(args.vg, oled::amber());
+        nvgFillColor(args.vg, accent());
         nvgText(args.vg, W - 4.f, yc, tmp, NULL);
         float b[4];
         float w = tmp[0] ? nvgTextBounds(args.vg, 0.f, 0.f, tmp, NULL, b) + 4.f : 0.f;
@@ -1374,7 +1413,8 @@ struct LScreen : TransparentWidget {
         nvgFontSize(args.vg, 7.f);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
         bool muted = module && module->params[LP::MUTE_PARAM + t].getValue() > 0.5f;
-        nvgFillColor(args.vg, trackCol(t, sel ? 255 : muted ? 70 : 170));
+        nvgFillColor(args.vg, module && module->trackMon(t) ? nvgTransRGBA(kMonRamp[t], sel ? 255 : muted ? 70 : 170)
+                                                            : trackCol(t, sel ? 255 : muted ? 70 : 170));
         nvgText(args.vg, 4.f, yc, num, NULL);
         int st = lp ? (int)lp->st : previewHas(t) ? (t < 3 ? (int)EchoLooper::PLAY : (int)EchoLooper::STOP) : (int)EchoLooper::EMPTY;
         bool armed = lp && lp->arm != EchoLooper::A_NONE;
@@ -1440,7 +1480,7 @@ struct LScreen : TransparentWidget {
         nvgBeginPath(args.vg);
         nvgMoveTo(args.vg, px, yT + 0.8f);
         nvgLineTo(args.vg, px, yB - 0.8f);
-        nvgStrokeColor(args.vg, lp && lp->st == EchoLooper::DUB ? kRecRed : playing ? oled::amber() : oled::dim());
+        nvgStrokeColor(args.vg, lp && lp->st == EchoLooper::DUB ? kRecRed : playing ? accent() : oled::dim());
         nvgStrokeWidth(args.vg, 1.f);
         nvgStroke(args.vg);
     }
@@ -1492,7 +1532,7 @@ struct LScreen : TransparentWidget {
         nvgBeginPath(args.vg);
         nvgMoveTo(args.vg, px, yT + 0.8f);
         nvgLineTo(args.vg, px, yB - 0.8f);
-        nvgStrokeColor(args.vg, lp->st == EchoLooper::DUB ? kRecRed : lp->playing() ? oled::amber() : oled::dim());
+        nvgStrokeColor(args.vg, lp->st == EchoLooper::DUB ? kRecRed : lp->playing() ? accent() : oled::dim());
         nvgStrokeWidth(args.vg, 1.f);
         nvgStroke(args.vg);
     }
@@ -1542,7 +1582,8 @@ struct LTile : OpaqueWidget {
         snprintf(num, sizeof num, "%02d", t + 1);
         nvgFontSize(args.vg, 10.f);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-        nvgFillColor(args.vg, rec ? oled::amber() : trackCol(t));
+        // the number: its cyan while the track monitors, back to its colour as the take closes
+        nvgFillColor(args.vg, module && module->trackMon(t) ? kMonRamp[t] : rec ? oled::amber() : trackCol(t));
         nvgText(args.vg, 3.f, 2.5f, num, NULL);
         nvgFontSize(args.vg, 7.f);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
@@ -1571,7 +1612,8 @@ struct LTile : OpaqueWidget {
             float f = lp ? clamp(lp->pos / L, 0.f, 1.f) : 0.3f + 0.1f * t;
             nvgBeginPath(args.vg);
             nvgRect(args.vg, 2.5f, H - 1.6f, (W - 5.f) * f, 0.9f);
-            nvgFillColor(args.vg, oled::amber());   // amber: on a red (recording) tile too
+            // amber (cyan on MON): on a red (recording) tile too
+            nvgFillColor(args.vg, module && module->hearIn() ? monCyan() : oled::amber());
             nvgFill(args.vg);
         }
     }
@@ -1863,7 +1905,8 @@ struct SynTHBloKLoopWidget : ModuleWidget {
             tl->box.size = mm2px(Vec(tw, ls::kTileH)); tl->module = module; tl->t = t;
             addChild(tl);
         }
-        // REC | PLAY | ONCE | UNDO | CLEAR for the selected track: tall cells, REC red and PLAY green
+        // REC | PLAY | ONCE | UNDO | CLEAR for the selected track: tall cells, REC red, PLAY green, CLEAR yellow
+        const NVGcolor kClearYellow = nvgRGB(0xff, 0xe1, 0x3a);
         struct TC { const char* label; int param; };
         const TC tc[5] = {{"REC", LP::REC_PARAM}, {"PLAY", LP::PLAY_PARAM}, {"ONCE", LP::ONCE_PARAM},
                           {"UNDO", LP::UNDO_PARAM}, {"CLEAR", LP::CLEAR_PARAM}};
@@ -1871,11 +1914,11 @@ struct SynTHBloKLoopWidget : ModuleWidget {
         for (int i = 0; i < 5; i++) {
             float x = ls::kPad + i * (xw + CG);
             oled::Cell* c;
-            if (i < 2) {
+            if (i < 2 || i == 4) {
                 LTintCell* t = createParam<LTintCell>(mm2px(Vec(OX + x, OY + ls::yTrans)), module, tc[i].param);
                 t->module = module; t->label = tc[i].label;
-                t->tint = i == 0 ? kRecRed : oled::green();
-                if (i == 0) t->labelY = 0.27f;   // ALL sits in its lower half
+                t->tint = i == 0 ? kRecRed : i == 1 ? oled::green() : kClearYellow;
+                t->labelY = 0.27f;   // ALL 8 sits in its lower half
                 addParam(t);
                 c = t;
             } else c = cell(x, ls::yTrans, xw, tc[i].param, tc[i].label);
@@ -1895,6 +1938,16 @@ struct SynTHBloKLoopWidget : ModuleWidget {
             a->box.size = mm2px(Vec(xw - 1.8f, ls::kTransH * 0.5f - 0.9f));
             a->module = module; a->label = "ALL 8"; a->fontSize = 5.5f; a->inset = true;
             if (module) a->flash = &module->allRecFlash;
+            addParam(a);
+        }
+        // ALL, inside PLAY's and CLEAR's lower halves: play / clear all 8 tracks at once
+        for (int k = 0; k < 2; k++) {
+            const float ax = OX + ls::kPad + (k == 0 ? 1.f : 4.f) * (xw + CG) + 0.9f, ay = OY + ls::yTrans + ls::kTransH * 0.5f;
+            LTintCell* a = createParam<LTintCell>(mm2px(Vec(ax, ay)), module, k == 0 ? LP::PLAY_ALL_PARAM : LP::CLEAR_ALL_PARAM);
+            a->box.size = mm2px(Vec(xw - 1.8f, ls::kTransH * 0.5f - 0.9f));
+            a->module = module; a->label = "ALL 8"; a->fontSize = 5.5f; a->inset = true;
+            a->tint = k == 0 ? oled::green() : kClearYellow;
+            if (module && k == 0) a->flash = &module->allPlayFlash;
             addParam(a);
         }
 
