@@ -87,7 +87,15 @@ struct SynTHBloKLoop : Module {
     // the track may play another eighth instead (as many whole beats away, so it stays on the grid)
     std::atomic<int> padReq{-1};   // track * 8 + eighth, from the UI
     int pend[kTracks], lastSlice[kTracks];
-    bool randOn[kTracks] = {};
+    bool randOn[kTracks] = {};   // the lane has a RAND effect (its mode); it plays while randAll is on
+    bool randAll = false;        // RAND (the button, the JAM's GRID): every lane's effect on / off
+    // RAND's mode per track (what a random step does) and its amount (LOW / MED / HIGH: how often)
+    enum RandMode { RM_8, RM_16, RM_32, RM_64, RM_STUTTER, RM_BEAT, RM_BAR, RM_ORDER, RM_LEN };
+    int randMode[kTracks] = {}, randAmt[kTracks];
+    int rReps[kTracks] = {}, rBack[kTracks] = {};   // a roll's repeats to go; slices to jump back by, to end it
+    // each scene's own RAND set (the lanes' effects), loaded with the scene; [8]: the set with no scene selected
+    bool sRandUsed[9] = {}, sRandOn[9][kTracks] = {};
+    int sRandMode[9][kTracks] = {}, sRandAmt[9][kTracks] = {};
     int clockDiv = 0, clockCount = 0;   // clock pulse = 1/16, 1/8 or 1/4
     float sinceClock = 10.f, clockPeriod = 0.f, sinceBeatClk = 10.f, clkBeat = 0.f, beatPhase = 0.f;
     float masterSm = 1.f;
@@ -108,13 +116,15 @@ struct SynTHBloKLoop : Module {
     bool replacing[kTracks] = {};   // a playing loop waits for its new take (a cancel lets it play on)
     int waveZoom = 1;   // the screen's lanes: x1 (whole loops) .. x32 (following the playhead); UI only
     // the lanes' VIEW (UI only): 0 smooth wave, 1 static spectrum (the whole loop's, measured as a take closes),
-    // 2 live spectrum, 3 live scope
-    int laneView = 0;
+    // 2 live spectrum, 3 live scope; LVL and MON each keep their own ([1]: MON)
+    int laneViews[2] = {};
+    int& laneView() { return laneViews[hearIn() ? 1 : 0]; }
     // what leaves each track (mono), the last kScope samples, for the live views
     enum { kScope = 2048 };
     float scope[kTracks][kScope] = {};
     std::atomic<int> scopeW{0};
     int takeGen[kTracks] = {};   // counts each new loop (a take closes, a clear): the static spectrum is measured again
+    bool doneMon[kTracks] = {}, wasHear = false;   // a take closed while MON was selected (cleared as MON is selected)
     bool autoMon = true;   // a closed take turns its track's input monitor off; REC turns it back on
     float listenSm[kTracks] = {};   // 1 = the inputs heard in place of the loops (MON selected)
     bool storeArm = false;
@@ -154,6 +164,7 @@ struct SynTHBloKLoop : Module {
             getParamQuantity(MUTE_PARAM + t)->randomizeEnabled = false;
             gainSm[t] = levelSm[t] = muteSm[t] = 1.f;
             pend[t] = lastSlice[t] = -1;
+            randAmt[t] = 1;
         }
         static const char* const kTrigName[5] = {"Record / replace", "Play / stop", "Play once", "Undo / redo", "Clear"};
         for (int i = 0; i < 5; i++)
@@ -197,9 +208,13 @@ struct SynTHBloKLoop : Module {
         for (int t = 0; t < kTracks; t++) if (e.sampleRate != loop[t].sr) { loop[t].init(e.sampleRate, kLoopSec); stereo[t] = false; }
     }
     void onReset() override {
-        for (int t = 0; t < kTracks; t++) { loop[t].clear(); stereo[t] = false; randOn[t] = false; pend[t] = -1; }
+        for (int t = 0; t < kTracks; t++) {
+            loop[t].clear(); stereo[t] = false; randOn[t] = false; pend[t] = -1; randMode[t] = RM_8; randAmt[t] = 1;
+        }
+        randAll = false;
         for (int k = 0; k < 8; k++) { sceneMask[k] = 0; sceneUsed[k] = false; }
         curScene = -1; storeArm = false;
+        for (int k = 0; k < 9; k++) sRandUsed[k] = false;
     }
 
     int sel() { return clamp((int)std::round(params[SEL_PARAM].getValue()), 0, kTracks - 1); }
@@ -222,11 +237,33 @@ struct SynTHBloKLoop : Module {
             if (on) m |= 1 << t;
         }
         sceneMask[k] = m; sceneUsed[k] = true; curScene = k;
+        loadRand(k);   // its own RAND set: blank until RAND on the screen deals it one
     }
+    // a scene's RAND set (k < 0: the one with no scene): the lanes' effects now stored in it / loaded from it
+    // (none stored: every lane blank). RAND off keeps them, so RAND on again plays the same.
+    void saveRand(int k) {
+        if (k < 0 || k > 7) k = 8;
+        sRandUsed[k] = true;
+        for (int t = 0; t < kTracks; t++) { sRandOn[k][t] = randOn[t]; sRandMode[k][t] = randMode[t]; sRandAmt[k][t] = randAmt[t]; }
+    }
+    void loadRand(int k) {
+        if (k < 0 || k > 7) k = 8;
+        bool has = sRandUsed[k];
+        for (int t = 0; t < kTracks; t++) {
+            randOn[t] = has && sRandOn[k][t];
+            if (has) { randMode[t] = sRandMode[k][t]; randAmt[t] = sRandAmt[k][t]; }
+            rReps[t] = rBack[t] = 0;
+            lastSlice[t] = -1;
+        }
+    }
+    // a lane's effect changed (its box, its menu, a deal): the selected scene keeps it
+    void randChanged() { saveRand(curScene); }
     // start / stop the tracks to match a scene (on the grid, as PLAY does)
     void recallScene(int k) {
-        if (!sceneUsed[k]) return;
+        // selected even with no tracks stored, with its own RAND set (blank until one is dealt to it)
         curScene = k;
+        loadRand(k);
+        if (!sceneUsed[k]) return;
         for (int t = 0; t < kTracks; t++) {
             EchoLooper& lp = loop[t];
             if (lp.len <= 0 || lp.st == EchoLooper::REC || lp.arm != EchoLooper::A_NONE) continue;
@@ -291,7 +328,7 @@ struct SynTHBloKLoop : Module {
             lp.jump(std::min(L - 1, (int)std::llround(b * lp.beatLen)));
         } else lp.jump((int)((int64_t)c * L / 8));
         if (lp.st == EchoLooper::STOP) { lp.st = EchoLooper::PLAY; lp.arm = EchoLooper::A_NONE; }
-        lastSlice[t] = c;
+        lastSlice[t] = randN(t) == 8 ? c : -1;
         chopAnchor(t);
     }
     // CHOP: track t now plays from where it is: the slice it repeats is the one around it (pads, RAND)
@@ -321,22 +358,105 @@ struct SynTHBloKLoop : Module {
         if (lp.pos != to) lp.jump(to);
     }
     // RAND: the playhead just entered eighth sl; maybe play another one (whole beats away when on the grid)
-    void randStep(int t, int sl) {
+    // the slices RAND steps on (n of the loop): eighths .. sixty-fourths, beats or bars
+    int randN(int t) const {
+        const EchoLooper& lp = loop[t];
+        int nb = lp.beats > 0 ? std::max(1, lp.loopBeats) : 4;
+        switch (randMode[t]) {
+            case RM_16: case RM_STUTTER: return 16;
+            case RM_32: return 32;
+            case RM_64: return 64;
+            case RM_BEAT: return std::max(2, std::min(64, nb));
+            case RM_BAR: return std::max(2, nb / 4);
+            default: return 8;
+        }
+    }
+    // at the start of slice sl (of n), as the track plays on into it. Every mode but ORDER puts something in for
+    // a moment and then goes back to where the loop would be, so the phrase stays where it was:
+    //   1/8, 1/16: maybe another eighth / sixteenth in the same place of the beat (on-beat for on-beat, off for off),
+    //   for one slice; 1/32, 1/64: maybe, from an eighth, a roll of its first 32nd / 64th to the next eighth;
+    //   STUTTER: maybe the sixteenth just played again; BEAT: maybe the beat two away (1 <-> 3, 2 <-> 4) for a beat;
+    //   BAR: maybe another bar for a bar; ORDER: always the eighth before the last (the loop backwards).
+    // On the beat grid a jump of whole beats moves the beat count with it; a shorter one lasts at most to the next
+    // beat, which puts the loop back in place (and ends the variation), so every mode stays in time.
+    void randStep(int t, int sl, int n) {
+        static const float kAmt[3] = {0.18f, 0.35f, 0.6f};
         EchoLooper& lp = loop[t];
-        if (random::uniform() >= 0.35f) return;
+        const int m = randMode[t];
+        int d = 0;
+        if (rReps[t] > 0) { d = -1; rBack[t]++; rReps[t]--; }      // a roll: the same slice again
+        else if (rBack[t] != 0) { d = rBack[t]; rBack[t] = 0; }    // back to where the loop would be
+        else {
+            if (!randAll || !randOn[t]) return;
+            if (m != RM_ORDER && random::uniform() >= kAmt[clamp(randAmt[t], 0, 2)]) return;
+            auto pick = [&](int step) {   // another slice, a whole number of steps away
+                int k = n / step;
+                if (k < 2) return 0;
+                int r = 1 + std::min(k - 2, (int)(random::uniform() * (k - 1)));
+                return r * step;
+            };
+            switch (m) {
+                case RM_8: case RM_16: d = pick(2); break;
+                case RM_BAR: d = pick(1); break;
+                case RM_32: case RM_64:
+                    if (sl % (n / 8) == 0) rReps[t] = n / 8 - 1;   // roll from here to the next eighth
+                    return;
+                case RM_STUTTER: d = -1; break;
+                case RM_BEAT: d = (n >= 4 ? 2 : 1) * (random::uniform() < 0.5f ? 1 : -1); break;
+                case RM_ORDER: d = -2; break;
+            }
+            if (d == 0) return;
+            if (m != RM_ORDER) rBack[t] = -d;
+        }
         bool grid = lp.locked && lp.beats > 0 && lp.beatLen > 0.0;
-        int nb = std::max(1, lp.loopBeats), cand[8], n = 0;
-        for (int j = 0; j < 8; j++)
-            if (j != sl && (!grid || ((j - sl) * nb) % 8 == 0)) cand[n++] = j;
-        if (n == 0) return;
-        int j = cand[std::min(n - 1, (int)(random::uniform() * n))];
+        int nb = std::max(1, lp.loopBeats);
+        if (d == 0) return;
         int L = playLen(t);
-        int to = lp.pos + (int)((int64_t)(j - sl) * L / 8);
+        if (L <= 0) return;
+        int to = lp.pos + (int)((int64_t)d * L / n);
         to = ((to % L) + L) % L;
-        if (grid) lp.beatIdx = ((lp.beatIdx + (j - sl) * nb / 8) % nb + nb) % nb;
+        if (grid && ((int64_t)d * nb) % n == 0) lp.beatIdx = ((lp.beatIdx + (int)((int64_t)d * nb / n)) % nb + nb) % nb;
         lp.jump(to);
-        lastSlice[t] = j;
+        lastSlice[t] = clamp((int)((int64_t)to * n / L), 0, n - 1);
         chopAnchor(t);
+    }
+
+    // deal every lane a RAND effect that sits with the others: one of a few sets that go together (a groove,
+    // fills, the phrase, glitch, backwards); the busy ones (rolls, STUTTER) on three lanes at most and gentle,
+    // 1/64 and ORDER on one lane at most, one other lane strong, the rest in the middle
+    void dealRand() {
+        static const int kSets[5][4] = {
+            {RM_8, RM_16, RM_BEAT, RM_8},        // a groove
+            {RM_8, RM_STUTTER, RM_32, RM_16},    // fills
+            {RM_BAR, RM_BEAT, RM_8, RM_BAR},     // the phrase
+            {RM_16, RM_32, RM_64, RM_STUTTER},   // glitch
+            {RM_ORDER, RM_BAR, RM_8, RM_BEAT}};  // backwards
+        const int set = std::min(4, (int)(random::uniform() * 5));
+        int busy = 0, n64 = 0, nOrder = 0, strong = std::min(kTracks - 1, (int)(random::uniform() * kTracks));
+        for (int t = 0; t < kTracks; t++) {
+            int m = RM_8;
+            for (int k = 0; k < 12; k++) {
+                int c = kSets[set][std::min(3, (int)(random::uniform() * 4))];
+                bool isBusy = c == RM_32 || c == RM_64 || c == RM_STUTTER;
+                if ((isBusy && busy >= 3) || (c == RM_64 && n64 >= 1) || (c == RM_ORDER && nOrder >= 1)) continue;
+                m = c;
+                break;
+            }
+            bool isBusy = m == RM_32 || m == RM_64 || m == RM_STUTTER;
+            busy += isBusy; n64 += m == RM_64; nOrder += m == RM_ORDER;
+            randOn[t] = true;
+            randMode[t] = m;
+            randAmt[t] = isBusy ? 0 : t == strong ? 2 : 1;
+            rReps[t] = rBack[t] = 0;
+            lastSlice[t] = -1;
+        }
+        randChanged();
+    }
+    // RAND on / off (the button, the JAM); switched on, the lanes load the selected scene's RAND set (blank until
+    // RAND on the screen deals one)
+    void toggleRand() {
+        randAll = !randAll;
+        if (randAll) loadRand(curScene);
     }
 
     // the strips' state: IN (input gain, input meters) or LVL (track level, meters of the loop playing alone,
@@ -357,6 +477,8 @@ struct SynTHBloKLoop : Module {
     bool hearIn() { return !stripLvl(); }
     // track t shows as monitoring (cyan): MON selected and its input monitor on (a closed take turns it off)
     bool trackMon(int t) { return hearIn() && params[MON_PARAM + t].getValue() > 0.5f; }
+    // track t's lane shows MON (cyan): MON selected and no take of its closed since (REC starts it over)
+    bool laneMon(int t) { return hearIn() && !doneMon[t]; }
     int stripParam(int t) { return (stripLvl() ? LEVEL_PARAM : GAIN_PARAM) + t; }
     float stripPk(int t) { return stripLvl() ? playPk[t] : inPk[t]; }
 
@@ -417,7 +539,7 @@ struct SynTHBloKLoop : Module {
                 Param& p = params[COUNTIN_PARAM];
                 p.setValue((float)(((int)std::round(p.getValue()) + 1) % 5));
             } break;
-            case CC_GRID: randOn[s] = !randOn[s]; break;
+            case CC_GRID: toggleRand(); break;
         }
     }
     void processJamIn(const ProcessArgs& args) {
@@ -470,7 +592,7 @@ struct SynTHBloKLoop : Module {
                 case CC_SONG: return S.undoOk ? 127 : 0;
                 case CC_CLEAR: return S.len > 0 || S.st == EchoLooper::REC ? 127 : 0;
                 case CC_TEMPO: return params[COUNTIN_PARAM].getValue() > 0.5f ? 127 : 0;
-                case CC_GRID: return randOn[s] ? 127 : 0;
+                case CC_GRID: return randAll ? 127 : 0;
                 case CC_SOLO: return soloHeld ? 127 : 0;
                 case CC_MUTE: return muteHeld ? 127 : 0;
                 default: return 127;
@@ -678,6 +800,8 @@ struct SynTHBloKLoop : Module {
         const float pkFall = std::exp(-dt / 0.3f);
         const int chopN = clamp((int)std::round(params[CHOP_PARAM].getValue()), 1, 8);
         const int sw = scopeW;
+        if (hearIn() && !wasHear) for (int t = 0; t < kTracks; t++) doneMon[t] = false;
+        wasHear = hearIn();
         for (int t = 0; t < kTracks; t++) {
             Input& in = inputs[IN_INPUT + t];
             const int ch = in.getChannels();
@@ -709,17 +833,20 @@ struct SynTHBloKLoop : Module {
             }
             if ((wasRec && lp.st != EchoLooper::REC && lp.st != EchoLooper::DUB)
                 || (lp.st == EchoLooper::EMPTY && prevSt[t] != EchoLooper::EMPTY)) takeGen[t]++;
+            if (wasRec && lp.st != EchoLooper::REC && lp.st != EchoLooper::DUB && lp.len > 0) doneMon[t] = true;
+            if ((lp.st == EchoLooper::REC || lp.st == EchoLooper::DUB) && !wasRec) doneMon[t] = false;
             prevSt[t] = lp.st;
             // the eighth now playing; RAND may move on from it as it starts
-            int Lt = playLen(t);
+            int Lt = playLen(t), rn = randN(t);
             if (lp.playing() && Lt > 0 && lp.st != EchoLooper::DUB) {
-                int sl = clamp((int)((int64_t)lp.pos * 8 / Lt), 0, 7);
+                int sl = clamp((int)((int64_t)lp.pos * rn / Lt), 0, rn - 1);
                 if (sl != lastSlice[t]) {
                     int was = lastSlice[t];
                     lastSlice[t] = sl;
-                    if (randOn[t] && was >= 0 && sl == (was + 1) % 8 && pend[t] < 0) randStep(t, sl);
+                    if (was >= 0 && sl == (was + 1) % rn && pend[t] < 0) randStep(t, sl, rn);
+                    else rReps[t] = rBack[t] = 0;   // moved by something else (the beat, a pad): the variation is over
                 }
-            } else lastSlice[t] = -1;
+            } else { lastSlice[t] = -1; rReps[t] = rBack[t] = 0; }
             smooth(levelSm[t], params[LEVEL_PARAM + t].getValue(), 0.01f);
             smooth(muteSm[t], params[MUTE_PARAM + t].getValue() > 0.5f ? 0.f : 1.f, 0.004f);
             // MON selected: the loop fades out and the input in
@@ -798,10 +925,26 @@ struct SynTHBloKLoop : Module {
         json_object_set_new(root, "curScene", json_integer(curScene));
         json_object_set_new(root, "clockDiv", json_integer(clockDiv));
         json_object_set_new(root, "zoom", json_integer(waveZoom));
-        json_object_set_new(root, "view", json_integer(laneView));
+        json_object_set_new(root, "view", json_integer(laneViews[0]));
+        json_object_set_new(root, "viewMon", json_integer(laneViews[1]));
         std::string rs;
         for (int t = 0; t < kTracks; t++) rs += randOn[t] ? '1' : '0';
         json_object_set_new(root, "rand", json_string(rs.c_str()));
+        json_object_set_new(root, "randAll", json_boolean(randAll));
+        std::string rm, ra;
+        for (int t = 0; t < kTracks; t++) { rm += (char)('0' + randMode[t]); ra += (char)('0' + randAmt[t]); }
+        json_object_set_new(root, "randMode", json_string(rm.c_str()));
+        json_object_set_new(root, "randAmt", json_string(ra.c_str()));
+        json_t* sr = json_array();   // each scene's RAND set (and the one with none): per lane its mode ('-': none), amount
+        for (int k = 0; k < 9; k++) {
+            std::string v;
+            for (int t = 0; t < kTracks; t++) {
+                v += sRandOn[k][t] ? (char)('0' + sRandMode[k][t]) : '-';
+                v += (char)('0' + sRandAmt[k][t]);
+            }
+            json_array_append_new(sr, sRandUsed[k] ? json_string(v.c_str()) : json_null());
+        }
+        json_object_set_new(root, "sceneRand", sr);
         json_object_set_new(root, "autoMon", json_boolean(autoMon));
         json_object_set_new(root, "in", midiIn.toJson());
         json_object_set_new(root, "out", midiOut.toJson());
@@ -817,9 +960,28 @@ struct SynTHBloKLoop : Module {
         if (json_t* j = json_object_get(root, "curScene")) curScene = clamp((int)json_integer_value(j), -1, 7);
         if (json_t* j = json_object_get(root, "clockDiv")) clockDiv = clamp((int)json_integer_value(j), 0, 2);
         if (json_t* j = json_object_get(root, "zoom")) waveZoom = clamp((int)json_integer_value(j), 1, 32);
-        if (json_t* j = json_object_get(root, "view")) laneView = clamp((int)json_integer_value(j), 0, 3);
+        if (json_t* j = json_object_get(root, "view")) laneViews[0] = laneViews[1] = clamp((int)json_integer_value(j), 0, 3);
+        if (json_t* j = json_object_get(root, "viewMon")) laneViews[1] = clamp((int)json_integer_value(j), 0, 3);
         const char* rs = json_string_value(json_object_get(root, "rand"));
         for (int t = 0; t < kTracks; t++) randOn[t] = rs && strlen(rs) >= (size_t)kTracks && rs[t] == '1';
+        if (json_t* sr = json_object_get(root, "sceneRand"))
+            for (int k = 0; k < 9; k++) {
+                const char* v = json_string_value(json_array_get(sr, k));
+                sRandUsed[k] = v && strlen(v) >= (size_t)(2 * kTracks);
+                for (int t = 0; t < kTracks && sRandUsed[k]; t++) {
+                    sRandOn[k][t] = v[2 * t] != '-';
+                    sRandMode[k][t] = sRandOn[k][t] ? clamp(v[2 * t] - '0', 0, RM_LEN - 1) : 0;
+                    sRandAmt[k][t] = clamp(v[2 * t + 1] - '0', 0, 2);
+                }
+            }
+        if (json_t* j = json_object_get(root, "randAll")) randAll = json_boolean_value(j);
+        else { randAll = false; for (int t = 0; t < kTracks; t++) randAll = randAll || randOn[t]; }   // older patches
+        const char* rm = json_string_value(json_object_get(root, "randMode"));
+        const char* ra = json_string_value(json_object_get(root, "randAmt"));
+        for (int t = 0; t < kTracks; t++) {
+            if (rm && strlen(rm) >= (size_t)kTracks) randMode[t] = clamp(rm[t] - '0', 0, RM_LEN - 1);
+            if (ra && strlen(ra) >= (size_t)kTracks) randAmt[t] = clamp(ra[t] - '0', 0, 2);
+        }
         if (json_t* j = json_object_get(root, "autoMon")) autoMon = json_boolean_value(j);
         if (json_t* j = json_object_get(root, "in")) midiIn.fromJson(j);
         if (json_t* j = json_object_get(root, "out")) midiOut.fromJson(j);
@@ -907,11 +1069,35 @@ struct LPad : OpaqueWidget {
     }
 };
 
-// RAND (green, as on the JAM): the selected track shuffles its eighths as it plays (lit while on).
+const char* const kRandModeName[LP::RM_LEN] = {"1/8: another eighth for an eighth", "1/16: another sixteenth for a sixteenth",
+    "1/32: a 32nd roll to the next eighth", "1/64: a 64th roll to the next eighth",
+    "STUTTER: the sixteenth just played again", "BEAT: the beat two away, for a beat", "BAR: another bar, for a bar",
+    "ORDER: the eighths backwards"};
+
+// RAND's modes as the screen labels them
+const char* const kRandLabel[LP::RM_LEN] = {"1/8", "1/16", "1/32", "1/64", "STU", "BEA", "BAR", "ORD"};
+
+// RAND's menu for track s: its mode and amount
+void randMenu(LP* m, int s) {
+    Menu* menu = createMenu();
+    menu->addChild(createMenuLabel(string::f("Track %d RAND", s + 1)));
+    for (int i = 0; i < LP::RM_LEN; i++)
+        menu->addChild(createCheckMenuItem(kRandModeName[i], "", [=]() { return m->randMode[s] == i; },
+                                           [=]() { m->randOn[s] = true; m->randMode[s] = i; m->lastSlice[s] = -1; m->randChanged(); }));
+    menu->addChild(new MenuSeparator);
+    menu->addChild(createMenuLabel("Amount (ORDER: every eighth)"));
+    static const char* const kAmtName[3] = {"LOW", "MED", "HIGH"};
+    for (int i = 0; i < 3; i++)
+        menu->addChild(createCheckMenuItem(kAmtName[i], "", [=]() { return m->randAmt[s] == i; },
+                                           [=]() { m->randAmt[s] = i; m->randChanged(); }));
+}
+
+// RAND (green, as on the JAM): the selected track shuffles its loop as it plays (lit while on). Right-click: its
+// mode and amount.
 struct LRandBtn : OpaqueWidget {
     LP* module = NULL;
     void draw(const DrawArgs& args) override {
-        bool on = module ? module->randOn[module->sel()] : false;
+        bool on = module ? module->randAll : false;
         NVGcolor g = nvgRGB(0x78, 0xe6, 0x5a);
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.4f);
@@ -930,7 +1116,11 @@ struct LRandBtn : OpaqueWidget {
     }
     void onButton(const ButtonEvent& e) override {
         if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
-            if (module) { int s = module->sel(); module->randOn[s] = !module->randOn[s]; }
+            if (module) module->toggleRand();
+            e.consume(this);
+        }
+        if (e.button == GLFW_MOUSE_BUTTON_RIGHT && e.action == GLFW_PRESS) {
+            if (module) randMenu(module, module->sel());
             e.consume(this);
         }
     }
@@ -1253,6 +1443,11 @@ struct LScreen : TransparentWidget {
     LP* module = NULL;
     // the readouts: amber on LVL, cyan on MON
     NVGcolor accent() { return module && module->hearIn() ? monCyan() : oled::amber(); }
+    // a lane's readout and number: its track colour, or its cyan (kMonRamp) while MON is selected, back to its
+    // colour as its take closes
+    NVGcolor laneCol(int t, int a) {
+        return module && module->laneMon(t) ? nvgTransRGBA(kMonRamp[t], (unsigned char)a) : trackCol(t, a);
+    }
 
     // the spectrum views: kBands log-spaced bands, 30 Hz .. 16 kHz, each 0..1 on the screen
     enum { kFft = LP::kScope, kBands = 48 };
@@ -1260,7 +1455,8 @@ struct LScreen : TransparentWidget {
     float win[kFft];
     float statBand[kTracks][kBands] = {}, liveBand[kTracks][kBands] = {}, liveHold[kTracks][kBands] = {};
     int statKey[kTracks][4];   // takeGen, len, layers, undone the static spectrum was measured at
-    float viewX0 = 0.f, viewX1 = 0.f;   // the VIEW tag in the header, for clicks
+    float viewX0 = 0.f, viewX1 = 0.f, randX0 = 0.f, randX1 = 0.f;   // the VIEW and RAND tags, for clicks
+    double viewPressT = -1.0, randPressT = -1.0;   // when each was last clicked (its glow)
     LScreen() {
         for (int i = 0; i < kFft; i++) win[i] = 0.5f - 0.5f * std::cos(2.f * (float)M_PI * i / kFft);
         for (int t = 0; t < kTracks; t++) statKey[t][0] = -1;
@@ -1327,7 +1523,7 @@ struct LScreen : TransparentWidget {
 
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
-        int view = module ? module->laneView : 0;
+        int view = module ? module->laneView() : 0;
         if (module && view == 1) updateStatic();
         if (module && (view == 1 || view == 2)) updateLive();
         float W = box.size.x, H = box.size.y;
@@ -1362,50 +1558,59 @@ struct LScreen : TransparentWidget {
         nvgResetScissor(args.vg);
     }
 
-    // the selected track: big number and name, mono / stereo | state, armed action, layers and length
+    // the selected track: number, LOOP, FULL / EMPTY, mono / stereo | LEN, COUNT, IN level | armed action,
+    // RAND, MON | LVL
     void drawHeader(const DrawArgs& args, float W, int s) {
         const EchoLooper* lp = module ? &module->loop[s] : NULL;
         float yc = mm2px(ls::kHeadH * 0.5f + 0.2f);
-        char num[4], name[16];
+        char num[4];
         snprintf(num, sizeof num, "%d", s + 1);
-        snprintf(name, sizeof name, "LOOP %d", s + 1);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
         nvgFontSize(args.vg, 12.f);
         nvgFillColor(args.vg, trackCol(s));
         nvgText(args.vg, 4.f, yc, num, NULL);
-        nvgText(args.vg, mm2px(5.5f), yc, name, NULL);
+        float b[4];
+        float x = mm2px(5.5f) + nvgTextBounds(args.vg, 0.f, 0.f, "LOOP", NULL, b) + mm2px(1.5f);
+        nvgText(args.vg, mm2px(5.5f), yc, "LOOP", NULL);
+        bool full = lp ? lp->len > 0 : previewHas(s);
+        nvgFontSize(args.vg, 7.f);
+        nvgFillColor(args.vg, full ? oled::green() : oled::dim());
+        nvgText(args.vg, x, yc + 0.3f, full ? "FULL" : "EMPTY", NULL);
+        x += nvgTextBounds(args.vg, 0.f, 0.f, "EMPTY", NULL, b) + mm2px(2.f);
         bool st2 = module ? module->stereo[s] : true;
         nvgFontSize(args.vg, 6.f);
         nvgFillColor(args.vg, oled::dim());
-        nvgText(args.vg, mm2px(22.f), yc + 0.5f, lp && lp->len <= 0 && lp->st != EchoLooper::REC ? "" : st2 ? "STEREO" : "MONO", NULL);
-        if (module && module->randOn[s]) {
-            nvgFillColor(args.vg, oled::green());
-            nvgText(args.vg, mm2px(34.f), yc + 0.5f, "RAND", NULL);
-        }
-        drawViewTag(args, mm2px(44.f), yc);
-        // MON | LVL at the right end; the state and length sit left of it
-        float xr = W - 4.f - drawHearTag(args, W - 4.f, yc) - mm2px(3.f);
+        nvgText(args.vg, x, yc + 0.5f, lp && lp->len <= 0 && lp->st != EchoLooper::REC ? "" : st2 ? "STEREO" : "MONO", NULL);
 
-        int st = lp ? (int)lp->st : (int)EchoLooper::PLAY;
-        char info[40] = "x1  2.00 s";
-        if (lp) {
-            info[0] = 0;
-            if (lp->st == EchoLooper::REC) {
-                if (lp->locked) snprintf(info, sizeof info, "%d BT  %.2f s", (int)(lp->pos / lp->curBeat) + 1, lp->pos / lp->sr);
-                else snprintf(info, sizeof info, "%.2f s", lp->pos / lp->sr);
-            } else if (lp->len > 0) snprintf(info, sizeof info, "x%d  %.2f s", lp->layers, module->playLen(s) / lp->sr);
-            else snprintf(info, sizeof info, "%.0f s", kLoopSec);
+        // LEN | COUNT | IN level
+        auto pair = [&](float xmm, const char* n, const char* v) {
+            nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+            nvgFontSize(args.vg, 6.f);
+            nvgFillColor(args.vg, oled::dim());
+            nvgText(args.vg, mm2px(xmm), yc + 0.5f, n, NULL);
+            float w = nvgTextBounds(args.vg, 0.f, 0.f, n, NULL, b);
+            nvgFontSize(args.vg, 7.5f);
+            nvgFillColor(args.vg, accent());
+            nvgText(args.vg, mm2px(xmm) + w + 4.f, yc + 0.3f, v, NULL);
+        };
+        char len[12] = "FREE", cnt[8] = "OFF", lvl[16] = "-12 dB";
+        if (module) {
+            int v = (int)std::round(module->params[LP::LEN_PARAM + s].getValue());
+            if (v > 0 && v % 4 == 0) snprintf(len, sizeof len, "%d BAR", v / 4);
+            else if (v > 0) snprintf(len, sizeof len, "%d BT", v);
+            int c = (int)std::round(module->params[LP::COUNTIN_PARAM].getValue());
+            if (c > 0) snprintf(cnt, sizeof cnt, "%d", c);
+            float pk = module->inPk[s];
+            if (!module->inputs[LP::IN_INPUT + s].isConnected()) snprintf(lvl, sizeof lvl, "--");
+            else if (pk < 0.004f) snprintf(lvl, sizeof lvl, "-48 dB");
+            else snprintf(lvl, sizeof lvl, "%.0f dB", 20.f * std::log10(pk));
         }
-        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-        nvgFontSize(args.vg, 8.f);
-        nvgFillColor(args.vg, accent());
-        nvgText(args.vg, xr, yc, info, NULL);
-        float b[4];
-        float iw = nvgTextBounds(args.vg, 0.f, 0.f, info, NULL, b);
-        float xs = xr - iw - mm2px(3.f);
-        nvgFillColor(args.vg, stateColor(st));
-        nvgText(args.vg, xs, yc, kStateName[st], NULL);
-        // the count-in, or an armed action (blinking), left of the state
+        pair(36.f, "LEN", len);
+        pair(54.f, "COUNT", cnt);
+        pair(67.f, "IN", lvl);
+
+        // MON | LVL at the right end; the count-in or an armed action (blinking) left of it
+        float xr = W - 4.f - drawHearTag(args, W - 4.f, yc) - mm2px(3.f);
         char arm[16] = "";
         if (lp && lp->counting()) snprintf(arm, sizeof arm, "COUNT %d", lp->counting());
         else if (lp && lp->arm != EchoLooper::A_NONE && module->blink < 0.125f) {
@@ -1413,10 +1618,42 @@ struct LScreen : TransparentWidget {
             snprintf(arm, sizeof arm, "%s", kArm[clamp(lp->arm, 0, 7)]);
         }
         if (arm[0]) {
-            float sw = nvgTextBounds(args.vg, 0.f, 0.f, kStateName[st], NULL, b);
+            nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+            nvgFontSize(args.vg, 7.f);
             nvgFillColor(args.vg, oled::litFill());
-            nvgText(args.vg, xs - sw - mm2px(3.f), yc, arm, NULL);
+            nvgText(args.vg, xr, yc + 0.3f, arm, NULL);
         }
+    }
+
+    // a tag's short glow as it is clicked (pressed at t0), over its box
+    void pressGlow(const DrawArgs& args, double t0, float x, float y, float w, float h, NVGcolor col) {
+        const float a = 1.f - (float)(system::getTime() - t0) / 0.18f;
+        if (a <= 0.f) return;
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, x, y, w, h, 1.f);
+        nvgFillColor(args.vg, nvgTransRGBA(col, (unsigned char)(70.f * a)));
+        nvgFill(args.vg);
+    }
+
+    // RAND (as VIEW, green), from x: lit while RAND is on. Click (RAND on): deal every lane an effect, kept by the
+    // selected scene; right-click: the selected lane's menu.
+    void drawRandTag(const DrawArgs& args, float x, float yc) {
+        const bool all = module && module->randAll;
+        const float h = mm2px(3.6f), y = yc - h * 0.5f, pad = mm2px(1.f);
+        NVGcolor g = oled::green();
+        float b[4];
+        nvgFontSize(args.vg, 5.5f);
+        const float w = nvgTextBounds(args.vg, 0.f, 0.f, "RAND", NULL, b) + 2.f * pad;
+        randX0 = x; randX1 = x + w;
+        pressGlow(args, randPressT, x, y, w, h, g);
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, x, y, w, h, 1.f);
+        nvgStrokeColor(args.vg, all ? g : nvgTransRGBA(g, 90));
+        nvgStrokeWidth(args.vg, 0.6f);
+        nvgStroke(args.vg);
+        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, all ? g : nvgTransRGBA(g, 110));
+        nvgText(args.vg, x + pad, yc + 0.2f, "RAND", NULL);
     }
 
     // MON | LVL (as the buttons), what is heard: the selected one lit, the other dim; right-aligned to xRight,
@@ -1441,65 +1678,48 @@ struct LScreen : TransparentWidget {
         return 2.f * w + gap;
     }
 
-    // VIEW and the lanes' view (click: the next one), from x
+    // the VIEW button (click: the next view): VIEW and a 2 x 2 of boxes, the view's lit (smooth, static spectrum
+    // | live spectrum, live scope), from x
     void drawViewTag(const DrawArgs& args, float x, float yc) {
-        static const char* const kView[4] = {"SMOOTH", "STATIC SPECTRUM", "LIVE SPECTRUM", "LIVE SCOPE"};
-        const char* name = kView[module ? clamp(module->laneView, 0, 3) : 0];
+        const int view = module ? clamp(module->laneView(), 0, 3) : 0;
+        const float h = mm2px(3.6f), y = yc - h * 0.5f, pad = mm2px(0.7f), cw = 3.4f, ch = (h - 2.f * pad - 0.8f) * 0.5f;
         nvgFontSize(args.vg, 5.5f);
-        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgFillColor(args.vg, oled::dim());
         float b[4];
-        float vw = nvgTextBounds(args.vg, 0.f, 0.f, "VIEW", NULL, b);
-        nvgText(args.vg, x, yc + 0.3f, "VIEW", NULL);
-        const float h = mm2px(3.6f), y = yc - h * 0.5f + 0.3f, bx = x + vw + mm2px(1.f);
-        float bw = nvgTextBounds(args.vg, 0.f, 0.f, name, NULL, b) + mm2px(2.f);
+        float tw = nvgTextBounds(args.vg, 0.f, 0.f, "VIEW", NULL, b);
+        const float w = pad + tw + mm2px(0.9f) + 2.f * cw + 0.8f + pad;
+        pressGlow(args, viewPressT, x, y, w, h, accent());
         nvgBeginPath(args.vg);
-        nvgRoundedRect(args.vg, bx, y, bw, h, 1.f);
+        nvgRoundedRect(args.vg, x, y, w, h, 1.f);
         nvgStrokeColor(args.vg, accent());
         nvgStrokeWidth(args.vg, 0.6f);
         nvgStroke(args.vg);
-        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
         nvgFillColor(args.vg, accent());
-        nvgText(args.vg, bx + bw * 0.5f, y + h * 0.5f, name, NULL);
-        viewX0 = x; viewX1 = bx + bw;
+        nvgText(args.vg, x + pad, yc + 0.2f, "VIEW", NULL);
+        const float gx = x + w - pad - 2.f * cw - 0.8f, gy = y + pad;
+        for (int i = 0; i < 4; i++) {
+            nvgBeginPath(args.vg);
+            nvgRoundedRect(args.vg, gx + (i % 2) * (cw + 0.8f), gy + (i / 2) * (ch + 0.8f), cw, ch, 0.4f);
+            if (i == view) { nvgFillColor(args.vg, accent()); nvgFill(args.vg); }
+            else { nvgStrokeColor(args.vg, nvgTransRGBA(accent(), 100)); nvgStrokeWidth(args.vg, 0.4f); nvgStroke(args.vg); }
+        }
+        viewX0 = x; viewX1 = x + w;
     }
 
-    // LEN | COUNT | IN level, the tempo at the right
+    // VIEW at the left, the tempo at the right
     void drawInfo(const DrawArgs& args, float W, int s) {
         float yc = mm2px(ls::yInfo + oled::kRow * 0.5f);
-        auto pair = [&](float xmm, const char* n, const char* v) {
-            nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-            nvgFontSize(args.vg, 6.f);
-            nvgFillColor(args.vg, oled::dim());
-            nvgText(args.vg, mm2px(xmm), yc, n, NULL);
-            float b[4];
-            float w = nvgTextBounds(args.vg, 0.f, 0.f, n, NULL, b);
-            nvgFontSize(args.vg, 7.5f);
-            nvgFillColor(args.vg, accent());
-            nvgText(args.vg, mm2px(xmm) + w + 4.f, yc, v, NULL);
-        };
-        char len[12] = "FREE", cnt[8] = "OFF", lvl[16] = "-12 dB", tmp[24] = "120 BPM";
+        char tmp[24] = "120 BPM";
         const char* src = "TEMPO";
         if (module) {
-            int v = (int)std::round(module->params[LP::LEN_PARAM + s].getValue());
-            if (v > 0 && v % 4 == 0) snprintf(len, sizeof len, "%d BAR", v / 4);
-            else if (v > 0) snprintf(len, sizeof len, "%d BT", v);
-            int c = (int)std::round(module->params[LP::COUNTIN_PARAM].getValue());
-            if (c > 0) snprintf(cnt, sizeof cnt, "%d", c);
-            float pk = module->inPk[s];
-            if (!module->inputs[LP::IN_INPUT + s].isConnected()) snprintf(lvl, sizeof lvl, "--");
-            else if (pk < 0.004f) snprintf(lvl, sizeof lvl, "-48 dB");
-            else snprintf(lvl, sizeof lvl, "%.0f dB", 20.f * std::log10(pk));
             if (module->source == 0) { src = "FREE"; tmp[0] = 0; }
             else {
                 src = module->source == 2 ? "CLOCK" : "TEMPO";
                 snprintf(tmp, sizeof tmp, "%.1f BPM", 60.f / module->beatNow);
             }
-            if (!module->running) src = module->source == 0 ? "STOPPED  FREE" : module->source == 2 ? "STOPPED  CLOCK" : "STOPPED  TEMPO";
         }
-        pair(1.4f, "LEN", len);
-        pair(22.f, "COUNT", cnt);
-        pair(40.f, "IN", lvl);
+        drawViewTag(args, 4.f, yc);
+        drawRandTag(args, viewX1 + mm2px(1.5f), yc);   // RAND beside VIEW
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
         nvgFontSize(args.vg, 8.f);
         nvgFillColor(args.vg, accent());
@@ -1511,11 +1731,31 @@ struct LScreen : TransparentWidget {
         nvgText(args.vg, W - 4.f - w, yc, src, NULL);
     }
 
+    // each lane's RAND effect (mm), between the state dot and the readout: dim and empty with none; its label,
+    // green and outlined while RAND is off, black on green while it is on. Click: the next effect (none,
+    // 1/8 .. ORD, none); right-click: its mode and amount.
+    static constexpr float kLaneBoxX = 7.3f, kLaneBoxW = 4.2f, kLaneBoxH = 3.3f;
+    void drawLaneRand(const DrawArgs& args, int t, float yc) {
+        const bool on = module && module->randOn[t];
+        const float x = mm2px(kLaneBoxX), w = mm2px(kLaneBoxW), h = mm2px(kLaneBoxH), y = yc - h * 0.5f;
+        NVGcolor g = oled::green();
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, x, y, w, h, 0.8f);
+        const bool live = on && module->randAll;
+        if (!live) { nvgStrokeColor(args.vg, nvgTransRGBA(g, on ? 160 : 90)); nvgStrokeWidth(args.vg, 0.5f); nvgStroke(args.vg); }
+        if (!on) return;
+        if (live) { nvgFillColor(args.vg, g); nvgFill(args.vg); }
+        nvgFontSize(args.vg, 5.f);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, live ? nvgRGB(0x10, 0x10, 0x10) : nvgTransRGBA(g, 170));
+        nvgText(args.vg, x + w * 0.5f, yc + 0.2f, kRandLabel[clamp(module->randMode[t], 0, LP::RM_LEN - 1)], NULL);
+    }
+
     // one track's loop: number and state dot; the waveform with the playing part, beats and playhead
     void drawLane(const DrawArgs& args, float W, int t, bool sel) {
         const EchoLooper* lp = module ? &module->loop[t] : NULL;
         float yT = mm2px(ls::yLanes + t * ls::kLaneH), yB = yT + mm2px(ls::kLaneH), yc = (yT + yB) * 0.5f;
-        float x0 = mm2px(8.f), x1 = W - 4.f, hh = (yB - yT) * 0.5f - 1.2f;
+        float x0 = mm2px(kLaneBoxX + kLaneBoxW + 1.f), x1 = W - 4.f, hh = (yB - yT) * 0.5f - 1.2f;
         if (sel) {
             nvgBeginPath(args.vg);
             nvgRoundedRect(args.vg, 2.f, yT + 0.3f, W - 4.f, yB - yT - 0.6f, 1.2f);
@@ -1527,8 +1767,7 @@ struct LScreen : TransparentWidget {
         nvgFontSize(args.vg, 7.f);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
         bool muted = module && module->params[LP::MUTE_PARAM + t].getValue() > 0.5f;
-        nvgFillColor(args.vg, module && module->trackMon(t) ? nvgTransRGBA(kMonRamp[t], sel ? 255 : muted ? 70 : 170)
-                                                            : trackCol(t, sel ? 255 : muted ? 70 : 170));
+        nvgFillColor(args.vg, laneCol(t, sel ? 255 : muted ? 70 : 170));
         nvgText(args.vg, 4.f, yc, num, NULL);
         int st = lp ? (int)lp->st : previewHas(t) ? (t < 3 ? (int)EchoLooper::PLAY : (int)EchoLooper::STOP) : (int)EchoLooper::EMPTY;
         bool armed = lp && lp->arm != EchoLooper::A_NONE;
@@ -1540,13 +1779,15 @@ struct LScreen : TransparentWidget {
                 nvgFill(args.vg);
             }
         }
-        // the live views: what leaves the track now, whatever its state
-        int view = module ? module->laneView : 0;
-        if (view == 2) {
-            drawSpectrum(args, liveBand[t], liveHold[t], nvgRGBA(255, 255, 255, muted ? 40 : 110), t, sel, muted, x0, x1, yT, yB);
+        drawLaneRand(args, t, yc);
+        // the live views: what leaves the track now, whatever its state; a loop's playhead over it
+        int view = module ? module->laneView() : 0;
+        if (view == 2 || view == 3) {
+            if (view == 2) drawSpectrum(args, liveBand[t], liveHold[t], nvgRGBA(255, 255, 255, muted ? 40 : 110), t, sel, muted, x0, x1, yT, yB);
+            else drawScope(args, t, sel, muted, x0, x1, yc, hh);
+            if (lp && lp->len > 0 && lp->st != EchoLooper::REC) drawTracker(args, lp, t, x0, x1, yT, yB);
             return;
         }
-        if (view == 3) { drawScope(args, t, sel, muted, x0, x1, yc, hh); return; }
 
         if (lp && lp->st == EchoLooper::REC) {   // recording: a red bar grows (to its length, else over 20 s)
             int target = lp->recTarget > 0 ? lp->recTarget : lp->recBeats > 0 && lp->curBeat > 0.f
@@ -1569,6 +1810,7 @@ struct LScreen : TransparentWidget {
         }
         if (view == 1) {   // the whole loop's spectrum, still; the live one a faint line over it
             drawSpectrum(args, statBand[t], liveBand[t], nvgRGBA(255, 255, 255, muted ? 30 : 90), t, sel, muted, x0, x1, yT, yB);
+            drawTracker(args, lp, t, x0, x1, yT, yB);
             return;
         }
         int zoom = module ? module->waveZoom : 1;
@@ -1583,6 +1825,11 @@ struct LScreen : TransparentWidget {
             pk[c] = lp ? lp->peak[c] : previewPeak(t, c);
         }
         smoothWave(args, pk, in, N, x0, bw, yc, hh, t, sel, muted);
+        drawTracker(args, lp, t, x0, x1, yT, yB);
+    }
+
+    // the whole loop's beat ticks (bars longer) and its playhead, over a lane
+    void drawTracker(const DrawArgs& args, const EchoLooper* lp, int t, float x0, float x1, float yT, float yB) {
         if (lp && lp->beats > 1 && lp->beatLen > 0.0 && lp->beats <= 64) {   // beat ticks (bars longer)
             nvgBeginPath(args.vg);
             for (int k = 1; k < lp->beats; k++) {
@@ -1678,7 +1925,7 @@ struct LScreen : TransparentWidget {
         nvgLineTo(args.vg, xe, yc);
         edge(1.f);
         nvgClosePath(args.vg);
-        nvgFillColor(args.vg, trackCol(t, muted ? 22 : 34));   // all of it dim
+        nvgFillColor(args.vg, laneCol(t, muted ? 22 : 34));   // all of it dim
         nvgFill(args.vg);
         if (muted) return;
         for (int a = 0; a < n;) {   // each playing run bright
@@ -1687,9 +1934,9 @@ struct LScreen : TransparentWidget {
             while (b < n && in[b]) b++;
             nvgSave(args.vg);
             nvgIntersectScissor(args.vg, x0 + a * cw, yc - hh - 2.f, (b - a) * cw, 2.f * hh + 4.f);
-            nvgFillColor(args.vg, trackCol(t, sel ? 120 : 85));
+            nvgFillColor(args.vg, laneCol(t, sel ? 120 : 85));
             nvgFill(args.vg);
-            nvgStrokeColor(args.vg, trackCol(t, sel ? 235 : 180));
+            nvgStrokeColor(args.vg, laneCol(t, sel ? 235 : 180));
             nvgStrokeWidth(args.vg, 0.6f);
             nvgStroke(args.vg);
             nvgRestore(args.vg);
@@ -1717,11 +1964,11 @@ struct LScreen : TransparentWidget {
         curve(v, false);
         nvgLineTo(args.vg, x1, yb);
         nvgClosePath(args.vg);
-        nvgFillColor(args.vg, trackCol(t, muted ? 25 : sel ? 105 : 75));
+        nvgFillColor(args.vg, laneCol(t, muted ? 25 : sel ? 105 : 75));
         nvgFill(args.vg);
         nvgBeginPath(args.vg);
         curve(v, true);
-        nvgStrokeColor(args.vg, trackCol(t, muted ? 60 : sel ? 240 : 185));
+        nvgStrokeColor(args.vg, laneCol(t, muted ? 60 : sel ? 240 : 185));
         nvgStrokeWidth(args.vg, 0.7f);
         nvgStroke(args.vg);
         if (!line) return;
@@ -1749,12 +1996,12 @@ struct LScreen : TransparentWidget {
         trace();
         nvgLineTo(args.vg, x1, yc);
         nvgClosePath(args.vg);
-        nvgFillColor(args.vg, trackCol(t, muted ? 20 : sel ? 70 : 50));
+        nvgFillColor(args.vg, laneCol(t, muted ? 20 : sel ? 70 : 50));
         nvgFill(args.vg);
         nvgBeginPath(args.vg);
         nvgMoveTo(args.vg, x0, yc - clamp(at(start), -1.f, 1.f) * hh);
         trace();
-        nvgStrokeColor(args.vg, trackCol(t, muted ? 60 : sel ? 240 : 190));
+        nvgStrokeColor(args.vg, laneCol(t, muted ? 60 : sel ? 240 : 190));
         nvgStrokeWidth(args.vg, 0.7f);
         nvgStroke(args.vg);
     }
@@ -1762,15 +2009,44 @@ struct LScreen : TransparentWidget {
     // scroll over the lanes: zoom in / out (x1 .. x32, every lane together; the smooth view)
     void onHoverScroll(const HoverScrollEvent& e) override {
         float y = e.pos.y - mm2px(ls::yLanes);
-        if (!module || module->laneView != 0 || e.scrollDelta.y == 0.f || y < 0.f || y >= mm2px(kTracks * ls::kLaneH)) return;
+        if (!module || module->laneView() != 0 || e.scrollDelta.y == 0.f || y < 0.f || y >= mm2px(kTracks * ls::kLaneH)) return;
         module->waveZoom = clamp(e.scrollDelta.y > 0.f ? module->waveZoom * 2 : module->waveZoom / 2, 1, 32);
         e.consume(this);
     }
 
-    void onButton(const ButtonEvent& e) override {   // click a lane: select its track; VIEW: the next view
-        if (e.action != GLFW_PRESS || e.button != GLFW_MOUSE_BUTTON_LEFT) return;
-        if (module && e.pos.y < mm2px(ls::kHeadH) && e.pos.x >= viewX0 && e.pos.x <= viewX1) {
-            module->laneView = (module->laneView + 1) % 4;
+    // click a lane: select its track; VIEW: the next view; RAND: on, then the next mode (right-click: its menu)
+    void onButton(const ButtonEvent& e) override {
+        if (e.action != GLFW_PRESS) return;
+        bool info = module && e.pos.y >= mm2px(ls::yInfo) && e.pos.y < mm2px(ls::yInfo + oled::kRow);
+        if (info && e.pos.x >= randX0 && e.pos.x <= randX1) {
+            const int s = module->sel();
+            if (e.button == GLFW_MOUSE_BUTTON_RIGHT) randMenu(module, s);
+            else if (e.button == GLFW_MOUSE_BUTTON_LEFT && module->randAll) {   // deal every lane an effect, kept by the scene
+                randPressT = system::getTime();
+                module->dealRand();
+            }
+            e.consume(this);
+            return;
+        }
+        float ly = e.pos.y - mm2px(ls::yLanes);   // a lane's RAND box
+        if (module && ly >= 0.f && ly < mm2px(kTracks * ls::kLaneH)
+            && e.pos.x >= mm2px(kLaneBoxX) && e.pos.x <= mm2px(kLaneBoxX + kLaneBoxW)) {
+            const int t = clamp((int)(ly / mm2px(ls::kLaneH)), 0, kTracks - 1);
+            if (e.button == GLFW_MOUSE_BUTTON_RIGHT) randMenu(module, t);
+            else if (e.button == GLFW_MOUSE_BUTTON_LEFT) {   // the next effect: none, 1/8 .. ORD, none
+                if (!module->randOn[t]) { module->randOn[t] = true; module->randMode[t] = 0; }
+                else if (module->randMode[t] < LP::RM_LEN - 1) module->randMode[t]++;
+                else module->randOn[t] = false;
+                module->lastSlice[t] = -1;
+                module->randChanged();
+            }
+            e.consume(this);
+            return;
+        }
+        if (e.button != GLFW_MOUSE_BUTTON_LEFT) return;
+        if (info && e.pos.x >= viewX0 && e.pos.x <= viewX1) {
+            module->laneView() = (module->laneView() + 1) % 4;
+            viewPressT = system::getTime();
             e.consume(this);
             return;
         }
@@ -1893,7 +2169,7 @@ struct LSceneCell : OpaqueWidget {
             menu->addChild(createMenuLabel("Scene U" + std::to_string(u + 1)));
             menu->addChild(createMenuItem("Store the tracks playing now", "", [=]() { m->storeScene(u); m->storeArm = false; }));
             menu->addChild(createMenuItem("Clear", "", [=]() {
-                m->sceneUsed[u] = false; m->sceneMask[u] = 0;
+                m->sceneUsed[u] = false; m->sceneMask[u] = 0; m->sRandUsed[u] = false;
                 if (m->curScene == u) m->curScene = -1;
             }));
             e.consume(this);
