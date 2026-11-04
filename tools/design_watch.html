@@ -48,6 +48,12 @@ main{display:grid;grid-template-columns:minmax(260px,.7fr) minmax(0,1fr) minmax(
 @keyframes gone{0%{opacity:1;filter:drop-shadow(0 0 3px #ff3b5c)}100%{opacity:0}}
 #draw-tag{position:absolute;top:10px;left:12px;padding:2px 8px;font-size:11px;letter-spacing:.14em;color:#070b10;background:var(--cy)}
 #draw-tag.edit{background:var(--or)}#draw-tag.done{background:var(--line);color:var(--mut)}
+/* Claude looking over an SVG (tools/wb_focus.json): a sweep runs down the drawing and a box marks the area in question */
+#draw-tag.review{background:var(--mg)}
+#draw .scan{fill:url(#wb-scan);pointer-events:none}
+#draw .focus-box{fill:#ff00aa14;stroke:var(--mg);stroke-width:1.6px;vector-effect:non-scaling-stroke;stroke-dasharray:6 4;animation:fbox 1.1s linear infinite}
+@keyframes fbox{to{stroke-dashoffset:-20}}
+#draw-note{position:absolute;left:12px;right:12px;bottom:10px;padding:3px 8px;font-size:11px;font-style:normal;color:var(--tx);background:#070b10d9;border-left:2px solid var(--mg)}
 /* Click-to-zoom on DESIGN images: first view fits the window, clicking the image toggles actual pixels. */
 #stage img{cursor:zoom-in}
 #zoom{position:fixed;inset:0;z-index:10;display:none;background:#05070bf2;overflow:auto;cursor:zoom-out}
@@ -447,6 +453,52 @@ async function asmChange(p) {
   if (!running) nextReplay();
 }
 function nextReplay() { const job = queue.shift(); if (job) { last = job; replay(job); } }
+
+// ---- REVIEWING ----
+// Claude writes tools/wb_focus.json when it looks over an SVG: {"path": "/res/X.svg", "note": "...", "box": [x, y, w, h]}
+// (box in the SVG's own units, optional). The drawing goes up in LIVE.DRAWING with a sweep running down it and
+// the box marked, and the module comes up in DESIGN. A save replay in progress finishes first.
+let focusText = null, pendingReview = null;
+async function scanFocus(first) {
+  const txt = await getText('/tools/wb_focus.json');
+  if (txt === null || txt === focusText) return;
+  focusText = txt;
+  if (first) return;
+  try { pendingReview = JSON.parse(txt); } catch (e) { return; }   // half-written: the next poll gets it
+  if (!running) review(pendingReview);
+}
+async function review(job) {
+  pendingReview = null;
+  const p = job.path && ('/' + job.path.replace(/\\/g, '/').replace(/^\/+/, ''));
+  if (!p || !/\.svg$/i.test(p)) return;
+  const text = await getText(p);
+  if (text === null) return;
+  const draw = document.getElementById('draw'), svg = new DOMParser().parseFromString(text, 'image/svg+xml').documentElement;
+  if (svg.tagName.toLowerCase() !== 'svg') return;
+  const live = document.importNode(svg, true);
+  if (!live.getAttribute('viewBox') && live.getAttribute('width')) live.setAttribute('viewBox', `0 0 ${parseFloat(live.getAttribute('width'))} ${parseFloat(live.getAttribute('height'))}`);
+  live.removeAttribute('width'); live.removeAttribute('height');
+  const [vx, vy, vw, vh] = (live.getAttribute('viewBox') || '0 0 100 100').split(/[\s,]+/).map(Number), NS = 'http://www.w3.org/2000/svg';
+  const el = (tag, at) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); return e; };
+  const defs = el('defs', {}), grad = el('linearGradient', {id: 'wb-scan', x1: 0, y1: 0, x2: 0, y2: 1});
+  grad.append(el('stop', {offset: 0, 'stop-color': '#00e5ff', 'stop-opacity': 0}), el('stop', {offset: .85, 'stop-color': '#00e5ff', 'stop-opacity': .28}), el('stop', {offset: 1, 'stop-color': '#00e5ff', 'stop-opacity': .7}));
+  defs.append(grad); live.append(defs);
+  if (Array.isArray(job.box) && job.box.length === 4) {
+    const [bx, by, bw, bh] = job.box.map(Number);
+    live.append(el('rect', {class: 'focus-box', x: bx, y: by, width: bw, height: bh, rx: Math.min(bw, bh) * .08}));
+  }
+  const band = vh * .08, scan = el('rect', {class: 'scan', x: vx, y: vy - band, width: vw, height: band});
+  scan.append(el('animate', {attributeName: 'y', from: vy - band, to: vy + vh, dur: '2.6s', repeatCount: 'indefinite'}));
+  live.append(scan);
+  draw.classList.remove('edit', 'busy');
+  draw.innerHTML = '';
+  draw.appendChild(live);
+  draw.insertAdjacentHTML('beforeend', `<span id="draw-tag" class="review">REVIEWING · ${esc(p.replace(/^.*\//, ''))}</span>` +
+    (job.note ? `<span id="draw-note">${esc(String(job.note))}</span>` : ''));
+  feed(`reviewing <b>${short(p)}</b>` + (job.note ? ' · ' + esc(String(job.note)) : ''));
+  const m = strip === 'mod' && modOf(p);
+  if (m) { pinned = true; show('mod:' + m.slug); }
+}
 document.getElementById('replay').onclick = () => { if (last) { queue.length = 0; replay(last); } };
 
 function lineDiff(a, b) {
@@ -551,7 +603,8 @@ function replay({p, before, now}) {
 
 async function tick(first) {
   try {
-    await Promise.all([scanArt(first), scanModules(first), scanLog(), scanCode(first), scanGit(first)]);
+    await Promise.all([scanArt(first), scanModules(first), scanLog(), scanCode(first), scanGit(first), scanFocus(first)]);
+    if (!running && pendingReview) review(pendingReview);
     if (first) await cacheAll();
     if (first) show(latest());
     document.getElementById('live').textContent = '● watching';

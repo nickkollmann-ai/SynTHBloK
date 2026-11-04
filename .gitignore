@@ -13,3 +13,5 @@
 *.vcvplugin
 *.orig
 build.log
+# what Claude is looking over, for the workbench (tools/design_watch.html)
+tools/wb_focus.json
