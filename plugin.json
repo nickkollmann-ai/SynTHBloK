@@ -269,6 +269,16 @@
         "Filter",
         "MIDI"
       ]
+    },
+    {
+      "slug": "SynTHBloKMatrixSong",
+      "name": "SynTHBloK MATRIX-SONG",
+      "description": "Song arranger for the MATRIX modules: finds DRUM, FX, ECHO and LOOP in the patch by itself (no cables), 8 sections A-H that set each module's pattern, mute and loop action, launches on the bar or beat, a 32-step chain with record, master clock (CLOCK, RUN, RESET, BAR, SECT)",
+      "tags": [
+        "Sequencer",
+        "Clock generator",
+        "Utility"
+      ]
     }
   ],
   "authorEmail": "support@liquidnick.com",

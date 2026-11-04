@@ -22,6 +22,7 @@
 #include "JackLed.hpp"
 #include "KnobTicks.hpp"
 #include "JamOwner.hpp"
+#include "SongLink.hpp"
 #include <atomic>
 #include <cstdio>
 #include <string>
@@ -46,7 +47,7 @@ struct LoopLenQuantity : ParamQuantity {
     }
 };
 
-struct SynTHBloKMatrixFx : Module {
+struct SynTHBloKMatrixFx : Module, songlink::Member {   // MATRIX-SONG picks its scene, plays its loop, mutes it
     enum ParamIds { PAT_PARAM, LEN_PARAM, PAGE_PARAM, CLEAR_PARAM, LEARN_PARAM, BANK_PARAM, RUN_PARAM, RESET_PARAM,
                     RAND_PARAM, MIDI_ON_PARAM, DUP_PARAM,
                     KNOB_PARAM, DRY_PARAM, WET_PARAM, LOOP_LVL_PARAM, BPM_PARAM, FILT_PARAM, RES_PARAM, ROOT_PARAM, SCALE_PARAM,
@@ -109,6 +110,7 @@ struct SynTHBloKMatrixFx : Module {
 
     SynTHBloKMatrixFx() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, 0);
+        songlink::join(this, this, "FX", 8, true);
         configParam(PAT_PARAM, 1.f, 8.f, 1.f, "Scene");
         configParam(LEN_PARAM, 1.f, 8.f, 1.f, "Scene loop (1 = hold the scene; 2..8 = step through scenes 1..N, one per bar)");
         configParam(PAGE_PARAM, 1.f, 6.f, 1.f, "JAM matrix page (must match the JAM)");
@@ -161,6 +163,7 @@ struct SynTHBloKMatrixFx : Module {
         rebuildAll();
     }
     ~SynTHBloKMatrixFx() {
+        songlink::leave(this);
         if (jam.active) { slowSend = true; clearLeds(); }
         jamown::release(id);
         for (int s = 0; s < 8; s++) { delete fx[s]; delete pending[s].exchange(NULL); delete retired[s].exchange(NULL); }
@@ -186,6 +189,9 @@ struct SynTHBloKMatrixFx : Module {
             swapGain[s] = 1.f; idleT[s] = 0.f;
         }
     }
+    int songPatternNow() override { return curPat(); }
+    void songSetPattern(int p) override { params[PAT_PARAM].setValue((float)(clamp(p, 0, 7) + 1)); }
+    void songDoLoop(int a) override { echoloop::songAction(looper, a); }
     void onSampleRateChange(const SampleRateChangeEvent& e) override {
         fxSr = e.sampleRate;
         rebuildAll();
@@ -575,6 +581,7 @@ struct SynTHBloKMatrixFx : Module {
 
     void process(const ProcessArgs& args) override {
         const float sr = args.sampleRate, dt = args.sampleTime;
+        const float songG = songPoll(dt);   // MATRIX-SONG: scene / loop requests, and its mute on OUT L / R
         int own = jam.update(id, params[MIDI_ON_PARAM].getValue() > 0.5f);   // losing the JAM goes dark, gaining it resends all
         if (own > 0) for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
         else if (own < 0) clearLeds();
@@ -759,8 +766,8 @@ struct SynTHBloKMatrixFx : Module {
         if (pre) { looper.process(l, r, lL, lR); l += lL * loopSm; r += lR * loopSm; }   // the filter sweeps the loop too
         dj.process(l, r, hpMode ? (filtSm - 0.5f) * 2.f : filtSm * 2.f, params[RES_PARAM].getValue(), sr, 0.f, hpMode ? 2.f : 0.f);
         if (!pre) { looper.process(l, r, lL, lR); l += lL * loopSm; r += lR * loopSm; }
-        outputs[OUT_L_OUTPUT].setVoltage(clamp(5.f * mfx::safe(l * masterVol), -11.f, 11.f));
-        outputs[OUT_R_OUTPUT].setVoltage(clamp(5.f * mfx::safe(r * masterVol), -11.f, 11.f));
+        outputs[OUT_L_OUTPUT].setVoltage(clamp(5.f * mfx::safe(l * masterVol), -11.f, 11.f) * songG);
+        outputs[OUT_R_OUTPUT].setVoltage(clamp(5.f * mfx::safe(r * masterVol), -11.f, 11.f) * songG);
         if (prevSt == EchoLooper::REC && looper.st != EchoLooper::REC) takeGen++;
         prevSt = looper.st;
         blink += dt;

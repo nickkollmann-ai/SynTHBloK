@@ -35,6 +35,21 @@ inline void flashes(const EchoLooper& lp, float blink, float& rec, float& play, 
     if (a == EchoLooper::A_CLOSE_ONCE || a == EchoLooper::A_ONCE) once = bl;
 }
 
+// MATRIX-SONG's loop actions (songlink::Loop: 1 PLAY, 2 STOP, 3 REC, 4 ONCE) on a looper: each presses the
+// button only when it would do that (so a section that says PLAY never stops a playing loop); on the grid as usual
+inline void songAction(EchoLooper& lp, int a) {
+    bool armed = lp.arm != EchoLooper::A_NONE;
+    switch (a) {
+        case 1: if (lp.len > 0 && !lp.playing() && lp.st != EchoLooper::REC && !armed) lp.press(EchoLooper::B_PLAY);
+                else if (lp.st == EchoLooper::ONCE) lp.press(EchoLooper::B_PLAY); break;   // ONCE: keep looping
+        case 2: if (lp.playing() && lp.arm != EchoLooper::A_STOP) lp.press(EchoLooper::B_PLAY);
+                else if (lp.st == EchoLooper::REC) lp.press(EchoLooper::B_PLAY); break;    // a take closes and plays
+        case 3: if (lp.st != EchoLooper::REC && lp.st != EchoLooper::DUB && lp.arm != EchoLooper::A_REC && lp.arm != EchoLooper::A_DUB)
+                    lp.press(EchoLooper::B_REC); break;
+        case 4: if (lp.len > 0 && lp.st != EchoLooper::ONCE && lp.st != EchoLooper::REC) lp.press(EchoLooper::B_ONCE); break;
+    }
+}
+
 // the waveform's view: zoom factor and its start (fraction of the loop)
 struct View {
     float zoom = 1.f, view0 = 0.f;

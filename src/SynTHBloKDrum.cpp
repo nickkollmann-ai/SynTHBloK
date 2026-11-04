@@ -21,6 +21,7 @@
 #include "KnobTicks.hpp"
 #include "OledUi.hpp"
 #include "JamOwner.hpp"
+#include "SongLink.hpp"
 #include "ForgeFxUi.hpp"
 #include "JackLed.hpp"
 #include "SynTHBloKGrainForge.hpp"
@@ -105,7 +106,7 @@ static const DrumKitDef kFactoryKit[kNumFactoryKit] = {
       {0.3f, 0.4f, 0.6f, 0.5f, 0.5f, 0.6f, 0.55f, 0.45f}, {0.45f, 0.4f, 0.6f, 0.7f, 0.5f, 0.6f, 0.6f, 0.55f}},
      {0, 0, 0, 0, 0, 0, 0, 0}}};
 
-struct SynTHBloKDrum : Module {
+struct SynTHBloKDrum : Module, songlink::Member {   // MATRIX-SONG picks its pattern and mutes it
     enum ParamIds { PAT_PARAM, LEN_PARAM, BPM_PARAM, RUN_PARAM, RESET_PARAM, CLEAR_PARAM, PAGE_PARAM, LEARN_PARAM,
                     BANK_PARAM, RANGE_PARAM, OFFC_PARAM, ONC_PARAM, HEADC_PARAM, HITC_PARAM, BONC_PARAM, BOFFC_PARAM,
                     MIDI_ON_PARAM, FX_ON_PARAM, ACC_EDIT_PARAM, AUDITION_PARAM, SEL_PARAM, ACCENT_PARAM,
@@ -187,6 +188,7 @@ struct SynTHBloKDrum : Module {
 
     SynTHBloKDrum() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
+        songlink::join(this, this, "DRUM", 8, false);
         configParam(PAT_PARAM, 1.f, 8.f, 1.f, "Pattern");
         configParam(LEN_PARAM, 1.f, 8.f, 8.f, "Pattern length (steps)");
         configParam(BPM_PARAM, 40.f, 240.f, 120.f, "Internal tempo (when CLOCK is unpatched)", " BPM");
@@ -509,7 +511,9 @@ struct SynTHBloKDrum : Module {
     void onBypass(const BypassEvent& e) override { if (jam.active) clearLeds(); jamown::release(id); jam.active = false; }
     void onUnBypass(const UnBypassEvent& e) override { for (int i = 0; i < kNumLed; i++) lastLed[i] = -1; resync = 0.f; }
     // Rack closing / the module deleted: lights off, paced so the JAM takes every message
-    ~SynTHBloKDrum() { if (jam.active) { slowSend = true; clearLeds(); } jamown::release(id); }
+    ~SynTHBloKDrum() { songlink::leave(this); if (jam.active) { slowSend = true; clearLeds(); } jamown::release(id); }
+    int songPatternNow() override { return curPat(); }
+    void songSetPattern(int p) override { params[PAT_PARAM].setValue((float)(clamp(p, 0, 7) + 1)); }
 
     void toggle(Param& p) { p.setValue(p.getValue() > 0.5f ? 0.f : 1.f); }
     void jamButton(int cc, int b) {
@@ -660,6 +664,7 @@ struct SynTHBloKDrum : Module {
     }
 
     void process(const ProcessArgs& args) override {
+        const float songG = songPoll(args.sampleTime);   // MATRIX-SONG: its pattern requests, and its mute on OUT L / R
         // the JAM follows the last clicked module (JamOwner.hpp): losing it goes dark, gaining it resends all
         int own = jam.update(id, params[MIDI_ON_PARAM].getValue() > 0.5f);
         if (own > 0) for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
@@ -804,8 +809,8 @@ struct SynTHBloKDrum : Module {
         fx.processFx(args, dryL, dryR, edge && running, stepSec, rst, fxL, fxR);
         fxOnSm += (params[FX_ON_PARAM].getValue() - fxOnSm) * km;
         masterVol += (params[MASTER_PARAM].getValue() - masterVol) * km;
-        outputs[OUT_L_OUTPUT].setVoltage((dryL + (5.f * fxL - dryL) * fxOnSm) * masterVol);
-        outputs[OUT_R_OUTPUT].setVoltage((dryR + (5.f * fxR - dryR) * fxOnSm) * masterVol);
+        outputs[OUT_L_OUTPUT].setVoltage((dryL + (5.f * fxL - dryL) * fxOnSm) * masterVol * songG);
+        outputs[OUT_R_OUTPUT].setVoltage((dryR + (5.f * fxR - dryR) * fxOnSm) * masterVol * songG);
 
         // ---- STRIP CV = the strips (the voices' levels), KNOB CV = the knob's page ----
         bool bip = params[RANGE_PARAM].getValue() > 0.5f;

@@ -14,6 +14,7 @@
 #include "Echo_dsp.hpp"
 #include "Matrix8_ui.hpp"
 #include "JamOwner.hpp"
+#include "SongLink.hpp"
 #include <atomic>
 #include <thread>
 #include <chrono>
@@ -62,7 +63,7 @@ struct LoopLenQuantity : ParamQuantity {
     }
 };
 
-struct SynTHBloKLoop : Module {
+struct SynTHBloKLoop : Module, songlink::Member {   // MATRIX-SONG picks its scene, plays its loops, mutes it
     enum ParamId { SEL_PARAM, REC_PARAM, PLAY_PARAM, ONCE_PARAM, UNDO_PARAM, CLEAR_PARAM, COUNTIN_PARAM, TEMPO_PARAM,
                    MASTER_PARAM, ENUMS(LEN_PARAM, kTracks), ENUMS(GAIN_PARAM, kTracks), ENUMS(MON_PARAM, kTracks),
                    ENUMS(LEVEL_PARAM, kTracks), MIDI_ON_PARAM, PAGE_PARAM, ENUMS(MUTE_PARAM, kTracks), RUN_PARAM, RESET_PARAM,
@@ -146,6 +147,7 @@ struct SynTHBloKLoop : Module {
 
     SynTHBloKLoop() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
+        songlink::join(this, this, "LOOP", 8, true);
         configParam(SEL_PARAM, 0.f, kTracks - 1, 0.f, "Selected track", "", 0.f, 1.f, 1.f);
         getParamQuantity(SEL_PARAM)->snapEnabled = true;
         configButton(REC_PARAM, "Record / replace (selected track)");
@@ -668,7 +670,25 @@ struct SynTHBloKLoop : Module {
     void onBypass(const BypassEvent& e) override { if (jam.active) clearLeds(); jamown::release(id); jam.active = false; }
     void onUnBypass(const UnBypassEvent& e) override { for (int i = 0; i < kNumLed; i++) lastLed[i] = -1; resync = 0.f; }
     // Rack closing / the module deleted: lights off, paced so the JAM takes every message
-    ~SynTHBloKLoop() { if (jam.active) { slowSend = true; clearLeds(); } jamown::release(id); }
+    ~SynTHBloKLoop() { songlink::leave(this); if (jam.active) { slowSend = true; clearLeds(); } jamown::release(id); }
+    // MATRIX-SONG: its pattern is a scene (U1-U8); PLAY / STOP / ONCE act on every track that holds a loop,
+    // REC records the selected track
+    int songPatternNow() override { return curScene; }
+    void songSetPattern(int p) override { if (p >= 0 && p < 8) recallScene(p); }
+    void songDoLoop(int a) override {
+        if (a == songlink::L_REC) {
+            const EchoLooper& lp = loop[sel()];
+            if (lp.st != EchoLooper::REC && lp.st != EchoLooper::DUB && lp.arm != EchoLooper::A_REC) act(sel(), 0);
+            return;
+        }
+        for (int t = 0; t < kTracks; t++) {
+            const EchoLooper& lp = loop[t];
+            if (lp.len <= 0 || lp.st == EchoLooper::REC || lp.st == EchoLooper::DUB || lp.arm != EchoLooper::A_NONE) continue;
+            if (a == songlink::L_PLAY && !lp.playing()) act(t, 1);
+            else if (a == songlink::L_STOP && lp.playing()) act(t, 1);
+            else if (a == songlink::L_ONCE && lp.st != EchoLooper::ONCE) act(t, 2);
+        }
+    }
 
     void jamButton(int cc, int b) {
         bool down = b > 0;
@@ -811,6 +831,7 @@ struct SynTHBloKLoop : Module {
 
     void process(const ProcessArgs& args) override {
         const float sr = args.sampleRate, dt = args.sampleTime;
+        const float songG = songPoll(dt);   // MATRIX-SONG: scene / loop requests, and its mute on every output
         // the JAM follows the last clicked module (JamOwner.hpp): losing it goes dark, gaining it resends all
         int own = jam.update(id, params[MIDI_ON_PARAM].getValue() > 0.5f);
         if (own > 0) for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
@@ -1026,7 +1047,7 @@ struct SynTHBloKLoop : Module {
             bool mon = params[MON_PARAM + t].getValue() > 0.5f;
             if (mon) { oL += iL; oR += iR; }
             else if (listenSm[t] > 0.f) { oL += iL * listenSm[t]; oR += iR * listenSm[t]; mon = true; }
-            oL *= levelSm[t] * muteSm[t]; oR *= levelSm[t] * muteSm[t];
+            oL *= levelSm[t] * muteSm[t] * songG; oR *= levelSm[t] * muteSm[t] * songG;
             outPk[t] = std::max(std::max(std::fabs(oL), std::fabs(oR)), outPk[t] * pkFall);
             scope[t][sw] = 0.5f * (oL + oR);
             Output& o = outputs[OUT_OUTPUT + t];

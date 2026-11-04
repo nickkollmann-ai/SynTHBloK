@@ -24,7 +24,8 @@ main{display:grid;grid-template-columns:minmax(300px,.75fr) minmax(0,1.6fr);grid
 /* Once an SVG has been drawn, the drawing stays and takes most of the window; the code is a narrow strip
    (a quarter of its old half). */
 #asm{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr)}
-#asm.svg{grid-template-columns:minmax(0,.15fr) minmax(0,1fr)}
+#asm.svg{grid-template-rows:minmax(0,.25fr) minmax(0,1fr)}
+#asm.svg #draw{border-left:0;border-top:1px solid var(--line)}
 #asm.svg #code{font-size:9px}
 #code{margin:0;overflow:auto;padding:8px 0;font-size:11px;line-height:1.55;background:#070b10;white-space:pre}
 #code div{padding:0 10px 0 0}#code u{display:inline-block;width:44px;padding-right:10px;text-align:right;color:#2c4652;text-decoration:none;user-select:none}

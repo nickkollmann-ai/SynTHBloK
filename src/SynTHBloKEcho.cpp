@@ -10,6 +10,7 @@
 #include "JackLed.hpp"
 #include "Echo_dsp.hpp"
 #include "EchoLoopUi.hpp"
+#include "SongLink.hpp"
 
 namespace {
 
@@ -96,7 +97,7 @@ struct EchoTempoQuantity : ParamQuantity {
 };
 } // namespace
 
-struct SynTHBloKEcho : Module {
+struct SynTHBloKEcho : Module, songlink::Member {   // MATRIX-SONG plays its loop and mutes it
     enum ParamId { TYPE_PARAM, TIME_PARAM, SUBDIV_PARAM, FEEDBACK_PARAM, LEVEL_PARAM, TONE_PARAM, MOD_PARAM, SPACE_PARAM,
                    LOOP_LEVEL_PARAM, TAP_PARAM, FREEZE_PARAM, KILLDRY_PARAM, ON_PARAM,
                    REC_PARAM, PLAY_PARAM, ONCE_PARAM, UNDO_PARAM, CLEAR_PARAM, QUANT_PARAM, PREFX_PARAM,
@@ -142,6 +143,7 @@ struct SynTHBloKEcho : Module {
 
     SynTHBloKEcho() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
+        songlink::join(this, this, "ECHO", 0, true);
         configSwitch(TYPE_PARAM, 0.f, ET_NUM - 1, ET_CLASSIC, "Delay type",
                      {"CLASSIC (MATRIX ping-pong)", "2290 (clean digital)", "2290 MOD (chorused)", "ANALOG (BBD)", "TAPE (wow, flutter)",
                       "LO-FI (crushed)", "DYNAMIC (ducking)", "REVERSE", "PING-PONG", "SLAP (20-300 ms)", "CRYSTAL (octave shimmer)",
@@ -219,6 +221,9 @@ struct SynTHBloKEcho : Module {
         looper.replace = true;   // REC on a playing loop writes over it
     }
 
+    ~SynTHBloKEcho() { songlink::leave(this); }
+    void songDoLoop(int a) override { echoloop::songAction(looper, a); }
+
     void onSampleRateChange(const SampleRateChangeEvent& e) override {
         if (e.sampleRate != looper.sr) looper.init(e.sampleRate, 60.f);
     }
@@ -261,6 +266,7 @@ struct SynTHBloKEcho : Module {
     void process(const ProcessArgs& args) override {
         const float sr = args.sampleRate, dt = args.sampleTime;
         auto smooth = [&](float& v, float target, float tau) { v += (target - v) * (1.f - std::exp(-dt / tau)); };
+        const float songG = songPoll(dt);   // MATRIX-SONG: loop requests, and its mute on OUT L / R
 
         // ---- tempo: clock wins, then tap (until the TIME knob moves), else the TIME knob ----
         static const float kPpq[3] = {4.f, 2.f, 1.f};
@@ -437,8 +443,8 @@ struct SynTHBloKEcho : Module {
             float a = std::fabs(v);
             return a <= 8.f ? v : std::copysign(8.f + 2.f * std::tanh((a - 8.f) / 2.f), v);
         };
-        outputs[OUT_L_OUTPUT].setVoltage(outCeil(5.f * oL * masterSm));
-        outputs[OUT_R_OUTPUT].setVoltage(outCeil(5.f * oR * masterSm));
+        outputs[OUT_L_OUTPUT].setVoltage(outCeil(5.f * oL * masterSm) * songG);
+        outputs[OUT_R_OUTPUT].setVoltage(outCeil(5.f * oR * masterSm) * songG);
 
         // cells: lit with the state; an armed action blinks its cell until the grid edge
         blink += dt;
