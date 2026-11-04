@@ -204,7 +204,7 @@
     },
     {
       "slug": "SynTHBloKMatrix8",
-      "name": "SynTHBloK Matrix-8",
+      "name": "SynTHBloK MTX-8",
       "description": "Maschine JAM groovebox: 8x8 step sequencer driving 8 built-in synth voices (morphing oscillator, resonant filter, envelopes, drive, pan), touch strips shape each voice, stereo out",
       "tags": [
         "Synth voice",
@@ -228,7 +228,7 @@
     },
     {
       "slug": "SynTHBloKDuo",
-      "name": "SynTHBloK MATRIX-DUO",
+      "name": "SynTHBloK MTX-DUO",
       "description": "LEAD and BASS dual-oscillator mono synths (wave morph, hard sync, FM, sub, 24 dB filter, ADSR, drive, glide) with their own 8-step note sequencer in a key and scale, 8 patterns, clock/reset/run in, audio, pitch and gate out",
       "tags": [
         "Synth voice",
@@ -238,8 +238,8 @@
     },
     {
       "slug": "SynTHBloKEcho",
-      "name": "SynTHBloK MATRIX-ECHO",
-      "description": "Stereo delay and looper: 12 delay types (MATRIX ping-pong, clean digital, chorused, analog, tape, lo-fi, ducking, reverse, ping-pong, slap, octave shimmer, multi-head space echo), tap tempo and clock with 11 subdivisions incl. dual, freeze, kill dry, trails, reverb, 6 presets, 60 s stereo looper with overdub, play once and undo",
+      "name": "SynTHBloK MTX-ECHO",
+      "description": "Stereo delay and looper: 12 delay types (MTX ping-pong, clean digital, chorused, analog, tape, lo-fi, ducking, reverse, ping-pong, slap, octave shimmer, multi-head space echo), tap tempo and clock with 11 subdivisions incl. dual, freeze, kill dry, trails, reverb, 6 presets, 60 s stereo looper with overdub, play once and undo",
       "tags": [
         "Effect",
         "Delay",
@@ -249,8 +249,8 @@
     },
     {
       "slug": "SynTHBloKLoop",
-      "name": "SynTHBloK MATRIX-LOOP",
-      "description": "8-track loop sampler built on the MATRIX-ECHO looper: record / replace, play / stop, play once, undo / redo and clear per track, tempo-locked lengths with count-in, clock or tempo knob, mono or stereo (poly) tracks, 8 inputs with gain and monitor, 8 outputs and a stereo mix, scenes, a JAM-style grid and an OLED showing all 8 loops",
+      "name": "SynTHBloK MTX-LOOP",
+      "description": "8-track loop sampler built on the MTX-ECHO looper: record / replace, play / stop, play once, undo / redo and clear per track, tempo-locked lengths with count-in, clock or tempo knob, mono or stereo (poly) tracks, 8 inputs with gain and monitor, 8 outputs and a stereo mix, scenes, a JAM-style grid and an OLED showing all 8 loops",
       "tags": [
         "Sampler",
         "Recording",
@@ -259,8 +259,8 @@
     },
     {
       "slug": "SynTHBloKMatrixFx",
-      "name": "SynTHBloK MATRIX-FX",
-      "description": "8-input effects matrix played from the MATRIX 8x8 grid and the Maschine JAM: 8 effect slots (64 effects in 7 tabs: drive, filter, mod, glitch, delay, reverb, dynamics), 12 one-click chains, accents, 8 routing scenes, slot links and dub chains, drag-and-drop OLED setup, musical RAND, DJ filter, 60 s tempo-locked looper (MATRIX-ECHO's)",
+      "name": "SynTHBloK MTX-FX",
+      "description": "8-input effects matrix played from the MTX 8x8 grid and the Maschine JAM: 8 effect slots (64 effects in 7 tabs: drive, filter, mod, glitch, delay, reverb, dynamics), 12 one-click chains, accents, 8 routing scenes, slot links and dub chains, drag-and-drop OLED setup, musical RAND, DJ filter, 60 s tempo-locked looper (MTX-ECHO's)",
       "tags": [
         "Effect",
         "Delay",
@@ -272,8 +272,8 @@
     },
     {
       "slug": "SynTHBloKMatrixSong",
-      "name": "SynTHBloK MATRIX-SONG",
-      "description": "Song arranger for the MATRIX modules: finds DRUM, FX, ECHO and LOOP in the patch by itself (no cables), 8 sections A-H that set each module's pattern, mute and loop action, launches on the bar or beat, a 32-step chain with record, master clock (CLOCK, RUN, RESET, BAR, SECT)",
+      "name": "SynTHBloK MTX Composer",
+      "description": "Song arranger for the MTX modules: finds MTX-8, FORGE, DUO, DRUM, FX, ECHO and LOOP in the patch by itself (no cables), 8 sections A-H that set each module's pattern, mute, level and loop action, launches on the bar or beat, cycles through 1-8 sections every 1-16 bars, master clock (CLOCK, BAR, SECT) and Maschine JAM control",
       "tags": [
         "Sequencer",
         "Clock generator",

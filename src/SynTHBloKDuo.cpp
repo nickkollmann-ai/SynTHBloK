@@ -22,6 +22,7 @@
 #include "KnobTicks.hpp"
 #include "OledUi.hpp"
 #include "JamOwner.hpp"
+#include "SongLink.hpp"
 #include "ForgeFxUi.hpp"
 #include "JackLed.hpp"
 // FORGE FX runs GRAIN-FORGE's module as an embedded engine; its own panel builder isn't used here.
@@ -113,7 +114,7 @@ struct DUAdsr {
     }
 };
 
-struct SynTHBloKDuo : Module {
+struct SynTHBloKDuo : Module, songlink::Member {
     enum ParamIds { PAT_PARAM, LEN_PARAM, BPM_PARAM, VIEW_PARAM, KEY_PARAM, SCALE_PARAM, RUN_PARAM, RESET_PARAM, CLEAR_PARAM,
                     ENUMS(LEAD_PARAM, DO_NUM), ENUMS(BASS_PARAM, DO_NUM), MASTER_PARAM, PAGE_PARAM, LEARN_PARAM,
                     BANK_PARAM, OFFC_PARAM, ONC_PARAM, HEADC_PARAM, HITC_PARAM, BONC_PARAM, BOFFC_PARAM, RANGE_PARAM, MIX_PARAM,
@@ -182,6 +183,7 @@ struct SynTHBloKDuo : Module {
 
     SynTHBloKDuo() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
+        songlink::join(this, this, "DUO", 8, false);
         configParam(PAT_PARAM, 1.f, 8.f, 1.f, "Pattern");
         configParam(LEN_PARAM, 1.f, 8.f, 8.f, "Pattern length (steps)");
         configParam(BPM_PARAM, 40.f, 240.f, 120.f, "Internal tempo (when CLOCK is unpatched)", " BPM");
@@ -287,6 +289,8 @@ struct SynTHBloKDuo : Module {
     void clearAll() { for (int p = 0; p < 8; p++) for (int e = 0; e < 2; e++) for (int c = 0; c < 8; c++) note[p][e][c] = 0; }
     bool gateOn(int e) { for (auto& v : eng[e]) if (v.gateOn()) return true; return false; }
     int curPat() { return clamp((int)params[PAT_PARAM].getValue(), 1, 8) - 1; }
+    int songPatternNow() override { return curPat(); }
+    void songSetPattern(int p) override { params[PAT_PARAM].setValue((float)(clamp(p, 0, 7) + 1)); }
     int view() { return clamp((int)params[VIEW_PARAM].getValue(), 0, 1); }
     int engParam(int e, int p) { return (e ? BASS_PARAM : LEAD_PARAM) + p; }
     // Pad (r, c): the note 7 - r at step c of the shown synth; several per step make a chord.
@@ -484,7 +488,7 @@ struct SynTHBloKDuo : Module {
     void onBypass(const BypassEvent& e) override { if (jam.active) clearLeds(); jamown::release(id); jam.active = false; }
     void onUnBypass(const UnBypassEvent& e) override { for (int i = 0; i < kNumLed; i++) lastLed[i] = -1; resync = 0.f; }
     // Rack closing / the module deleted: lights off, paced so the JAM takes every message
-    ~SynTHBloKDuo() { if (jam.active) { slowSend = true; clearLeds(); } jamown::release(id); }
+    ~SynTHBloKDuo() { songlink::leave(this); if (jam.active) { slowSend = true; clearLeds(); } jamown::release(id); }
 
     // JAM light idx (layout in Matrix8_ui.hpp): pads = the shown synth's notes in the pattern's colour,
     // the root rows dim, the playhead column white. Scenes = patterns, strips = their knobs,
@@ -637,6 +641,7 @@ struct SynTHBloKDuo : Module {
     }
 
     void process(const ProcessArgs& args) override {
+        const float songG = songPoll(args.sampleTime);   // MATRIX-SONG: its pattern requests, and its mute on OUT L / R
         // the JAM follows the last clicked module (JamOwner.hpp): losing it goes dark, gaining it resends all
         int own = jam.update(id, params[MIDI_ON_PARAM].getValue() > 0.5f);
         if (own > 0) { for (int i = 0; i < kNumLed; i++) lastLed[i] = -1; for (int& l : lastOledLed) l = -1; }
@@ -758,8 +763,9 @@ struct SynTHBloKDuo : Module {
         fx.processFx(args, dryL, dryR, edge && running, stepSec, rst, fxL, fxR);
         fxOnSm += (params[FX_ON_PARAM].getValue() - fxOnSm) * km;
         masterVol += (params[MASTER_PARAM].getValue() - masterVol) * km;
-        outputs[OUT_L_OUTPUT].setVoltage((dryL + (5.f * fxL - dryL) * fxOnSm) * masterVol);
-        outputs[OUT_R_OUTPUT].setVoltage((dryR + (5.f * fxR - dryR) * fxOnSm) * masterVol);
+        outputs[OUT_L_OUTPUT].setVoltage((dryL + (5.f * fxL - dryL) * fxOnSm) * masterVol * songG);
+        outputs[OUT_R_OUTPUT].setVoltage((dryR + (5.f * fxR - dryR) * fxOnSm) * masterVol * songG);
+        songMeter(outputs[OUT_L_OUTPUT].getVoltage(), outputs[OUT_R_OUTPUT].getVoltage());
         if (midiOn) processJamLeds(args);
     }
 
@@ -971,7 +977,7 @@ struct DUTitle : TransparentWidget {
         nvgFontSize(args.vg, 10.f);
         nvgTextLetterSpacing(args.vg, 0.8f);
         nvgFillColor(args.vg, nvgRGB(0xff, 0x7a, 0x00));
-        nvgText(args.vg, 0.f, mm2px(6.4f), "MATRIX-DUO", NULL);
+        nvgText(args.vg, 0.f, mm2px(6.4f), "MTX-DUO", NULL);
     }
 };
 

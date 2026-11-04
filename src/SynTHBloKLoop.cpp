@@ -35,7 +35,7 @@ const int kTracks = 8;
 const float kLoopSec = 20.f;     // per track (8 stereo tracks with their undo copies: ~120 MB at 48 kHz)
 const float kTempoFree = 39.f;
 const char* const kStateName[6] = {"EMPTY", "REC", "PLAY", "REPLACE", "STOP", "ONCE"};
-const char* const kClockDivName[3] = {"1/16 (MATRIX steps)", "1/8", "1/4 (beats)"};
+const char* const kClockDivName[3] = {"1/16 (MTX steps)", "1/8", "1/4 (beats)"};
 const int kLenN = 7;
 const char* const kLenName[kLenN] = {"FREE", "1 BT", "2 BT", "1 BAR", "2 BAR", "4 BAR", "8 BAR"};
 const int kLenBeats[kLenN] = {0, 1, 2, 4, 8, 16, 32};
@@ -1649,7 +1649,7 @@ struct LTitle : TransparentWidget {
         nvgFontSize(args.vg, 10.f);
         nvgTextLetterSpacing(args.vg, 0.8f);
         nvgFillColor(args.vg, nvgRGB(0xff, 0x7a, 0x00));
-        nvgText(args.vg, 0.f, mm2px(6.4f), "MATRIX-LOOP", NULL);
+        nvgText(args.vg, 0.f, mm2px(6.4f), "MTX-LOOP", NULL);
     }
 };
 

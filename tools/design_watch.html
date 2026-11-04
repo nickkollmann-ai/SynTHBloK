@@ -60,14 +60,17 @@ main{display:grid;grid-template-columns:minmax(260px,.7fr) minmax(0,1fr) minmax(
 #log{flex:1;min-height:0;overflow:hidden auto;overflow-wrap:anywhere;margin:0;padding:10px 12px;white-space:pre-wrap;word-break:break-word;color:#9fb6c0;font-size:11px}
 #log .e{color:var(--bad)}#log .w{color:var(--or)}#log .c{color:var(--cy)}
 /* the save list: 4 rows high, no scroll bar; each new file slides in at the top and the rest scroll down */
-#feed{height:72px;box-sizing:content-box;overflow:hidden auto;scrollbar-width:none;border-top:1px solid var(--line);padding:6px 12px;font-size:11px;line-height:18px;color:var(--mut)}
-#feed::-webkit-scrollbar{display:none}
+#feeds{display:flex;border-top:1px solid var(--line)}
+#feed,#gitfeed{flex:1;min-width:0;height:72px;box-sizing:content-box;overflow:hidden auto;scrollbar-width:none;padding:6px 12px;font-size:11px;line-height:18px;color:var(--mut)}
+#gitfeed{border-left:1px solid var(--line)}
+#feed::-webkit-scrollbar,#gitfeed::-webkit-scrollbar{display:none}
 /* no scroll bars on the code and compiler windows either: they follow the work as it runs (the wheel still scrolls) */
 #code,#log{scrollbar-width:none}#code::-webkit-scrollbar,#log::-webkit-scrollbar{display:none}
-#feed div{height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#feed div.in{animation:feedin .25s ease}
+#feed div,#gitfeed div{height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#feed div.in,#gitfeed div.in{animation:feedin .25s ease}
 @keyframes feedin{from{margin-top:-18px;opacity:0}to{margin-top:0;opacity:1}}
-#feed b{color:var(--cy);font-weight:500}
+#feed b,#gitfeed b{color:var(--cy);font-weight:500}
+#gitfeed i{font-style:normal;color:var(--or)}
 footer{display:flex;gap:8px;overflow-x:auto;padding:8px 12px;border-top:1px solid var(--line);background:#070b10}
 footer button{flex:none;width:86px;background:var(--card);border:1px solid var(--line);color:var(--mut);padding:4px;cursor:pointer;font:inherit;font-size:10px;text-align:center}
 footer button img{display:block;width:100%;height:70px;object-fit:contain;margin-bottom:3px}
@@ -104,7 +107,7 @@ footer button em{display:block;font-style:normal;background:var(--cy);color:#070
   <section class="pane" id="p-comp">
     <div class="head"><span>COMPILER <b>build.log</b></span><span id="state">IDLE</span></div>
     <pre id="log">No build.log yet. It fills in when a build starts.</pre>
-    <div id="feed"></div>
+    <div id="feeds"><div id="feed"></div><div id="gitfeed"></div></div>
   </section>
   <section class="pane" id="p-draw">
     <div class="head"><span>LIVE.DRAWING <b>the SVG being built</b></span></div>
@@ -220,19 +223,47 @@ async function scanModules(first) {
   else if (!first) drawStrip();
 }
 // A burst of saves (a build's screenshots) goes in one at a time, so the list visibly scrolls through them.
-const feedQ = [];
-let feedT = null;
-function feed(msg) {
-  feedQ.push(`${time(Date.now())} ${msg}`);
-  if (!feedT) feedT = setInterval(feedNext, 140);
+// Each list (files, git) has its own queue.
+function feeder(id) {
+  const q = [];
+  let timer = null;
+  const next = () => {
+    const f = document.getElementById(id), m = q.shift();
+    if (m === undefined) { clearInterval(timer); timer = null; return; }
+    f.querySelectorAll('.in').forEach(e => e.classList.remove('in'));
+    f.insertAdjacentHTML('afterbegin', `<div class="in">${m}</div>`);
+    f.scrollTop = 0;
+    while (f.children.length > 40) f.lastChild.remove();
+  };
+  return (msg, at) => { q.push(`${time(at || Date.now())} ${msg}`); if (!timer) timer = setInterval(next, 140); };
 }
-function feedNext() {
-  const f = document.getElementById('feed'), m = feedQ.shift();
-  if (m === undefined) { clearInterval(feedT); feedT = null; return; }
-  f.querySelectorAll('.in').forEach(e => e.classList.remove('in'));
-  f.insertAdjacentHTML('afterbegin', `<div class="in">${m}</div>`);
-  f.scrollTop = 0;
-  while (f.children.length > 40) f.lastChild.remove();
+const feed = feeder('feed'), gitFeed = feeder('gitfeed');
+
+// The commit screen: commits (.git/logs/HEAD) and pushes (the origin branch's log), newest on top.
+// On load it shows the last few, then each new one as it lands.
+const gitSeen = {};
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+async function scanGit(first) {
+  const logs = [['/.git/logs/HEAD', 'head'], ['/.git/logs/refs/remotes/origin/master', 'push']];
+  const evs = [];
+  for (const [p, kind] of logs) {
+    const txt = await getText(p);
+    if (txt === null) continue;
+    const lines = txt.trimEnd().split('\n');
+    const from = gitSeen[p] === undefined ? Math.max(0, lines.length - 4) : gitSeen[p];
+    for (const ln of lines.slice(from)) {
+      const m = ln.match(/^\S+ (\S+) .*? (\d+) [+-]\d{4}\t(.*)$/);
+      if (!m) continue;
+      const sha = m[1].slice(0, 7), at = +m[2] * 1000, msg = m[3];
+      if (kind === 'push') evs.push([at, `pushed <b>${sha}</b> to <i>origin</i>`]);
+      else {
+        const c = msg.match(/^commit(?: \((\w+)\))?: (.*)$/);
+        evs.push([at, c ? `commit <b>${sha}</b> ${esc(c[2])}` : `<i>${esc(msg.split(':')[0])}</i> <b>${sha}</b>`]);
+      }
+    }
+    gitSeen[p] = lines.length;
+  }
+  evs.sort((a, b) => a[0] - b[0]).forEach(([at, m]) => gitFeed(m, at));
 }
 
 async function scanArt(first) {
@@ -415,7 +446,7 @@ function replay({p, before, now}) {
 
 async function tick(first) {
   try {
-    await Promise.all([scanArt(first), scanModules(first), scanLog(), scanCode(first)]);
+    await Promise.all([scanArt(first), scanModules(first), scanLog(), scanCode(first), scanGit(first)]);
     if (first) await cacheAll();
     if (first) show(latest());
     document.getElementById('live').textContent = '● watching';

@@ -1349,7 +1349,7 @@ struct FxTitle : TransparentWidget {
         nvgFontSize(args.vg, 10.f);
         nvgTextLetterSpacing(args.vg, 0.8f);
         nvgFillColor(args.vg, nvgRGB(0xff, 0x7a, 0x00));
-        nvgText(args.vg, 0.f, mm2px(6.4f), "MATRIX-FX", NULL);
+        nvgText(args.vg, 0.f, mm2px(6.4f), "MTX-FX", NULL);
     }
 };
 

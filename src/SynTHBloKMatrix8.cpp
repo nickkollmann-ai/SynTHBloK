@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "SongLink.hpp"
 
 namespace {
 
@@ -224,7 +225,7 @@ struct M8Reverb {
     }
 };
 
-struct SynTHBloKMatrix8 : Module {
+struct SynTHBloKMatrix8 : Module, songlink::Member {
     enum ParamIds { LEN_PARAM, PAT_PARAM, PAGE_PARAM, OFFC_PARAM, ONC_PARAM, HEADC_PARAM, HITC_PARAM, CLEAR_PARAM, LEARN_PARAM,
                     BANK_PARAM, RANGE_PARAM, BONC_PARAM, BOFFC_PARAM, RUN_PARAM, RESET_PARAM, KNOB_PARAM,
                     DELAY_PARAM, SPACE_PARAM,
@@ -279,6 +280,7 @@ struct SynTHBloKMatrix8 : Module {
 
     SynTHBloKMatrix8() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
+        songlink::join(this, this, "MTX-8", 8, false);
         configParam(LEN_PARAM, 1.f, 8.f, 8.f, "Pattern length (steps)");
         configParam(PAT_PARAM, 1.f, 8.f, 1.f, "Pattern");
         configParam(PAGE_PARAM, 1.f, 6.f, 1.f, "JAM matrix page (must match the JAM)");
@@ -360,6 +362,8 @@ struct SynTHBloKMatrix8 : Module {
     }
 
     int curPat() { return clamp((int)params[PAT_PARAM].getValue(), 1, 8) - 1; }
+    int songPatternNow() override { return curPat(); }
+    void songSetPattern(int p) override { params[PAT_PARAM].setValue((float)(clamp(p, 0, 7) + 1)); }
     int curPage() { return clamp((int)params[PAGE_PARAM].getValue(), 1, 6); }
     int bank() { return clamp((int)params[BANK_PARAM].getValue(), 1, 8) - 1; }
     int padNote(int r, int c) { return std::min(127, 12 * (curPage() - 1) + 56 + c - 8 * r); }
@@ -380,7 +384,7 @@ struct SynTHBloKMatrix8 : Module {
     void onRemove(const RemoveEvent& e) override { clearLeds(); }
     void onBypass(const BypassEvent& e) override { clearLeds(); }
     void onUnBypass(const UnBypassEvent& e) override { for (int i = 0; i < kNumLed; i++) lastLed[i] = -1; resync = 0.f; }
-    ~SynTHBloKMatrix8() { clearLeds(); }
+    ~SynTHBloKMatrix8() { songlink::leave(this); clearLeds(); }
 
     int desiredLed(int idx, bool running) {
         if (idx == kKnobLed) return (int)std::round(params[knobParam()].getValue() * 127.f);
@@ -441,6 +445,7 @@ struct SynTHBloKMatrix8 : Module {
     }
 
     void process(const ProcessArgs& args) override {
+        const float songG = songPoll(args.sampleTime);   // MATRIX-SONG: its pattern requests, and its mute on the audio and triggers
         midi::Message msg;
         while (midiIn.tryPop(&msg, args.frame)) {
             if (msg.bytes.size() < 3) continue;
@@ -503,7 +508,7 @@ struct SynTHBloKMatrix8 : Module {
             step = (pendingReset || step < 0) ? 0 : (step + 1) % len;
             pendingReset = false;
             for (int r = 0; r < 8; r++)
-                if (pat[curPat()][r][step] && trackOn(r)) {
+                if (pat[curPat()][r][step] && trackOn(r) && !songMuted.load()) {
                     pulse[r].trigger(0.01f);
                     voice[r].trigger(clockPeriod > 0.f && clockPeriod < 2.f ? clockPeriod : 0.125f);   // held for one step
                 }
@@ -552,9 +557,10 @@ struct SynTHBloKMatrix8 : Module {
             l += rl * spaceMix;
             r += rr * spaceMix;
             master += (params[KNOB_PARAM].getValue() - master) * k;
-            outputs[AUDIO_L_OUTPUT].setVoltage(5.f * std::tanh(l * 0.5f * master));
-            outputs[AUDIO_R_OUTPUT].setVoltage(5.f * std::tanh(r * 0.5f * master));
+            outputs[AUDIO_L_OUTPUT].setVoltage(5.f * std::tanh(l * 0.5f * master) * songG);
+            outputs[AUDIO_R_OUTPUT].setVoltage(5.f * std::tanh(r * 0.5f * master) * songG);
         }
+        songMeter(outputs[AUDIO_L_OUTPUT].getVoltage(), outputs[AUDIO_R_OUTPUT].getVoltage());
 
         resync += args.sampleTime;
         // A new bank (or strip page) resends everything, so the strip LEDs show that bank's stored values.
@@ -862,7 +868,7 @@ struct JTitle : TransparentWidget {
         nvgFontSize(args.vg, 10.f);
         nvgTextLetterSpacing(args.vg, 0.8f);
         nvgFillColor(args.vg, nvgRGB(0xff, 0x7a, 0x00));
-        nvgText(args.vg, 0.f, mm2px(6.4f), "MATRIX-8", NULL);
+        nvgText(args.vg, 0.f, mm2px(6.4f), "MTX-8", NULL);
     }
 };
 

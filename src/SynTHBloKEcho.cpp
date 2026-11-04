@@ -81,7 +81,7 @@ const EchoGenre kGenre[kBanks - 1][kGenreN] = {
      {"WIDE PING", "WIDE", {8, 0.55f, 2, 0.50f, 0.40f, 0.60f, 0.10f, 0.15f}},  // PING-PONG, 1/4
      {"QUARTER TRIPLET", "QTR-T", {0, 0.48f, 3, 0.45f, 0.40f, 0.50f, 0.05f, 0.10f}}}}; // CLASSIC, 1/4T
 
-const char* const kClockDivName[3] = {"1/16 (MATRIX steps)", "1/8", "1/4 (beats)"};
+const char* const kClockDivName[3] = {"1/16 (MTX steps)", "1/8", "1/4 (beats)"};
 
 // LEN: beats on a tempo-locked loop; 1 / LEN of a free loop (defined after the module)
 struct EchoLenQuantity : ParamQuantity {
@@ -145,7 +145,7 @@ struct SynTHBloKEcho : Module, songlink::Member {   // MATRIX-SONG plays its loo
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
         songlink::join(this, this, "ECHO", 0, true);
         configSwitch(TYPE_PARAM, 0.f, ET_NUM - 1, ET_CLASSIC, "Delay type",
-                     {"CLASSIC (MATRIX ping-pong)", "2290 (clean digital)", "2290 MOD (chorused)", "ANALOG (BBD)", "TAPE (wow, flutter)",
+                     {"CLASSIC (MTX ping-pong)", "2290 (clean digital)", "2290 MOD (chorused)", "ANALOG (BBD)", "TAPE (wow, flutter)",
                       "LO-FI (crushed)", "DYNAMIC (ducking)", "REVERSE", "PING-PONG", "SLAP (20-300 ms)", "CRYSTAL (octave shimmer)",
                       "SPACE (multi-head echo + reverb)"});
         configParam(TIME_PARAM, 0.f, 1.f, 0.5f, "Delay time (no clock and TEMPO at FREE; SLAP: 20-300 ms)", " ms", 350.f, 20.f);
@@ -558,7 +558,7 @@ struct EchoTitle : TransparentWidget {
         nvgFontSize(args.vg, 10.f);
         nvgTextLetterSpacing(args.vg, 0.8f);
         nvgFillColor(args.vg, nvgRGB(0xff, 0x7a, 0x00));
-        nvgText(args.vg, 0.f, mm2px(6.4f), "MATRIX-ECHO", NULL);
+        nvgText(args.vg, 0.f, mm2px(6.4f), "MTX-ECHO", NULL);
     }
 };
 
