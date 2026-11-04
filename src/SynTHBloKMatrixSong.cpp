@@ -9,6 +9,11 @@
 //  REC records a performance: from the next bar, the launches, mutes and strip moves (on the 16th grid) until
 //  the bar after REC goes off. PLAY replays the take from its first bar, round and round.
 //  Master clock: CLOCK (16ths), RUN, RESET, BAR and SECT (0-7 V) out; CLOCK in (16ths) or the BPM knob.
+//  JAM ("JAM Template 1 Live", as the other MATRIX modules; click SONG to hand it the JAM): the pads are
+//  the grid (a press selects the cell; MUTE + pad mutes it, CLEAR + pad clears it), scenes launch A-H,
+//  A-H mute the rows, the touch strips are the levels. PLAY = RUN, REC = REC, SONG = PLAY the take,
+//  TEMPO = RESET, GRID = bar / beat, PREV / NEXT launch the section before / after, the cross pad moves
+//  the selected cell, DUPLICATE copies the section to the next, the knob is the BPM.
 // ============================================================================
 #include "plugin.hpp"
 #include "SongLink.hpp"
@@ -17,11 +22,14 @@
 #include "Matrix8_ui.hpp"
 #include "JackLed.hpp"
 #include "KnobTicks.hpp"
+#include "JamOwner.hpp"
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <functional>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -33,7 +41,7 @@ static const NVGcolor* const kRowCol = kPatOnColor;
 static const char* const kLoopGlyph[songlink::L_COUNT] = {"", "PLAY", "STOP", "REC", "ONCE"};
 
 struct SynTHBloKMatrixSong : Module {
-    enum ParamIds { RUN_PARAM, RESET_PARAM, REC_PARAM, PLAY_PARAM, QUANT_PARAM, BPM_PARAM, NUM_PARAMS };
+    enum ParamIds { RUN_PARAM, RESET_PARAM, REC_PARAM, PLAY_PARAM, QUANT_PARAM, BPM_PARAM, MIDI_ON_PARAM, LEN_PARAM, NUM_PARAMS };
     enum InputIds { CLOCK_INPUT, RUN_INPUT, RESET_INPUT, NUM_INPUTS };
     enum OutputIds { CLOCK_OUTPUT, RUN_OUTPUT, RESET_OUTPUT, BAR_OUTPUT, SECT_OUTPUT, NUM_OUTPUTS };
 
@@ -76,6 +84,16 @@ struct SynTHBloKMatrixSong : Module {
     dsp::SchmittTrigger clkTrig, runTrig, rstTrig, rstBtnTrig;
     dsp::PulseGenerator clockPulse, resetPulse, barPulse;
     float resetFlash = 0.f, blink = 0.f;
+    float recFlash[kRows] = {};   // a row's REC just pressed (UI)
+
+    // Maschine JAM, as on MATRIX-DRUM: the last clicked module owns it (JamOwner.hpp)
+    midi::InputQueue midiIn;
+    midi::Output midiOut;
+    jamown::Link jam;
+    bool slowSend = false, soloHeld = false, muteHeld = false, clearHeld = false, jamReset = false;
+    int jamPage = 1, stripPage = 0, lastStripPage = -1, lastPage = -1, knobCC = kKnobFirstCC, ledScan = 0;
+    int lastLed[kNumLed];
+    float tokens = 4.f, resync = 0.f;
 
     SynTHBloKMatrixSong() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, 0);
@@ -86,6 +104,10 @@ struct SynTHBloKMatrixSong : Module {
         configSwitch(QUANT_PARAM, 0.f, 1.f, 0.f, "Launches land on the next", {"Bar", "Beat"});
         configParam(BPM_PARAM, 40.f, 240.f, 120.f, "Tempo (when CLOCK is unpatched)", " BPM");
         paramQuantities[BPM_PARAM]->snapEnabled = true;
+        configSwitch(MIDI_ON_PARAM, 0.f, 1.f, 1.f, "JAM MIDI (off = ignore the JAM, its lights dark)", {"Off", "On"});
+        configSwitch(LEN_PARAM, 0.f, 6.f, 0.f, "Take length (a set length ends the take by itself)", {"Free (until REC goes off)", "1 bar", "2 bars", "4 bars", "8 bars", "16 bars", "32 bars"});
+        paramQuantities[LEN_PARAM]->randomizeEnabled = false;
+        for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
         for (int id : {RUN_PARAM, REC_PARAM, PLAY_PARAM, QUANT_PARAM}) paramQuantities[id]->randomizeEnabled = false;
         configInput(CLOCK_INPUT, "Clock (16th notes; the BPM knob when unpatched)");
         configInput(RUN_INPUT, "Run (trigger: toggles RUN)");
@@ -121,6 +143,8 @@ struct SynTHBloKMatrixSong : Module {
         return params[BPM_PARAM].getValue();
     }
     bool takePlaying() { return playState == P_ON; }
+    // the take's set length in ticks (0 = free: until REC goes off)
+    int recLenTicks() { static const int bars[7] = {0, 1, 2, 4, 8, 16, 32}; return 16 * bars[clamp((int)params[LEN_PARAM].getValue(), 0, 6)]; }
     void loadLive(int s) { for (int r = 0; r < kRows; r++) { lev[r] = cells[s][r].level; mut[r] = cells[s][r].mute; } }
 
     // UI: a strip / MUTE moves the live state, and writes into the playing section (not while a take plays,
@@ -138,12 +162,36 @@ struct SynTHBloKMatrixSong : Module {
             songlink::with(rowId[r], [&](songlink::Member& m) { if (m.songPatterns > 0) m.reqPattern = std::min(p, m.songPatterns - 1); });
         }
     }
+    // a row's REC: what its module plays now lands in the selected section's pad at once (its pattern, and
+    // the strip's level and mute); a looper (ECHO / FX / LOOP) also starts recording now, and the pad keeps REC
+    void captureRow(int r) {
+        if (r < 0 || r >= kRows || rowId[r] < 0) return;
+        int s = selSec;
+        Cell c = cells[s][r];
+        bool looper = false;
+        songlink::with(rowId[r], [&](songlink::Member& m) {
+            int p = m.songPatternNow();
+            if (p >= 0) c.pat = p;
+            if (m.songHasLoop) { looper = true; m.reqLoop = songlink::L_REC; }
+        });
+        if (looper) c.loop = songlink::L_REC;
+        c.level = lev[r]; c.mute = mut[r];
+        cells[s][r] = c;
+        selRow = r;
+        recFlash[r] = 0.3f;
+        edited(s);
+    }
     // a row let go (emptied, or SONG removed): its module back to full level, unmuted
     void release(int r) {
         if (rowId[r] < 0) return;
         songlink::with(rowId[r], [](songlink::Member& m) { m.songLevel = 1.f; m.songMuted = false; m.songLinked = false; });
     }
-    ~SynTHBloKMatrixSong() { for (int r = 0; r < kRows; r++) release(r); }
+    // Rack closing / the module deleted: lights off, paced so the JAM takes every message
+    ~SynTHBloKMatrixSong() {
+        for (int r = 0; r < kRows; r++) release(r);
+        if (jam.active) { slowSend = true; clearLeds(); }
+        jamown::release(id);
+    }
 
     // switch every row's module to section s
     void apply(int s) {
@@ -215,12 +263,165 @@ struct SynTHBloKMatrixSong : Module {
         }
     }
 
+    // ---- JAM ----
+    int padNote(int r, int c) { return std::min(127, 12 * (jamPage - 1) + 56 + c - 8 * r); }
+    void sendNote(int n, int vel) { midi::Message m; m.bytes = {0x90, (uint8_t)n, (uint8_t)clamp(vel, 0, 127)}; if (slowSend) std::this_thread::sleep_for(std::chrono::microseconds(400)); midiOut.sendMessage(m); }
+    void sendCC(int cc, int v) { midi::Message m; m.bytes = {0xB0, (uint8_t)cc, (uint8_t)clamp(v, 0, 127)}; if (slowSend) std::this_thread::sleep_for(std::chrono::microseconds(400)); midiOut.sendMessage(m); }
+    void clearLeds() {
+        for (int r = 0; r < 8; r++) for (int c = 0; c < 8; c++) sendNote(padNote(r, c), 0);
+        for (int i = 0; i < 8; i++) { sendCC(i, 0); sendCC(8 + i, 0); sendCC(48 + 8 * stripPage + i, 0); }
+        for (int i = 0; i < kNumBtn; i++) sendCC(kBtnCC[i], 0);
+        for (auto& n : kBtnNote) if (n[0] > padNote(0, 7)) sendNote(n[0], 0);
+        for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
+    }
+    void onRemove(const RemoveEvent& e) override { if (jam.active) clearLeds(); jamown::release(id); }
+    void onBypass(const BypassEvent& e) override { if (jam.active) clearLeds(); jamown::release(id); jam.active = false; }
+    void onUnBypass(const UnBypassEvent& e) override { for (int i = 0; i < kNumLed; i++) lastLed[i] = -1; resync = 0.f; }
+
+    void toggle(Param& p) { p.setValue(p.getValue() > 0.5f ? 0.f : 1.f); }
+    void jamPad(int r, int s) {
+        selSec = s; selRow = r;
+        if (muteHeld) { cells[s][r].mute = !cells[s][r].mute; edited(s); }
+        else if (clearHeld) { cells[s][r] = Cell(); edited(s); }
+    }
+    void jamButton(int cc, int b) {
+        bool down = b > 0;
+        if (cc == CC_MUTE) { muteHeld = down; return; }
+        if (cc == CC_CLEAR) { clearHeld = down; return; }
+        if (cc == CC_SOLO) { soloHeld = down; return; }
+        if (!down) return;
+        switch (cc) {
+            case CC_PLAY: toggle(params[RUN_PARAM]); break;
+            case CC_REC: toggle(params[REC_PARAM]); break;
+            case CC_SONG: toggle(params[PLAY_PARAM]); break;
+            case CC_TEMPO: jamReset = true; break;
+            case CC_GRID: toggle(params[QUANT_PARAM]); break;
+            case CC_PREV: launch((curSec + kSecs - 1) % kSecs); break;
+            case CC_NEXT: launch((curSec + 1) % kSecs); break;
+            case CC_UP: selRow = (selRow + kRows - 1) % kRows; break;
+            case CC_DOWN: selRow = (selRow + 1) % kRows; break;
+            case CC_LEFT: selSec = (selSec + kSecs - 1) % kSecs; break;
+            case CC_RIGHT: selSec = (selSec + 1) % kSecs; break;
+            case CC_DUPLICATE: {
+                int to = (selSec + 1) % kSecs;
+                for (int r = 0; r < kRows; r++) cells[to][r] = cells[selSec][r];
+                selSec = to;
+                edited(curSec);
+            } break;
+        }
+    }
+    void processJamIn(const ProcessArgs& args) {
+        midi::Message msg;
+        while (midiIn.tryPop(&msg, args.frame)) {
+            if (msg.bytes.size() < 3) continue;
+            int st = msg.bytes[0] & 0xf0, a = msg.bytes[1], b = msg.bytes[2];
+            if (st == 0x90 && b > 0) {
+                bool pad = false;
+                for (int r = 0; r < kRows && !pad; r++) for (int s = 0; s < kSecs; s++)
+                    if (padNote(r, s) == a) { jamPad(r, s); pad = true; break; }
+                if (!pad) for (auto& n : kBtnNote) if (n[0] == a) jamButton(n[1], b);
+            } else if (st == 0xB0) {
+                bool isBtn = false;
+                for (int i = 0; i < kNumBtn; i++) if (kBtnCC[i] == a) isBtn = true;
+                if (isBtn) jamButton(a, b);
+                else if (a >= kKnobFirstCC && a <= kKnobLastCC) {
+                    knobCC = a;
+                    params[BPM_PARAM].setValue(std::round(40.f + 200.f * b / 127.f));
+                    lastLed[kKnobLed] = b;
+                }
+                else if (a == kKnobPushCC && b > 0) paramQuantities[BPM_PARAM]->reset();
+                else if (a >= 0 && a < 8 && b > 0) launch(a);
+                else if (a >= 8 && a < 16 && b > 0) { if (soloHeld) captureRow(a - 8); else if (rowId[a - 8] >= 0) toggleMute(a - 8); }
+                else if (a >= 48 && a < 112) {
+                    stripPage = (a - 48) / 8;
+                    if (rowId[(a - 48) % 8] >= 0) setLevel((a - 48) % 8, b / 127.f);
+                }
+            }
+        }
+    }
+    // pads: a row's colour, bright in the playing section (dim while muted), dim elsewhere, dark when empty;
+    // the selected cell white. Scenes: the playing section bright, a queued one blinking. A-H: lit = muted.
+    int desiredLed(int idx) {
+        bool blinkOn = blink < 0.25f;
+        if (idx == kKnobLed) return (int)std::round((params[BPM_PARAM].getValue() - 40.f) / 200.f * 127.f);
+        if (idx >= 88) {
+            switch (kBtnCC[idx - 88]) {
+                case CC_PLAY: return running ? 127 : 0;
+                case CC_REC: return recState == R_ON || (recState != R_OFF && blinkOn) ? 127 : 0;
+                case CC_SONG: return playState == P_ON || (playState == P_ARM && blinkOn) ? 127 : 0;
+                case CC_TEMPO: return resetFlash > 0.f ? 127 : 0;
+                case CC_GRID: return params[QUANT_PARAM].getValue() > 0.5f ? 127 : 0;
+                case CC_MUTE: return muteHeld ? 127 : 0;
+                case CC_CLEAR: return clearHeld ? 127 : 0;
+                case CC_SOLO: return soloHeld ? 127 : 0;
+                default: return 127;
+            }
+        }
+        if (idx < 64) {
+            int r = idx / 8, s = idx % 8;
+            if (rowId[r] < 0) return 0;
+            if (s == selSec && r == selRow) return kJamWhite;
+            const Cell& c = cells[s][r];
+            if (c.pat < 0 && !c.mute && c.loop == songlink::L_NONE) return 0;
+            if (s == curSec) return c.mute || mut[r] ? kJamDim[r] : kJamBright[r];
+            return kJamDim[r];
+        }
+        if (idx < 72) {
+            int s = idx - 64;
+            if (queued.load() == s) return blinkOn ? kJamWhite : kJamDim[s];
+            return s == curSec ? kJamBright[s] : kJamDim[s];
+        }
+        if (idx < 80) return rowId[idx - 72] >= 0 ? (int)std::round(lev[idx - 72] * 127.f) : 0;
+        int r = idx - 80;
+        if (rowId[r] < 0) return 0;
+        return mut[r] ? kJamBright[r] : kJamDim[r];
+    }
+    void sendLed(int idx, int d) {
+        if (!jam.active) return;
+        if (idx < 64) sendNote(padNote(idx / 8, idx % 8), d);
+        else if (idx < 72) sendCC(idx - 64, d);
+        else if (idx < 80) sendCC(48 + 8 * stripPage + (idx - 72), d);
+        else if (idx < 88) sendCC(8 + (idx - 80), d);
+        else if (idx == kKnobLed) sendCC(knobCC, d);
+        else {
+            int cc = kBtnCC[idx - 88];
+            sendCC(cc, d);
+            int n = btnNoteFor(cc);
+            if (n >= 0 && n > padNote(0, 7)) sendNote(n, d);
+        }
+    }
+    void processJamLeds(const ProcessArgs& args) {
+        resync += args.sampleTime;
+        if (jamPage != lastPage || stripPage != lastStripPage || resync > 3.f) {
+            for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
+            lastPage = jamPage; lastStripPage = stripPage; resync = 0.f;
+        }
+        tokens = std::min(16.f, tokens + args.sampleTime * 2000.f);
+        for (int n = 0; n < 3; n++) {
+            int d = desiredLed(ledScan);
+            if (d != lastLed[ledScan]) {
+                if (tokens < 1.f) break;
+                tokens -= 1.f;
+                sendLed(ledScan, d);
+                lastLed[ledScan] = d;
+            }
+            ledScan = (ledScan + 1) % kNumLed;
+        }
+    }
+
     void process(const ProcessArgs& args) override {
         const float dt = args.sampleTime;
+        // the JAM follows the last clicked module: losing it goes dark, gaining it resends all
+        int own = jam.update(id, params[MIDI_ON_PARAM].getValue() > 0.5f);
+        if (own > 0) for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
+        else if (own < 0) clearLeds();
+        if (jam.active) processJamIn(args);
+        else { midi::Message m; while (midiIn.tryPop(&m, args.frame)) {} }
         if (runTrig.process(inputs[RUN_INPUT].getVoltage()))
             params[RUN_PARAM].setValue(params[RUN_PARAM].getValue() > 0.5f ? 0.f : 1.f);
         running = params[RUN_PARAM].getValue() > 0.5f;
-        bool rst = rstTrig.process(inputs[RESET_INPUT].getVoltage()) | rstBtnTrig.process(params[RESET_PARAM].getValue());
+        bool rst = rstTrig.process(inputs[RESET_INPUT].getVoltage()) | rstBtnTrig.process(params[RESET_PARAM].getValue()) | jamReset;
+        jamReset = false;
         if (running && !wasRunning) rst = true;   // RUN starts the song from the top
         if (!running && wasRunning) {             // stopped: a take being recorded ends here; a playing one waits
             if (recState == R_ON || recState == R_END) endRec((recT / 16 + 1) * 16);
@@ -283,7 +484,7 @@ struct SynTHBloKMatrixSong : Module {
             if (!start && (recState == R_ON || recState == R_END)) recT++;
             bool takeTop = false;
             if (!start && playState == P_ON && ++playT >= takeLen) takeTop = true;   // round again
-            if (bar && recState == R_END) endRec(recT);
+            if (bar && (recState == R_END || (recState == R_ON && recLenTicks() > 0 && recT >= recLenTicks()))) endRec(recT);
             if (bar && playState == P_ARM && takeLen > 0) { playState = P_ON; takeTop = true; }
 
             int to = start ? curSec : -1, launched = -1;
@@ -314,6 +515,7 @@ struct SynTHBloKMatrixSong : Module {
         outputs[SECT_OUTPUT].setVoltage((float)curSec);
         blink += dt;
         if (blink >= 0.5f) blink -= 0.5f;
+        if (jam.active) processJamLeds(args);
     }
 
     json_t* dataToJson() override {
@@ -337,6 +539,9 @@ struct SynTHBloKMatrixSong : Module {
         }
         json_object_set_new(root, "cells", cs);
         json_object_set_new(root, "section", json_integer(curSec));
+        json_object_set_new(root, "in", midiIn.toJson());
+        json_object_set_new(root, "out", midiOut.toJson());
+        json_object_set_new(root, "jamPage", json_integer(jamPage));
         std::lock_guard<std::mutex> lk(takeM);
         if (takeLen > 0) {
             json_t* tk = json_object();
@@ -377,6 +582,9 @@ struct SynTHBloKMatrixSong : Module {
                 }
         if (json_t* j = json_object_get(root, "section")) curSec = clamp((int)json_integer_value(j), 0, kSecs - 1);
         loadLive(curSec);
+        if (json_t* j = json_object_get(root, "in")) midiIn.fromJson(j);
+        if (json_t* j = json_object_get(root, "out")) midiOut.fromJson(j);
+        if (json_t* j = json_object_get(root, "jamPage")) jamPage = clamp((int)json_integer_value(j), 1, 6);
         std::lock_guard<std::mutex> lk(takeM);
         take.clear(); takeLen = 0;
         if (json_t* tk = json_object_get(root, "take")) {
@@ -508,6 +716,9 @@ struct SecHead : OpaqueWidget {
     }
 };
 
+// a row's REC square sits inside its label, at the right end (mm: its size and the label's inset)
+static const float kRecSq = 5.f, kRecIn = kRecSq + 0.8f;
+
 // A row's module: its name (and its pattern now) in the row's colour; click to choose the module.
 struct RowLabel : OpaqueWidget {
     MS* module = NULL;
@@ -543,7 +754,7 @@ struct RowLabel : OpaqueWidget {
         nvgText(args.vg, 3.f, box.size.y * 0.5f, name, NULL);
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
         nvgFillColor(args.vg, oled::amber());
-        nvgText(args.vg, box.size.x - 3.f, box.size.y * 0.5f, pat, NULL);
+        nvgText(args.vg, box.size.x - mm2px(kRecIn) - 3.f, box.size.y * 0.5f, pat, NULL);   // left of its REC
     }
     void onButton(const ButtonEvent& e) override {
         if (e.action != GLFW_PRESS || !module || !found) return;
@@ -646,7 +857,7 @@ struct SongPad : OpaqueWidget {
     }
 };
 
-// The CELL editor's info lines: the selected pad (module and section), then what it holds.
+// The CELL editor's info line: the selected pad (module and section), and its level, mute and loop.
 struct EdDisplay : TransparentWidget {
     MS* module = NULL;
     Found* found = NULL;
@@ -657,7 +868,6 @@ struct EdDisplay : TransparentWidget {
         const float R = mm2px(oled::kRow);
         nvgBeginPath(args.vg);
         oled::divider(args, 4.f, R, W - 4.f, R);
-        oled::divider(args, 4.f, 2.f * R, W - 4.f, 2.f * R);
         oled::dividerStroke(args);
         std::shared_ptr<window::Font> font = songFont();
         if (!font) return;
@@ -671,8 +881,7 @@ struct EdDisplay : TransparentWidget {
             name = i ? i->name : module->rowId[r] >= 0 ? "GONE" : "EMPTY ROW";
         } else c.pat = 0;
         char val[64];
-        snprintf(val, sizeof val, "%s  LEVEL %d%%%s%s%s", c.pat >= 0 ? string::f("PATTERN %d", c.pat + 1).c_str() : "KEEPS ITS PATTERN",
-                 (int)std::round(c.level * 100.f), c.mute ? "  MUTED" : "", c.loop ? "  LOOP " : "", c.loop ? songlink::kLoopName[c.loop] : "");
+        snprintf(val, sizeof val, "LEVEL %d%%%s%s%s", (int)std::round(c.level * 100.f), c.mute ? "  MUTED" : "", c.loop ? "  LOOP " : "", c.loop ? songlink::kLoopName[c.loop] : "");
         float y = R * 0.5f;
         nvgFontSize(args.vg, 6.f);
         nvgFillColor(args.vg, oled::dim());
@@ -682,9 +891,10 @@ struct EdDisplay : TransparentWidget {
         nvgFillColor(args.vg, kRowCol[r]);
         std::string who = string::f("%s · %s", name, kSecName[s]);
         nvgText(args.vg, mm2px(8.f), y, who.c_str(), NULL);
-        nvgFontSize(args.vg, 6.5f);
+        nvgFontSize(args.vg, 6.f);
         nvgFillColor(args.vg, oled::amber());
-        nvgText(args.vg, 4.f, R * 1.5f, val, NULL);
+        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+        nvgText(args.vg, W - 4.f, y, val, NULL);
     }
 };
 
@@ -722,7 +932,7 @@ struct SongDisplay : TransparentWidget {
         nvgFontSize(args.vg, 8.f);
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
         nvgText(args.vg, W - 4.f, y0, bpm, NULL);
-        // NOW: the section, the launch waiting for its bar; on the right, the take
+        // NOW: the section, and the launch waiting for its bar
         int cur = module ? module->curSec : 0, q = module ? module->queued.load() : -1;
         nvgFontSize(args.vg, 6.f);
         nvgFillColor(args.vg, oled::dim());
@@ -736,34 +946,123 @@ struct SongDisplay : TransparentWidget {
             std::string next = string::f("> %s", kSecName[q]);
             nvgText(args.vg, mm2px(13.f), y1, next.c_str(), NULL);
         }
-        std::string tk = "TAKE 8 BARS";
-        NVGcolor tc = oled::amber();
-        const NVGcolor red = nvgRGB(0xff, 0x32, 0x28), cyan = nvgRGB(0x5c, 0xc8, 0xf2);
-        float prog = -1.f;
-        if (module) {
-            tk = "";
-            if (module->recState == MS::R_ARM) { tk = "REC ON THE BAR"; tc = red; }
-            else if (module->recState == MS::R_ON) { tk = string::f("REC  BAR %d", module->recT / 16 + 1); tc = red; }
-            else if (module->recState == MS::R_END) { tk = string::f("REC  ENDS BAR %d", module->recT / 16 + 1); tc = red; }
-            else if (module->playState == MS::P_ARM) { tk = "TAKE ON THE BAR"; tc = cyan; }
-            else if (module->playState == MS::P_ON) {
-                tk = string::f("TAKE  %d / %d", module->playT / 16 + 1, module->takeLen / 16); tc = cyan;
-                prog = (module->playT + 1) / (float)module->takeLen;
-            }
-            else if (module->takeLen > 0) tk = string::f("TAKE  %d BARS", module->takeLen / 16);
-            else { tk = "NO TAKE"; tc = oled::dim(); }
-            if (prog < 0.f && run) prog = module->tick < 0 ? 0.f : (module->tick + 1) / 16.f;
-        }
-        nvgFillColor(args.vg, tc);
-        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-        nvgText(args.vg, W - 4.f, y1, tk.c_str(), NULL);
-        // the take's progress while it plays, else the bar's
-        if (prog >= 0.f) {
+        // the bar's progress while running
+        if (run && module) {
             nvgBeginPath(args.vg);
-            nvgRect(args.vg, 4.f, 2.f * R - 1.2f, (W - 8.f) * clamp(prog, 0.f, 1.f), 0.8f);
-            nvgFillColor(args.vg, module && module->playState == MS::P_ON ? cyan : oled::green());
+            nvgRect(args.vg, 4.f, 2.f * R - 1.2f, (W - 8.f) * (module->tick < 0 ? 0.f : (module->tick + 1) / 16.f), 0.8f);
+            nvgFillColor(args.vg, oled::green());
             nvgFill(args.vg);
         }
+    }
+};
+
+// The RECORD screen: the take (recording, playing, its length) over REC | PLAY | CLEAR | LOOPER REC and
+// the LENGTH choices.
+struct RecDisplay : TransparentWidget {
+    MS* module = NULL;
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        float W = box.size.x, H = box.size.y;
+        oled::box(args, W, H, nvgRGBA(255, 50, 40, 110));
+        const float R = mm2px(oled::kRow);
+        nvgBeginPath(args.vg);
+        oled::divider(args, 4.f, R, W - 4.f, R);
+        oled::dividerStroke(args);
+        std::shared_ptr<window::Font> font = songFont();
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        const NVGcolor red = nvgRGB(0xff, 0x32, 0x28), cyan = nvgRGB(0x5c, 0xc8, 0xf2);
+        std::string tk = "TAKE 8 BARS", st = "";
+        NVGcolor tc = oled::amber(), sc = oled::dim();
+        float prog = -1.f;
+        if (module) {
+            int lenT = module->recLenTicks();
+            tk = module->takeLen > 0 ? string::f("TAKE %d BARS", module->takeLen / 16) : "NO TAKE";
+            if (module->takeLen <= 0) tc = oled::dim();
+            if (module->recState == MS::R_ARM) { st = "REC ON THE BAR"; sc = red; }
+            else if (module->recState == MS::R_ON || module->recState == MS::R_END) {
+                int b = module->recT / 16 + 1;
+                st = lenT > 0 ? string::f("REC BAR %d/%d", b, lenT / 16) : module->recState == MS::R_END ? string::f("REC ENDS BAR %d", b) : string::f("REC BAR %d", b);
+                sc = red;
+                if (lenT > 0) prog = (module->recT + 1) / (float)lenT;
+            }
+            else if (module->playState == MS::P_ARM) { st = "PLAY ON THE BAR"; sc = cyan; }
+            else if (module->playState == MS::P_ON) {
+                st = string::f("PLAY %d/%d", module->playT / 16 + 1, module->takeLen / 16); sc = cyan;
+                prog = (module->playT + 1) / (float)module->takeLen;
+            }
+        }
+        float y = R * 0.5f;
+        nvgFontSize(args.vg, 6.f);
+        nvgFillColor(args.vg, oled::dim());
+        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgText(args.vg, 4.f, y, "RECORD", NULL);
+        nvgFontSize(args.vg, 7.5f);
+        nvgFillColor(args.vg, tc);
+        nvgText(args.vg, mm2px(11.f), y, tk.c_str(), NULL);
+        nvgFillColor(args.vg, sc);
+        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+        nvgText(args.vg, W - 4.f, y, st.c_str(), NULL);
+        if (prog >= 0.f) {
+            nvgBeginPath(args.vg);
+            nvgRect(args.vg, 4.f, R - 1.2f, (W - 8.f) * clamp(prog, 0.f, 1.f), 0.8f);
+            nvgFillColor(args.vg, module && module->playState == MS::P_ON ? cyan : red);
+            nvgFill(args.vg);
+        }
+        // LENGTH, before its choices on the last row
+        nvgFontSize(args.vg, 5.5f);
+        nvgFillColor(args.vg, oled::dim());
+        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgText(args.vg, mm2px(2.f), H - mm2px(0.8f + oled::kCellH * 0.5f), "LENGTH", NULL);
+    }
+};
+
+// A pattern in the CELL editor: a square in that pattern's fire colour (as the MATRIX modules' pattern
+// buttons), filled when the cell plays it.
+struct SongPatSq : OpaqueWidget {
+    MS* module = NULL;
+    int p = 0;
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        bool sel = module ? module->cells[module->selSec][module->selRow].pat == p : p == 0;
+        drawColorButton(args, box.size, p, sel, (char)('1' + p), 9.f);
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.button != GLFW_MOUSE_BUTTON_LEFT || e.action != GLFW_PRESS) return;
+        if (module) { module->cells[module->selSec][module->selRow].pat = p; module->edited(module->selSec); }
+        e.consume(this);
+    }
+};
+
+// KEEP beside the patterns: the cell leaves its module on whatever pattern it plays.
+struct SongKeepBtn : OpaqueWidget {
+    MS* module = NULL;
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        bool on = module ? module->cells[module->selSec][module->selRow].pat < 0 : false;
+        float W = box.size.x, H = box.size.y;
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, W, H, 1.4f);
+        nvgFillColor(args.vg, on ? oled::litFill() : oled::offFill());
+        nvgFill(args.vg);
+        nvgStrokeColor(args.vg, on ? oled::litFill() : oled::outline(110));
+        nvgStrokeWidth(args.vg, on ? 1.2f : 0.8f);
+        nvgStroke(args.vg);
+        std::shared_ptr<window::Font> font = songFont();
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, on ? oled::ink() : oled::amber());
+        nvgFontSize(args.vg, 9.f);
+        nvgText(args.vg, W * 0.5f, H * 0.4f, "KEEP", NULL);
+        nvgFontSize(args.vg, 5.5f);
+        nvgFillColor(args.vg, on ? oled::ink() : oled::dim());
+        nvgText(args.vg, W * 0.5f, H * 0.68f, "NO CHANGE", NULL);
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.button != GLFW_MOUSE_BUTTON_LEFT || e.action != GLFW_PRESS) return;
+        if (module) { module->cells[module->selSec][module->selRow].pat = -1; module->edited(module->selSec); }
+        e.consume(this);
     }
 };
 
@@ -855,9 +1154,88 @@ struct SongMuteSq : OpaqueWidget {
     }
 };
 
+// REC, inside each row's label (a square as the MUTEs, in the record red): what the row's module plays now
+// goes into the selected pad at once (MS::captureRow). Lit for a moment when pressed.
+struct SongRecSq : OpaqueWidget {
+    MS* module = NULL;
+    int r = 0;
+    void drawLayer(const DrawArgs& args, int layer) override {   // the lit layer, over its label
+        if (layer != 1) return;
+        bool used = !module || module->rowId[r] >= 0;
+        bool on = module && module->recFlash[r] > 0.f;
+        if (module) module->recFlash[r] = std::max(0.f, module->recFlash[r] - 1.f / 60.f);
+        NVGcolor red = nvgRGB(0xff, 0x32, 0x28), col = used ? red : nvgRGB(0x3a, 0x3a, 0x3a);
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.4f);
+        nvgFillColor(args.vg, on ? col : kIdle);
+        nvgFill(args.vg);
+        nvgStrokeColor(args.vg, col);
+        nvgStrokeWidth(args.vg, on ? 1.2f : 0.8f);
+        nvgStroke(args.vg);
+        std::shared_ptr<window::Font> font = songFont();
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgFontSize(args.vg, 4.6f);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, on ? nvgRGB(0x10, 0x10, 0x10) : col);
+        nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, "REC", NULL);
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
+            if (module) module->captureRow(r);
+            e.consume(this);
+        }
+    }
+};
+
+// The JAM corner (bottom left), a square as wide as the row labels: MIDI IN and OUT, each a dim title over
+// its device (click to pick the port), over the square MIDI on / off button.
+static const float kJmLine = 3.2f, kJmSq = 6.6f;
+struct SongJamDisplay : TransparentWidget {
+    MS* module = NULL;
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        float W = box.size.x, H = box.size.y;
+        oled::box(args, W, H);
+        nvgBeginPath(args.vg);
+        for (float y : {2.f * kJmLine}) oled::divider(args, 4.f, mm2px(y), W - 4.f, mm2px(y));
+        oled::dividerStroke(args);
+        std::shared_ptr<window::Font> font = songFont();
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgScissor(args.vg, 0, 0, W, H);
+        midi::Port* ports[2] = {module ? (midi::Port*)&module->midiIn : NULL, module ? (midi::Port*)&module->midiOut : NULL};
+        static const char* const title[2] = {"MIDI IN", "MIDI OUT"};
+        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        for (int i = 0; i < 2; i++) {
+            std::string dev = "Maschine Jam - 1";
+            if (ports[i]) dev = ports[i]->getDeviceId() >= 0 ? ports[i]->getDeviceName(ports[i]->getDeviceId()) : "(no device)";
+            float y = mm2px(2.f * kJmLine * i);
+            nvgFontSize(args.vg, 5.5f);
+            nvgFillColor(args.vg, oled::dim());
+            nvgText(args.vg, 4.f, y + mm2px(kJmLine * 0.55f), title[i], NULL);
+            nvgFontSize(args.vg, 6.5f);
+            nvgFillColor(args.vg, oled::amber());
+            nvgText(args.vg, 4.f, y + mm2px(kJmLine * 1.4f), dev.c_str(), NULL);
+        }
+        nvgResetScissor(args.vg);
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.action != GLFW_PRESS || e.button != GLFW_MOUSE_BUTTON_LEFT || e.pos.y >= mm2px(4.f * kJmLine)) return;
+        if (module) {
+            if (e.pos.y < mm2px(2.f * kJmLine)) oled::midiMenu(&module->midiIn, "MIDI IN port");
+            else oled::midiMenu(&module->midiOut, "MIDI OUT port");
+        }
+        e.consume(this);
+    }
+};
 struct SynTHBloKMatrixSongWidget : ModuleWidget {
     Found found;
-    void step() override {
+    void onButton(const ButtonEvent& e) override {   // clicking the module hands it the JAM
+        MS* m = getModule<MS>();
+        if (m && e.action == GLFW_PRESS && m->params[MS::MIDI_ON_PARAM].getValue() > 0.5f) jamown::claim(m->id);
+        ModuleWidget::onButton(e);
+    }    void step() override {
         MS* m = getModule<MS>();
         if (m) {
             found.list = songlink::list();
@@ -881,7 +1259,7 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
         setModule(module);
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKMatrixSong.svg")));
         using namespace rack::componentlibrary;
-        const float PW = 162.56f;   // 32 HP
+        const float PW = 147.32f;   // 29 HP
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(PW - 3.5f, 3.5f))));
         SongTitle* title = createWidget<SongTitle>(mm2px(Vec(8.5f, 0.f)));
@@ -896,16 +1274,20 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
 
         // ---------------- left: the grid (rows = modules, columns = sections) ----------------
         // sized as MATRIX-DRUM's: 6.6 mm pads on a 7.4 mm pitch, the block centred on the left plate
-        const float GX = 31.4f, GP = 7.4f, GS = 6.6f, GY = 19.5f;
+        const float GX = 25.2f, GP = 7.4f, GS = 6.6f, GY = 19.5f;
         for (int s = 0; s < kSecs; s++) {
             SecHead* h = createWidget<SecHead>(mm2px(Vec(GX + GP * s, 10.5f)));
             h->box.size = mm2px(Vec(GS, 6.6f)); h->module = module; h->s = s;
             addChild(h);
         }
         for (int r = 0; r < kRows; r++) {
-            RowLabel* l = createWidget<RowLabel>(mm2px(Vec(12.6f, GY + GP * r)));
-            l->box.size = mm2px(Vec(17.6f, GS)); l->module = module; l->found = &found; l->r = r;
+            const float LX = 3.6f, LW = GX - 1.2f - LX;
+            RowLabel* l = createWidget<RowLabel>(mm2px(Vec(LX, GY + GP * r)));
+            l->box.size = mm2px(Vec(LW, GS)); l->module = module; l->found = &found; l->r = r;
             addChild(l);
+            SongRecSq* rq = createWidget<SongRecSq>(mm2px(Vec(LX + LW - kRecIn, GY + GP * r + (GS - kRecSq) * 0.5f)));
+            rq->box.size = mm2px(Vec(kRecSq, kRecSq)); rq->module = module; rq->r = r;
+            addChild(rq);
             for (int s = 0; s < kSecs; s++) {
                 SongPad* p = createWidget<SongPad>(mm2px(Vec(GX + GP * s, GY + GP * r)));
                 p->box.size = mm2px(Vec(GS, GS)); p->module = module; p->found = &found; p->r = r; p->s = s;
@@ -925,85 +1307,117 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
             addChild(s);
         }
 
+        // ---------------- bottom left: the JAM (MIDI IN / OUT, the square MIDI on / off) ----------------
+        {
+            const float JX = 3.6f, JW = GX - 1.2f - JX, JY = LY + LH - JW;   // square, as wide as the row labels
+            SongJamDisplay* jd = createWidget<SongJamDisplay>(mm2px(Vec(JX, JY)));
+            jd->box.size = mm2px(Vec(JW, JW)); jd->module = module;
+            addChild(jd);
+            oled::Cell* jc = createParam<oled::Cell>(mm2px(Vec(JX + 2.f, JY + JW - kJmSq - 0.9f)), module, MS::MIDI_ON_PARAM);
+            jc->box.size = mm2px(Vec(kJmSq, kJmSq)); jc->module = module; jc->label = "MIDI"; jc->latch = true; jc->fontSize = 5.5f;
+            addParam(jc);
+        }
+
         // ---------------- right: the SONG screen and transport ----------------
-        const float SX = 101.6f, SW = PW - SX - 4.2f, SY = 10.4f;
-        const float ctY = SY + 2.f * oled::kRow + 0.4f, TH = 2.f * CH + GAP;
-        const float SH = ctY - SY + TH + 1.2f;
-        SongDisplay* sd = createWidget<SongDisplay>(mm2px(Vec(SX, SY)));
-        sd->box.size = mm2px(Vec(SW, SH)); sd->module = module;
-        addChild(sd);
+        const float SX = PW - 60.96f, SW = PW - SX - 4.2f, SY = 10.4f;
         const float x0 = SX + 2.f, inner = SW - 4.f;
-        // REC | PLAY | RUN | RESET (tall), then BAR over BEAT
         auto pcell = [&](float x, float y, float w, float h, int param, const char* lab) {
             oled::Cell* c = createParam<oled::Cell>(mm2px(Vec(x, y)), module, param);
             c->box.size = mm2px(Vec(w, h)); c->module = module; c->label = lab;
             addParam(c);
             return c;
         };
-        auto tint = [&](float x, int param, const char* lab, NVGcolor col, int jack) {
-            echoloop::TintCell* c = createParam<echoloop::TintCell>(mm2px(Vec(x, ctY)), module, param);
-            c->box.size = mm2px(Vec((inner - 4.f * CG) / 5.f, TH)); c->module = module; c->label = lab; c->latch = true;
-            c->fontSize = 7.f; c->tint = col; c->jack = jack;
+        auto tint = [&](float x, float y, float w, int param, const char* lab, NVGcolor col, int jack) {
+            echoloop::TintCell* c = createParam<echoloop::TintCell>(mm2px(Vec(x, y)), module, param);
+            c->box.size = mm2px(Vec(w, CH)); c->module = module; c->label = lab; c->latch = true;
+            c->tint = col; c->jack = jack;
             addParam(c);
         };
-        const float tw = (inner - 4.f * CG) / 5.f;
-        tint(x0, MS::REC_PARAM, "REC", nvgRGB(0xff, 0x32, 0x28), -1);
-        tint(x0 + (tw + CG), MS::PLAY_PARAM, "PLAY", nvgRGB(0x5c, 0xc8, 0xf2), -1);
-        tint(x0 + 2.f * (tw + CG), MS::RUN_PARAM, "RUN", oled::green(), MS::RUN_INPUT);
-        oled::Cell* rs = pcell(x0 + 3.f * (tw + CG), ctY, tw, TH, MS::RESET_PARAM, "RESET");
-        rs->fontSize = 7.f; rs->jack = MS::RESET_INPUT;
-        if (module) rs->flash = &module->resetFlash;
-        oled::Cell* qb = pcell(x0 + 4.f * (tw + CG), ctY, tw, CH, MS::QUANT_PARAM, "BAR");
-        qb->setTo = 0;
-        oled::Cell* qt = pcell(x0 + 4.f * (tw + CG), ctY + CH + GAP, tw, CH, MS::QUANT_PARAM, "BEAT");
-        qt->setTo = 1;
-
-        // ---------------- right, under the SONG screen: the CELL editor (the selected pad) ----------------
-        const float EX = SX, EY = SY + SH + 2.f, EW = SW, EH = 2.f * oled::kRow + 0.5f + 4.f * CH + 3.f * GAP + 0.8f;
-        EdDisplay* ed = createWidget<EdDisplay>(mm2px(Vec(EX, EY)));
-        ed->box.size = mm2px(Vec(EW, EH)); ed->module = module; ed->found = &found;
-        addChild(ed);
         auto btn = [&](float x, float y, float w, float h, const char* lab) {
             SongBtn* b = createWidget<SongBtn>(mm2px(Vec(x, y)));
             b->box.size = mm2px(Vec(w, h)); b->label = lab; b->fontSize = 5.2f;
             addChild(b);
             return b;
         };
-        auto selCell = [=]() -> MS::Cell* { return module ? &module->cells[module->selSec][module->selRow] : NULL; };
-        auto edited = [=]() { if (module) module->edited(module->selSec); };
+        // SONG: state | bar | tempo, NOW; then RUN | RESET | BAR | BEAT
+        const float SH = 2.f * oled::kRow + 0.4f + CH + 1.2f, ctY = SY + 2.f * oled::kRow + 0.4f;
+        SongDisplay* sd = createWidget<SongDisplay>(mm2px(Vec(SX, SY)));
+        sd->box.size = mm2px(Vec(SW, SH)); sd->module = module;
+        addChild(sd);
         {
-            float y = EY + 2.f * oled::kRow + 0.5f;
-            // pattern: KEEP | 1 .. 8
-            const float pw = (inner - 8.f * CG) / 9.f;
-            static const char* const pn[9] = {"KEEP", "1", "2", "3", "4", "5", "6", "7", "8"};
-            for (int i = 0; i < 9; i++) {
-                SongBtn* b = btn(x0 + i * (pw + CG), y, pw, CH, pn[i]);
-                if (i == 0) b->fontSize = 4.6f;
-                b->lit = [=]() { MS::Cell* c = selCell(); return c ? c->pat == i - 1 : i == 1; };
-                b->press = [=](int) { if (MS::Cell* c = selCell()) { c->pat = i - 1; edited(); } };
+            const float w = (inner - 3.f * CG) / 4.f;
+            tint(x0, ctY, w, MS::RUN_PARAM, "RUN", oled::green(), MS::RUN_INPUT);
+            oled::Cell* rs = pcell(x0 + (w + CG), ctY, w, CH, MS::RESET_PARAM, "RESET");
+            rs->jack = MS::RESET_INPUT;
+            if (module) rs->flash = &module->resetFlash;
+            pcell(x0 + 2.f * (w + CG), ctY, w, CH, MS::QUANT_PARAM, "BAR")->setTo = 0;
+            pcell(x0 + 3.f * (w + CG), ctY, w, CH, MS::QUANT_PARAM, "BEAT")->setTo = 1;
+        }
+
+        // ---------------- RECORD: the take and the looper REC ----------------
+        const float RY = SY + SH + 2.f, RH = oled::kRow + 0.5f + 2.f * CH + GAP + 0.8f;
+        RecDisplay* rd = createWidget<RecDisplay>(mm2px(Vec(SX, RY)));
+        rd->box.size = mm2px(Vec(SW, RH)); rd->module = module;
+        addChild(rd);
+        auto selCell = [=]() -> MS::Cell* { return module ? &module->cells[module->selSec][module->selRow] : NULL; };
+        {
+            const float y = RY + oled::kRow + 0.5f, w = (inner - 3.f * CG) / 4.f;
+            tint(x0, y, w, MS::REC_PARAM, "REC", nvgRGB(0xff, 0x32, 0x28), -1);
+            tint(x0 + (w + CG), y, w, MS::PLAY_PARAM, "PLAY", nvgRGB(0x5c, 0xc8, 0xf2), -1);
+            SongBtn* cl = btn(x0 + 2.f * (w + CG), y, w, CH, "CLEAR");
+            cl->fontSize = 6.f;
+            cl->lit = []() { return false; };
+            cl->press = [=](int) { if (module) module->clearTakeReq = true; };
+            // the selected cell's looper records as its section launches
+            SongBtn* lr = btn(x0 + 3.f * (w + CG), y, w, CH, "LOOPER REC");
+            lr->tint = nvgRGB(0xff, 0x32, 0x28);
+            lr->lit = [=]() { MS::Cell* c = selCell(); return c && c->loop == songlink::L_REC; };
+            lr->press = [=](int) { if (MS::Cell* c = selCell()) c->loop = c->loop == songlink::L_REC ? songlink::L_NONE : songlink::L_REC; };
+            // LENGTH: FREE 1 2 4 8 16 32
+            const float lx = x0 + 9.f, lw = (x0 + inner - lx - 6.f * CG) / 7.f, ly = y + CH + GAP;
+            static const char* const ln[7] = {"FREE", "1", "2", "4", "8", "16", "32"};
+            for (int i = 0; i < 7; i++) {
+                oled::Cell* c = pcell(lx + i * (lw + CG), ly, lw, CH, MS::LEN_PARAM, ln[i]);
+                c->setTo = i; c->fontSize = i == 0 ? 5.f : 6.f;
             }
-            // MUTE | LOOP: NONE PLAY STOP REC ONCE
-            y += CH + GAP;
-            const float lw = (inner - 5.f * CG) / 6.f;
-            SongBtn* mu = btn(x0, y, lw, CH, "MUTE");
-            mu->tint = nvgRGB(0x5c, 0xc8, 0xf2);
-            mu->lit = [=]() { MS::Cell* c = selCell(); return c && c->mute; };
-            mu->press = [=](int) { if (MS::Cell* c = selCell()) { c->mute = !c->mute; edited(); } };
-            static const char* const ln[5] = {"NO LOOP", "PLAY", "STOP", "REC", "ONCE"};
-            for (int a = 0; a < 5; a++) {
-                SongBtn* b = btn(x0 + (a + 1) * (lw + CG), y, lw, CH, ln[a]);
-                if (a == 0) b->fontSize = 4.6f;
-                if (a == songlink::L_REC) b->tint = nvgRGB(0xff, 0x32, 0x28);
+        }
+
+        // ---------------- CELL: the selected pad (pattern, KEEP, loop action, edits) ----------------
+        const float EY = RY + RH + 2.f, PS = 6.6f, PP = 7.4f, PH = PS + 0.8f + PS;
+        const float EH = oled::kRow + 0.6f + PH + GAP + CH + GAP + CH + 0.8f;
+        EdDisplay* ed = createWidget<EdDisplay>(mm2px(Vec(SX, EY)));
+        ed->box.size = mm2px(Vec(SW, EH)); ed->module = module; ed->found = &found;
+        addChild(ed);
+        {
+            float y = EY + oled::kRow + 0.6f;
+            // KEEP, then patterns 1-8 as two rows of four squares
+            const float px = x0 + inner - (4.f * PP - 0.8f);
+            SongKeepBtn* kb = createWidget<SongKeepBtn>(mm2px(Vec(x0, y)));
+            kb->box.size = mm2px(Vec(px - 1.2f - x0, PH)); kb->module = module;
+            addChild(kb);
+            for (int p = 0; p < 8; p++) {
+                SongPatSq* q = createWidget<SongPatSq>(mm2px(Vec(px + PP * (p % 4), y + (PS + 0.8f) * (p / 4))));
+                q->box.size = mm2px(Vec(PS, PS)); q->module = module; q->p = p;
+                addChild(q);
+            }
+            // LOOP: NONE PLAY STOP ONCE (REC is LOOPER REC, above)
+            y += PH + GAP;
+            static const char* const ln[4] = {"NO LOOP", "PLAY", "STOP", "ONCE"};
+            static const int la[4] = {songlink::L_NONE, songlink::L_PLAY, songlink::L_STOP, songlink::L_ONCE};
+            const float lw = (inner - 3.f * CG) / 4.f;
+            for (int i = 0; i < 4; i++) {
+                SongBtn* b = btn(x0 + i * (lw + CG), y, lw, CH, ln[i]);
+                int a = la[i];
                 if (a == songlink::L_PLAY || a == songlink::L_ONCE) b->tint = oled::green();
-                b->lit = [=]() { MS::Cell* c = selCell(); return c ? c->loop == a : a == 0; };
+                b->lit = [=]() { MS::Cell* c = selCell(); return c ? c->loop == a : a == songlink::L_NONE; };
                 b->press = [=](int) { if (MS::Cell* c = selCell()) c->loop = a; };
             }
-            // the cell and its row (across every section); then the section: COPY to the next, CLEAR it
-            static const char* const tn[5] = {"CLEAR CELL", "CELL TO ROW", "CLEAR ROW", "COPY SECTION >", "CLEAR SECTION"};
-            for (int i = 0; i < 5; i++) {
-                int per = i < 3 ? 3 : 2, k = i < 3 ? i : i - 3;
-                float w = (inner - (per - 1) * CG) / per;
-                SongBtn* b = btn(x0 + k * (w + CG), y + (i < 3 ? 1.f : 2.f) * (CH + GAP), w, CH, tn[i]);
+            // the cell, the cell across its row, the section to the next
+            y += CH + GAP;
+            static const char* const tn[3] = {"CLEAR CELL", "CELL TO ROW", "COPY SECTION >"};
+            const float tw = (inner - 2.f * CG) / 3.f;
+            for (int i = 0; i < 3; i++) {
+                SongBtn* b = btn(x0 + i * (tw + CG), y, tw, CH, tn[i]);
                 b->lit = []() { return false; };
                 b->press = [=](int) {
                     if (!module) return;
@@ -1011,21 +1425,18 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
                     int s = m->selSec, r = m->selRow;
                     if (i == 0) m->cells[s][r] = MS::Cell();
                     if (i == 1) for (int k = 0; k < kSecs; k++) m->cells[k][r] = m->cells[s][r];
-                    if (i == 2) for (int k = 0; k < kSecs; k++) m->cells[k][r] = MS::Cell();
-                    if (i == 3) { int to = (s + 1) % kSecs; for (int k = 0; k < kRows; k++) m->cells[to][k] = m->cells[s][k]; m->selSec = to; }
-                    if (i == 4) for (int k = 0; k < kRows; k++) m->cells[s][k] = MS::Cell();
+                    if (i == 2) { int to = (s + 1) % kSecs; for (int k = 0; k < kRows; k++) m->cells[to][k] = m->cells[s][k]; m->selSec = to; }
                     m->edited(m->curSec);
                 };
             }
         }
-        // BPM
-        const float KY = EY + EH + 9.f, KX = SX + SW * 0.5f;
+        // BPM: on the left of the input row, the CLOCK / RUN / RESET jacks beside it
+        const float KY = 98.f, KX = SX + 8.f;
         addChild(KnobTicks::create(Vec(KX, KY)));
         ParamWidget* kn = createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(KX, KY)), module, MS::BPM_PARAM);
         if (Knob* k = dynamic_cast<Knob*>(kn)) k->snap = true;
         addParam(kn);
-        label(KX + 9.f, KY, "BPM");
-
+        label(KX, KY - 7.f, "BPM");
         // jacks: inputs, then outputs
         auto jack = [&](float x, float y, int id, bool out, const char* name) {
             label(x, y - 5.5f, name);
@@ -1035,9 +1446,9 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
             } else addInput(createInputCentered<SmallJack>(mm2px(Vec(x, y)), module, id));
         };
         const float JY = 118.f;
-        jack(SX + 10.f, 98.f, MS::CLOCK_INPUT, false, "CLK IN");
-        jack(SX + SW * 0.5f, 98.f, MS::RUN_INPUT, false, "RUN");
-        jack(SX + SW - 10.f, 98.f, MS::RESET_INPUT, false, "RESET");
+        jack(SX + 23.f, KY, MS::CLOCK_INPUT, false, "CLK IN");
+        jack(SX + 37.f, KY, MS::RUN_INPUT, false, "RUN");
+        jack(SX + SW - 6.f, KY, MS::RESET_INPUT, false, "RESET");
         static const char* const on[5] = {"CLOCK", "RUN", "RESET", "BAR", "SECT"};
         for (int i = 0; i < 5; i++) jack(SX + 5.5f + i * (SW - 11.f) / 4.f, JY, MS::CLOCK_OUTPUT + i, true, on[i]);
     }
@@ -1050,7 +1461,28 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
             for (int s = 0; s < kSecs; s++) for (int r = 0; r < kRows; r++) m->cells[s][r] = MS::Cell();
             m->edited(m->curSec);
         }));
-        menu->addChild(createMenuItem("Clear the take", "", [=]() { m->clearTakeReq = true; }));
+        menu->addChild(createMenuItem("Clear the selected row (every section)", "", [=]() {
+            for (int s = 0; s < kSecs; s++) m->cells[s][m->selRow] = MS::Cell();
+            m->edited(m->curSec);
+        }));
+        menu->addChild(createMenuItem("Clear the selected section", "", [=]() {
+            for (int r = 0; r < kRows; r++) m->cells[m->selSec][r] = MS::Cell();
+            m->edited(m->curSec);
+        }));
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createSubmenuItem("JAM controls", "", [](Menu* sub) {
+            static const char* const key[] = {
+                "Pad: select the cell", "MUTE + pad: mute the cell", "CLEAR + pad: clear the cell",
+                "Scene 1-8: launch A-H", "PREV / NEXT: launch the section before / after",
+                "A-H: mute the row", "SOLO + A-H: REC the row into the selected pad", "Touch strips: row levels",
+                "PLAY: RUN", "REC: record a take", "SONG: play the take", "TEMPO: RESET", "GRID: launch on bar / beat",
+                "Arrows: move the selected cell", "DUPLICATE: copy the section to the next", "Knob: BPM"};
+            for (const char* k : key) sub->addChild(createMenuLabel(k));
+        }));
+        menu->addChild(createSubmenuItem("JAM matrix page (must match the JAM)", string::f("%d", m->jamPage), [=](Menu* sub) {
+            for (int p = 1; p <= 6; p++)
+                sub->addChild(createCheckMenuItem(string::f("%d", p), "", [=]() { return m->jamPage == p; }, [=]() { m->jamPage = p; }));
+        }));
     }
 };
 
