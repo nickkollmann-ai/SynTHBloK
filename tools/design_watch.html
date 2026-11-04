@@ -469,6 +469,14 @@ async function scanFocus(first) {
 }
 async function review(job) {
   pendingReview = null;
+  // {"clear": true}: the work is finished, LIVE.DRAWING goes back to blank
+  if (job.clear) {
+    const draw = document.getElementById('draw');
+    draw.classList.remove('edit', 'busy');
+    draw.textContent = 'Save an SVG in res/ and it is drawn here, piece by piece.';
+    feed('review finished · drawing cleared');
+    return;
+  }
   const p = job.path && ('/' + job.path.replace(/\\/g, '/').replace(/^\/+/, ''));
   if (!p || !/\.svg$/i.test(p)) return;
   const text = await getText(p);
