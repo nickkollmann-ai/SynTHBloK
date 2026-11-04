@@ -15,7 +15,16 @@ body{margin:0;background:var(--bg);color:var(--tx);font:12px/1.5 ui-monospace,Co
 header{display:flex;align-items:center;gap:14px;padding:8px 14px;border-bottom:1px solid var(--line);background:#070b10}
 header b{color:var(--mg);letter-spacing:.16em;font-weight:600}
 header span{color:var(--mut)}
-#live{margin-left:auto;color:var(--cy)}
+#live{color:var(--cy)}
+/* the commit -> push readout in the top bar: COMMIT lights on a new commit, PUSH waits (orange) until origin has it (green) */
+#git{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.1em;cursor:default}
+#git span{padding:1px 8px;border:1px solid var(--line);color:var(--mut);white-space:nowrap}
+#git span b{font-weight:500;color:var(--tx);margin-left:4px}
+#git i{font-style:normal;color:var(--line)}
+#git .hot{border-color:var(--mg);color:var(--mg);animation:gpulse 1s ease 3}
+#git .wait{border-color:var(--or);color:var(--or);animation:gpulse 1.2s ease infinite}
+#git .ok{border-color:var(--ok);color:var(--ok)}
+@keyframes gpulse{50%{box-shadow:0 0 8px currentColor}}
 /* DESIGN on the left; everything that shows code (LIVE.ASSEMBLY over COMPILER) stacked in the centre;
    LIVE.DRAWING (the SVG being built) on the right. */
 main{display:grid;grid-template-columns:minmax(260px,.7fr) minmax(0,1fr) minmax(0,1.2fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"design asm draw" "design comp draw";min-height:0}
@@ -94,6 +103,7 @@ footer button em{display:block;font-style:normal;background:var(--cy);color:#070
 <body>
 <header><b>SYNTHBLOK.WORKBENCH</b><span>panel art + compiler, live</span>
   <div class="modes"><button type="button" class="on" data-s="mod">MODULES <span id="nmod"></span></button><button type="button" data-s="file">FILES</button></div>
+  <div id="git"><span id="g-commit">COMMIT<b>-</b></span><i>→</i><span id="g-push">PUSH<b>-</b></span></div>
   <span id="live">● watching</span></header>
 <main>
   <section class="pane" id="p-design">
@@ -245,11 +255,11 @@ const gitSeen = {};
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 async function scanGit(first) {
   const logs = [['/.git/logs/HEAD', 'head'], ['/.git/logs/refs/remotes/origin/master', 'push']];
-  const evs = [];
+  const evs = [], all = {};
   for (const [p, kind] of logs) {
     const txt = await getText(p);
     if (txt === null) continue;
-    const lines = txt.trimEnd().split('\n');
+    const lines = all[kind] = txt.trimEnd().split('\n');
     const from = gitSeen[p] === undefined ? Math.max(0, lines.length - 4) : gitSeen[p];
     for (const ln of lines.slice(from)) {
       const m = ln.match(/^\S+ (\S+) .*? (\d+) [+-]\d{4}\t(.*)$/);
@@ -264,6 +274,24 @@ async function scanGit(first) {
     gitSeen[p] = lines.length;
   }
   evs.sort((a, b) => a[0] - b[0]).forEach(([at, m]) => gitFeed(m, at));
+  gitBadge(all.head || [], all.push || [], first);
+}
+// The top-bar readout: the newest commit, and whether origin has it yet (commits since the pushed one = waiting).
+let gitHead = '';
+function gitBadge(head, push, first) {
+  const sha = ln => (ln || '').split(' ')[1] || '';
+  const top = head[head.length - 1], h = sha(top), o = sha(push[push.length - 1]);
+  if (!h) return;
+  const c = document.getElementById('g-commit'), p = document.getElementById('g-push');
+  const msg = ((top.split('\t')[1] || '').replace(/^commit(?: \(\w+\))?: /, ''));
+  c.innerHTML = `COMMIT<b>${h.slice(0, 7)}</b>`;
+  c.title = msg + ' · ' + time(+(top.match(/ (\d+) [+-]\d{4}\t/) || [0, 0])[1] * 1000);
+  if (h !== gitHead && !first) { c.className = ''; void c.offsetWidth; c.className = 'hot'; }
+  gitHead = h;
+  let ahead = 0;
+  for (let i = head.length - 1; i >= 0 && sha(head[i]) !== o; i--) if (/\tcommit/.test(head[i])) ahead++;
+  if (h === o) { p.className = 'ok'; p.innerHTML = 'PUSH<b>✓ ON GITHUB</b>'; p.title = 'origin/master is at ' + o.slice(0, 7); }
+  else { p.className = 'wait'; p.innerHTML = `PUSH<b>${ahead || 1} WAITING</b>`; p.title = 'origin/master is at ' + (o.slice(0, 7) || '?'); }
 }
 
 async function scanArt(first) {
