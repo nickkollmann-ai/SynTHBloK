@@ -78,13 +78,13 @@ struct M8Voice {
     M8Osc oscA, oscB;
     M8Svf f1, f2;
     float subPhase = 0.f, env = 0.f, cut = 0.5f;
-    float adsr = 0.f, gateLeft = 0.f;
+    float adsr = 0.f, gateLeft = 0.f, vel = 1.f;   // vel: the hit's level (an accent plays above 1)
     int stage = 0;   // 0 idle, 1 attack, 2 decay/sustain, 3 release
     float drift = 0.f, driftTarget = 0.f, driftTimer = 0.f;
     uint32_t rng = 1;
     explicit M8Voice(uint32_t seed = 1) : rng(seed * 2654435761u + 1u) { oscB.phase = 0.37f; }
     float rand01() { rng = rng * 1664525u + 1013904223u; return (rng >> 8) * (1.f / 16777216.f); }
-    void trigger(float gate) { env = 1.f; stage = 1; gateLeft = gate; }
+    void trigger(float gate, float v = 1.f) { env = 1.f; stage = 1; gateLeft = gate; vel = v; }
     float process(float sr, const float* p, const M8Global& g) {
         // ADSR: attack 1 ms..2 s, decay 5 ms..2 s, release 5 ms..4 s (time constants)
         auto coef = [&](float t) { return 1.f - std::exp(-1.f / (t * sr)); };
@@ -131,7 +131,7 @@ struct M8Voice {
         float y = g.mode < 0.5f ? lp2 + (bp2 - lp2) * (g.mode * 2.f) : bp2 + (hp2 - bp2) * ((g.mode - 0.5f) * 2.f);
 
         float drive = 1.f + 6.f * p[VP_DRIVE];
-        return std::tanh(y * drive) / std::tanh(drive) * env * adsr * p[VP_LEVEL];
+        return std::tanh(y * drive) / std::tanh(drive) * env * adsr * p[VP_LEVEL] * vel;
     }
 };
 

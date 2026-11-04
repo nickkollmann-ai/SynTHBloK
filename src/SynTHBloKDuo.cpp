@@ -123,7 +123,7 @@ struct SynTHBloKDuo : Module, songlink::Member {
                     FLT_SUS_PARAM, FLT_REL_PARAM, FLT_AMP_PARAM, FLT_BYPASS_PARAM, FLT_IN_PARAM, FLT_DRYWET_PARAM, FLT_TRIG_PARAM,
                     FX_ON_PARAM, MIDI_ON_PARAM,
                     // FINAL stage (MATRIX FORGE's): DELAY and SPACE, then FORGE FX and MASTER
-                    DELAY_PARAM, SPACE_PARAM,
+                    DELAY_PARAM, SPACE_PARAM, RAND_PARAM,
                     NUM_PARAMS };
     // IN L / R, OPEN, GLITCH, GATE: as on MATRIX FORGE (the last three go straight to FORGE FX)
     enum InputIds { CLOCK_INPUT, RESET_INPUT, RUN_INPUT, IN_L_INPUT, IN_R_INPUT, OPEN_INPUT, GLITCH_INPUT, GATE_INPUT, NUM_INPUTS };
@@ -133,6 +133,7 @@ struct SynTHBloKDuo : Module, songlink::Member {
     static const int kFltSm = FLT_DRYWET_PARAM - FLT_CUT_PARAM + 1;
 
     uint8_t note[8][2][8];        // [pattern][LEAD, BASS][step]: bit d = scale degree d (a chord), 0 = rest
+    uint8_t acc[8][2] = {};       // [pattern][LEAD, BASS]: bit c = step c accented (right-click a pad)
     bool mute[2] = {};
     static const int kVoices = 4; // a step plays its lowest 4 notes
     DualOscVoice eng[2][kVoices];
@@ -152,7 +153,7 @@ struct SynTHBloKDuo : Module, songlink::Member {
     M8Delay m8delay;
     M8Reverb reverb;
     float delayMix = 0.f, spaceMix = 0.f;
-    dsp::SchmittTrigger clkTrig, rstTrig, runTrig, rstBtnTrig, clrTrig;
+    dsp::SchmittTrigger clkTrig, rstTrig, runTrig, rstBtnTrig, clrTrig, randTrig;
 
     // Maschine JAM ("JAM Template 4 Rack", MIDI channel 1): its 8x8 pads are the note grid.
     midi::InputQueue midiIn;
@@ -195,8 +196,8 @@ struct SynTHBloKDuo : Module, songlink::Member {
         configSwitch(RUN_PARAM, 0.f, 1.f, 1.f, "Run (a trigger at the RUN jack toggles it)", {"Stopped", "Running"});
         configButton(RESET_PARAM, "Reset (a trigger at the RESET jack also resets)");
         configButton(CLEAR_PARAM, "Clear the shown synth's notes in this pattern");
-        configParam(MASTER_PARAM, 0.f, 1.f, 0.8f, "Master volume (OUT L / R)", "%", 0.f, 100.f);
-        configParam(PAGE_PARAM, 1.f, 6.f, 1.f, "JAM matrix page (must match the JAM)");
+        configButton(RAND_PARAM, "Random LEAD / BASS lines on all 8 patterns (a chord progression, in key) and new strip values on all 8 banks");
+        configParam(MASTER_PARAM, 0.f, 1.f, 0.8f, "Master volume (OUT L / R)", "%", 0.f, 100.f);        configParam(PAGE_PARAM, 1.f, 6.f, 1.f, "JAM matrix page (must match the JAM)");
         paramQuantities[PAGE_PARAM]->snapEnabled = true;
         configSwitch(LEARN_PARAM, 0.f, 1.f, 0.f, "Learn JAM page: then press the TOP-LEFT pad on the JAM", {"Off", "Armed"});
         configSwitch(BANK_PARAM, 1.f, 8.f, 1.f, "Strip bank", std::vector<std::string>(kBankLabel, kBankLabel + 8));
@@ -286,7 +287,8 @@ struct SynTHBloKDuo : Module, songlink::Member {
         for (int e = 0; e < 2; e++) for (int c = 0; c < 8; c++) note[0][e][c] = defNote[e][c] < 0 ? 0 : 1 << defNote[e][c];
     }
 
-    void clearAll() { for (int p = 0; p < 8; p++) for (int e = 0; e < 2; e++) for (int c = 0; c < 8; c++) note[p][e][c] = 0; }
+    void clearAll() { for (int p = 0; p < 8; p++) for (int e = 0; e < 2; e++) { for (int c = 0; c < 8; c++) note[p][e][c] = 0; acc[p][e] = 0; } }
+    void clearView() { for (int c = 0; c < 8; c++) note[curPat()][view()][c] = 0; acc[curPat()][view()] = 0; }
     bool gateOn(int e) { for (auto& v : eng[e]) if (v.gateOn()) return true; return false; }
     int curPat() { return clamp((int)params[PAT_PARAM].getValue(), 1, 8) - 1; }
     int songPatternNow() override { return curPat(); }
@@ -295,7 +297,19 @@ struct SynTHBloKDuo : Module, songlink::Member {
     int engParam(int e, int p) { return (e ? BASS_PARAM : LEAD_PARAM) + p; }
     // Pad (r, c): the note 7 - r at step c of the shown synth; several per step make a chord.
     bool padOn(int r, int c) { return note[curPat()][view()][c] >> (7 - r) & 1; }
-    void togglePad(int r, int c) { note[curPat()][view()][c] ^= 1 << (7 - r); }
+    void togglePad(int r, int c) {
+        uint8_t& n = note[curPat()][view()][c];
+        n ^= 1 << (7 - r);
+        if (!n) acc[curPat()][view()] &= ~(1 << c);   // an emptied step loses its accent
+    }
+    // Right-click: the step's accent on / off (a whole chord is accented); an empty pad also gets its note.
+    bool stepAcc(int c) { return acc[curPat()][view()] >> c & 1; }
+    void toggleAccent(int r, int c) {
+        uint8_t& n = note[curPat()][view()][c];
+        uint8_t& a = acc[curPat()][view()];
+        if (!(n >> (7 - r) & 1)) { n |= 1 << (7 - r); a |= 1 << c; return; }
+        a ^= 1 << c;
+    }
 
     // MIDI note of scale degree deg (0..7) for LEAD (from C4) or BASS (from C2).
     int midiNote(int e, int deg) {
@@ -321,7 +335,7 @@ struct SynTHBloKDuo : Module, songlink::Member {
             eng[e][k].noteOn(440.f * std::pow(2.f, (n - 69) / 12.f), tie ? stepSec * 1.1f : std::max(0.01f, gate * stepSec), tie && tied[e]);
             k++;
         }
-        chordGain[e] = 1.f / std::sqrt((float)k);
+        chordGain[e] = (acc[curPat()][e] >> step & 1 ? 1.4f : 1.f) / std::sqrt((float)k);   // an accent +3 dB
         tied[e] = tie;
         return true;
     }
@@ -371,6 +385,102 @@ struct SynTHBloKDuo : Module, songlink::Member {
         ParamQuantity* q = paramQuantities[id];
         stripTgt[id] = q->getMinValue() + clamp(x, 0.f, 1.f) * (q->getMaxValue() - q->getMinValue());
     }
+    // RAND: 8 related patterns and new strip values, always in KEY / SCALE and in harmony. The patterns follow
+    // a chord progression (four chords, twice; only chords with a perfect fifth in the scale). BASS plays the
+    // chord's root on the first step, then roots, fifths and octaves on a rhythm all 8 patterns share. LEAD
+    // keeps one rhythm too: on the beats it lands on a tone of the chord, between them it moves by a step or
+    // two (never more than a fourth up or down); most beats play a 2- or 3-note chord. Patterns 4 and 8
+    // add a pickup. Accents fall on the beats. The synth strips (banks A..E) glide into ranges that keep both
+    // synths clean, in tune and balanced; the free banks F..H (CV only) take any value.
+    void randomizeAll() {
+        auto rnd = []() { return random::uniform(); };
+        auto pick = [&](int n) { return std::min((int)(rnd() * n), n - 1); };
+        int s = clamp((int)params[SCALE_PARAM].getValue(), 0, kScaleCount - 1), n = kScaleLen[s];
+        auto semi = [&](int d) { return 12 * (d / n) + kScale[s][d % n]; };   // degree -> semitones above the key
+        auto fifthUp = [&](int d) { for (int t = d; t <= d + n; t++) if (semi(t) - semi(d) == 7) return t; return -1; };
+        auto chordTone = [&](int t, int root) {
+            int i = ((semi(t) - semi(root)) % 12 + 12) % 12;
+            return i == 0 || i == 3 || i == 4 || i == 7;
+        };
+        // the progression (chord roots as scale degrees)
+        static const int kProg[8][4] = {{0, 5, 3, 4}, {0, 4, 5, 3}, {0, 3, 4, 0}, {0, 3, 0, 4},
+                                        {0, 5, 3, 0}, {0, 6, 5, 4}, {0, 3, 6, 4}, {0, 2, 3, 4}};
+        std::vector<int> ok;
+        for (int i = 0; i < 8; i++) {
+            bool good = true;
+            for (int k = 0; k < 4; k++) good &= kProg[i][k] < n && fifthUp(kProg[i][k]) >= 0;
+            if (good) ok.push_back(i);
+        }
+        int prog[4] = {0, 0, 0, 0};
+        if (!ok.empty()) for (int k = 0; k < 4; k++) prog[k] = kProg[ok[pick((int)ok.size())]][k];
+        else {   // e.g. a pentatonic: any roots that have a fifth, home again at the end
+            std::vector<int> roots;
+            for (int d = 0; d < n; d++) if (fifthUp(d) >= 0) roots.push_back(d);
+            prog[1] = roots[pick((int)roots.size())];
+            prog[2] = roots[pick((int)roots.size())];
+        }
+        // shared rhythms (bit c = step c) and the bass's shape per step: root, fifth or octave
+        static const int kBassR[6] = {0x11, 0x91, 0x51, 0x15, 0x55, 0x31};
+        int br = kBassR[pick(6)], lr = 0x11, shape[8];
+        for (int c = 1; c < 8; c++) if (c != 4 && rnd() < 0.4f) lr |= 1 << c;
+        for (int c = 0; c < 8; c++) { float x = rnd(); shape[c] = c == 0 ? 0 : x < 0.6f ? 0 : x < 0.85f ? 1 : 2; }
+        int d = 0;
+        for (int t = 2; t <= 5; t++) if (chordTone(t, prog[0])) { d = t; break; }
+        for (int p = 0; p < 8; p++) {
+            int R = prog[p % 4];
+            int lrp = (p == 3 || p == 7) ? lr | 0x80 : lr;
+            for (int c = 0; c < 8; c++) {
+                // BASS
+                int b = R;
+                if (shape[c] == 1) {   // the fifth, or the same note an octave down (a fourth below the root)
+                    int f = fifthUp(R);
+                    if (f > 7) for (int t = 0; t < R; t++) if (semi(R) - semi(t) == 5) f = t;
+                    if (f <= 7) b = f;
+                }
+                if (shape[c] == 2 && R + n <= 7) b = R + n;
+                note[p][1][c] = br >> c & 1 ? 1 << b : 0;
+                // LEAD
+                uint8_t m = 0;
+                if (lrp >> c & 1) {
+                    if (c % 4 == 0 || rnd() < 0.5f) {   // a chord tone, the nearest (within a fourth)
+                        int best = -1;
+                        for (int t = 0; t <= 7; t++)
+                            if (chordTone(t, R) && std::abs(t - d) <= 4 && (c % 4 == 0 || t != d) &&
+                                (best < 0 || std::abs(t - d) < std::abs(best - d) || (std::abs(t - d) == std::abs(best - d) && rnd() < 0.5f)))
+                                best = t;
+                        d = best >= 0 ? best : R;
+                    } else {   // a step or two through the scale, turning back at the edges
+                        int mv = (pick(2) + 1) * (rnd() < 0.5f ? 1 : -1);
+                        if (d + mv < 0 || d + mv > 7) mv = -mv;
+                        d += mv;
+                    }
+                    m = 1 << d;
+                    if (c % 4 == 0 && rnd() < 0.75f) {   // a chord: 1 or 2 more of its tones above (below at the top)
+                        int want = 1 + pick(2);
+                        for (int t = d + 1; t <= 7 && want; t++) if (chordTone(t, R)) { m |= 1 << t; want--; }
+                        for (int t = d - 1; t >= 0 && want; t--) if (chordTone(t, R)) { m |= 1 << t; want--; }
+                    }
+                }
+                note[p][0][c] = m;
+            }
+            // accents on the beats: LEAD on 1 (half the time) and 5 (a third), BASS on 1 (most of the time)
+            acc[p][0] = (note[p][0][0] && rnd() < 0.5f ? 0x01 : 0) | (note[p][0][4] && rnd() < 0.3f ? 0x10 : 0);
+            acc[p][1] = rnd() < 0.6f ? 0x01 : 0;
+        }
+        // synth strips per engine (LEAD, BASS):
+        //                                   WAVE1 WAVE2 TUNE   FM    MIX  SUB   DRIVE LEVEL CUT   RES  ENV   GLIDE ATK    DEC   SUS   REL   GATE
+        static const float lo[2][DO_OCT] = {{0.f, 0.f, 0.47f, 0.f,  0.f, 0.f,  0.f,  0.6f,  0.4f,  0.f, 0.2f, 0.f,  0.f,   0.25f, 0.3f, 0.15f, 0.4f},
+                                            {0.f, 0.f, 0.47f, 0.f,  0.f, 0.3f, 0.f,  0.65f, 0.25f, 0.f, 0.2f, 0.f,  0.f,   0.25f, 0.3f, 0.15f, 0.4f}};
+        static const float hi[2][DO_OCT] = {{1.f, 1.f, 0.55f, 0.25f, 1.f, 0.3f, 0.3f, 0.8f,  0.85f, 0.5f, 0.7f, 0.2f,  0.08f, 0.7f,  0.8f, 0.5f,  0.85f},
+                                            {1.f, 1.f, 0.53f, 0.2f,  1.f, 0.8f, 0.35f, 0.85f, 0.6f, 0.5f, 0.7f, 0.15f, 0.05f, 0.7f,  0.8f, 0.4f,  0.85f}};
+        for (int e = 0; e < 2; e++)
+            for (int k = 0; k < DO_OCT; k++) {
+                ParamQuantity* q = paramQuantities[engParam(e, k)];
+                float x = lo[e][k] + rnd() * (hi[e][k] - lo[e][k]);
+                stripTgt[engParam(e, k)] = q->getMinValue() + x * (q->getMaxValue() - q->getMinValue());
+            }
+        for (int b = 0; b < 3; b++) for (int i = 0; i < 8; i++) cvVal[b][i] = rnd();
+    }
     void setBank(int b) {
         b = clamp(b, 0, 7);
         params[BANK_PARAM].setValue((float)(b + 1));
@@ -392,7 +502,7 @@ struct SynTHBloKDuo : Module, songlink::Member {
     }
     void copyToNext() {
         int from = curPat(), to = (from + 1) % 8;
-        for (int e = 0; e < 2; e++) for (int c = 0; c < 8; c++) note[to][e][c] = note[from][e][c];
+        for (int e = 0; e < 2; e++) { for (int c = 0; c < 8; c++) note[to][e][c] = note[from][e][c]; acc[to][e] = acc[from][e]; }
         params[PAT_PARAM].setValue((float)(to + 1));
     }
     // A JAM side/bottom button was pressed (b > 0) or released (b == 0).
@@ -402,7 +512,7 @@ struct SynTHBloKDuo : Module, songlink::Member {
         switch (cc) {
             // CLEAR: the shown synth's notes in this pattern; held for a second, every pattern.
             case CC_CLEAR:
-                for (int c = 0; c < 8; c++) note[curPat()][view()][c] = 0;
+                clearView();
                 clearHeld = true; clearHeldT = 0.f; clearAllDone = false;
                 break;
             case CC_DUPLICATE: copyToNext(); break;
@@ -674,8 +784,8 @@ struct SynTHBloKDuo : Module, songlink::Member {
         jamReset = false;
         if (rst) { step = -1; pendingReset = true; internalTimer = 0.f; resetFlash = 0.15f; }
         resetFlash = std::max(0.f, resetFlash - args.sampleTime);
-        if (clrTrig.process(params[CLEAR_PARAM].getValue()))
-            for (int c = 0; c < 8; c++) note[curPat()][view()][c] = 0;
+        if (clrTrig.process(params[CLEAR_PARAM].getValue())) clearView();
+        if (randTrig.process(params[RAND_PARAM].getValue())) randomizeAll();
 
         if (edge && running) {
             int len = clamp((int)params[LEN_PARAM].getValue(), 1, 8);
@@ -786,6 +896,12 @@ struct SynTHBloKDuo : Module, songlink::Member {
         }
         json_object_set_new(root, "notes", na);
         json_object_set_new(root, "chords", ca);   // per step: two hex digits, bit d = scale degree d
+        json_t* aa = json_array();   // per pattern: LEAD then BASS, two hex digits each, bit c = step c accented
+        for (int p = 0; p < 8; p++) {
+            char h[5]; std::snprintf(h, sizeof(h), "%02x%02x", acc[p][0], acc[p][1]);
+            json_array_append_new(aa, json_string(h));
+        }
+        json_object_set_new(root, "accents", aa);
         std::string ms;
         for (int e = 0; e < 2; e++) ms += mute[e] ? '1' : '0';
         json_object_set_new(root, "mute", json_string(ms.c_str()));
@@ -838,6 +954,11 @@ struct SynTHBloKDuo : Module, songlink::Member {
                 if (c && strlen(c) >= 32)
                     for (int i = 0; i < 16; i++) note[p][i / 8][i % 8] = (uint8_t)std::strtol(std::string(c + 2 * i, 2).c_str(), NULL, 16);
             }
+        json_t* aa = json_object_get(r, "accents");   // older patches: no accents
+        for (int p = 0; p < 8; p++) {
+            const char* a = aa ? json_string_value(json_array_get(aa, p)) : NULL;
+            for (int e = 0; e < 2; e++) acc[p][e] = a && strlen(a) >= 4 ? (uint8_t)std::strtol(std::string(a + 2 * e, 2).c_str(), NULL, 16) : 0;
+        }
         const char* ms = json_string_value(json_object_get(r, "mute"));
         for (int e = 0; e < 2; e++) mute[e] = ms && strlen(ms) >= 2 && ms[e] == '1';
         const char* ss = json_string_value(json_object_get(r, "solo"));
@@ -887,12 +1008,19 @@ struct DUPad : OpaqueWidget {
         nvgStrokeColor(args.vg, col);
         nvgStrokeWidth(args.vg, 0.8f);
         nvgStroke(args.vg);
-    }
-    void onButton(const ButtonEvent& e) override {
-        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
-            if (module) module->togglePad(r, c);
-            e.consume(this);
+        if (on && module && module->stepAcc(c)) {   // accent: a bright core, as on MATRIX-DRUM
+            float m = box.size.x * 0.3f;
+            nvgBeginPath(args.vg);
+            nvgRoundedRect(args.vg, m, m, box.size.x - 2.f * m, box.size.y - 2.f * m, 0.8f);
+            nvgFillColor(args.vg, nvgLerpRGBA(onCol, nvgRGB(0xff, 0xf4, 0xd0), 0.75f));
+            nvgFill(args.vg);
         }
+    }
+    // click = note on / off, right-click = accent
+    void onButton(const ButtonEvent& e) override {
+        if (e.action != GLFW_PRESS || !module) return;
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT) { module->togglePad(r, c); e.consume(this); }
+        else if (e.button == GLFW_MOUSE_BUTTON_RIGHT) { module->toggleAccent(r, c); e.consume(this); }
     }
 };
 
@@ -1383,7 +1511,7 @@ struct SynTHBloKDuoWidget : ModuleWidget {
                 addChild(p);
             }
         // row triggers
-        label(69.6f, 13.8f, "OUT");
+        addParam(JRandBtn::create(69.6f, 10.5f, module, DU::RAND_PARAM));   // after pattern 8, over the OUT jacks
         for (int r = 0; r < 8; r++)
             { addOutput(createOutputCentered<SmallJack>(mm2px(Vec(69.6f, 22.8f + 7.4f * r)), module, DU::TRIG_OUTPUT + r));
               addChild(pageLed(JackLed::create(Vec(73.5f, 22.8f + 7.4f * r), module, DU::TRIG_OUTPUT + r, true))); }

@@ -246,6 +246,19 @@
       ]
     },
     {
+      "slug": "SynTHBloKMatrixForge",
+      "name": "SynTHBloK MTX FORGE",
+      "description": "Maschine JAM groovebox: the MTX-8 sequencer and 8 voices, and the whole mix (plus IN L/R) through the GRAIN-FORGE FX chain, clocked by the sequencer",
+      "tags": [
+        "Synth voice",
+        "Sequencer",
+        "Controller",
+        "MIDI",
+        "Effect",
+        "Delay"
+      ]
+    },
+    {
       "slug": "SynTHBloKDuo",
       "name": "SynTHBloK MTX-DUO",
       "description": "LEAD and BASS dual-oscillator mono synths (wave morph, hard sync, FM, sub, 24 dB filter, ADSR, drive, glide) with their own 8-step note sequencer in a key and scale, 8 patterns, clock/reset/run in, audio, pitch and gate out",
@@ -253,6 +266,18 @@
         "Synth voice",
         "Oscillator",
         "Sequencer"
+      ]
+    },
+    {
+      "slug": "SynTHBloKDrum",
+      "name": "SynTHBloK MTX-DRUM",
+      "description": "Drum-synth groovebox: 8 voices (kick, snare, clap, tom, hat, metal, FM, noise models) on the MTX 8x8 sequencer with accents, 8 patterns, strip banks, choke groups, per-voice audio and trigger outs, final filter, delay, reverb and FORGE FX, Maschine JAM control",
+      "tags": [
+        "Drum",
+        "Sequencer",
+        "Mixer",
+        "Effect",
+        "MIDI"
       ]
     },
     {
