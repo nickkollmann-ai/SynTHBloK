@@ -54,17 +54,12 @@
     },
     {
       "slug": "SynTHBloKFX",
-      "name": "SynTHBloK FX Expander",
-      "description": "Delay and space effects with tape, analog and modern character",
+      "name": "SynTHBloK-DL Character Delay",
+      "description": "Stereo delay with eight characters (clean, tape, analog, modern, ping-pong, dynamic, space, reverse), clock sync, hold and clear",
       "tags": [
         "Effect",
-        "Delay",
-        "Expander"
-      ],
-      "expander": {
-        "direction": "left",
-        "parent": "SynTHBloK"
-      }
+        "Delay"
+      ]
     },
     {
       "slug": "SynTHBloKResonator",

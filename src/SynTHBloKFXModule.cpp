@@ -1,4 +1,5 @@
 #include "plugin.hpp"
+#include "OledUi.hpp"
 
 struct SynTHBloKFXModule : Module {
 
@@ -104,6 +105,9 @@ struct SynTHBloKFXModule : Module {
     float revPhase = 0.f;
     int revAnchorA = 0, revAnchorB = 0;
 
+    // for the OLED: the delay time in use, the clock tempo (0 = free running), the feedback in use
+    float shownDelayMs = 0.f, shownBpm = 0.f, shownFb = 0.f;
+
     SynTHBloKFXModule() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
 
@@ -124,8 +128,9 @@ struct SynTHBloKFXModule : Module {
         configSwitch(SUBDIV_PARAM, 0.f, 2.f, 0.f, "Div",
             {"1/1", "3/4", "2/3"});
 
-        configButton(SYNC_PARAM, "Sync");
-        configButton(RESET_PARAM, "Rst");
+        // SYNC / RESET keep their ids so old patches load; they are now HOLD and CLEAR
+        configSwitch(SYNC_PARAM, 0.f, 1.f, 0.f, "Hold (loop the buffer as it is)", {"Off", "On"});
+        configButton(RESET_PARAM, "Clear the buffer");
 
         // === INPUTS (Short Names) ===
         configInput(TIME_CV_INPUT,      "Time CV");
@@ -210,255 +215,117 @@ struct SynTHBloKFXModule : Module {
 
     void process(const ProcessArgs& args) override;
 };
-struct DelayTypeOLED : TransparentWidget {
-    SynTHBloKFXModule* module;
-    std::shared_ptr<Font> font;
+// -----------------------------------------------------------------------------
+// PANEL: one OLED (mode, DIV, time, clock, repeats, the 8 mode cells), 8 knobs with CV jacks,
+// HOLD / CLEAR cells over the clock jack, IN L, IN R, OUT L, OUT R, SIDE along the bottom.
+// -----------------------------------------------------------------------------
+using DL = SynTHBloKFXModule;
 
-    DelayTypeOLED(SynTHBloKFXModule* m) {
-        module = m;
-        font = APP->window->loadFont(asset::system("res/fonts/ShareTechMono-Regular.ttf"));
-        box.size = Vec(33, 12);
-    }
+// OLED rows in mm from its top
+static const float kDlOx = 3.5f, kDlOy = 9.5f, kDlOw = 54.f, kDlOh = 27.f;
+static const float kDlBarsY = 10.f, kDlBarsH = 4.6f, kDlCells = 16.2f, kDlCellGap = 0.9f;
+static const char* const kDlModes[8] = {"CLEAN", "TAPE", "ANALOG", "MODERN", "PING-PONG", "DYNAMIC", "SPACE", "REVERSE"};
+static const char* const kDlCellNames[8] = {"CLEAN", "TAPE", "ANALOG", "MODERN", "PING", "DYNAMIC", "SPACE", "REVERSE"};
+static const char* const kDlDivs[3] = {"1/1", "3/4", "2/3"};
 
-    void draw(const DrawArgs& args) override {
+struct DelayDisplay : TransparentWidget {
+    DL* module = NULL;
+
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
         NVGcontext* vg = args.vg;
+        float W = box.size.x, H = box.size.y;
+        oled::box(args, W, H);
+        oled::divider(args, 4.f, mm2px(5.f), W - 4.f, mm2px(5.f));
+        oled::divider(args, 4.f, mm2px(kDlCells - 0.7f), W - 4.f, mm2px(kDlCells - 0.7f));
+        oled::dividerStroke(args);
 
-        NVGpaint bg = nvgLinearGradient(vg, 0, 0, 0, box.size.y,
-            nvgRGBA(10, 10, 10, 255),
-            nvgRGBA(0, 0, 0, 255));
+        // the module browser has no module: show the defaults
+        int mode = module ? clamp((int)std::round(module->params[DL::DELAY_TYPE_PARAM].getValue()), 0, 7) : 0;
+        int div = module ? clamp((int)std::round(module->params[DL::SUBDIV_PARAM].getValue()), 0, 2) : 0;
+        float ms = module ? module->shownDelayMs : 515.f;
+        float bpm = module ? module->shownBpm : 0.f;
+        float fb = module ? module->shownFb : 0.3f;
+        bool hold = module && module->params[DL::SYNC_PARAM].getValue() > 0.5f;
 
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgFillPaint(vg, bg);
-        nvgFill(vg);
-
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgStrokeColor(vg, nvgRGBA(255, 180, 90, 80));
-        nvgStrokeWidth(vg, 1.0f);
-        nvgStroke(vg);
-
-        static const char* names[8] = {
-            "CLEAN", "TAPE", "ANALOG", "MODERN",
-            "PING", "DYNAMIC", "SPACE", "REVERSE"
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(vg, font->handle);
+        float y1 = mm2px(2.6f), y2 = mm2px(7.4f), xv = mm2px(8.5f), xr = mm2px(33.f), xe = W - 4.f;
+        auto name = [&](float x, float y, const char* s) {
+            nvgFontSize(vg, 6.f);
+            nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+            nvgFillColor(vg, oled::dim());
+            nvgText(vg, x, y, s, NULL);
+        };
+        auto value = [&](float x, float y, const char* s, int align, float size, NVGcolor c) {
+            nvgFontSize(vg, size);
+            nvgTextAlign(vg, align | NVG_ALIGN_MIDDLE);
+            nvgFillColor(vg, c);
+            nvgText(vg, x, y, s, NULL);
         };
 
-        // the module browser preview has no module: show the default mode
-        int mode = module ? (int)module->params[SynTHBloKFXModule::DELAY_TYPE_PARAM].getValue() : 0;
-        mode = clamp(mode, 0, 7);
+        name(4.f, y1, "MODE");
+        value(xv, y1, kDlModes[mode], NVG_ALIGN_LEFT, 8.f, oled::amber());
+        name(xr, y1, "DIV");
+        value(xe, y1, kDlDivs[div], NVG_ALIGN_RIGHT, 7.5f, bpm > 0.f ? oled::amber() : oled::dim());
 
-        nvgFontSize(vg, 9.f);
-        nvgFontFaceId(vg, font->handle);
-        nvgFillColor(vg, nvgRGBA(255, 240, 180, 255));
-        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgText(vg, box.size.x * 0.5f, box.size.y * 0.5f, names[mode], NULL);
+        char buf[32];
+        if (ms >= 1000.f) snprintf(buf, sizeof(buf), "%.2f s", ms / 1000.f);
+        else snprintf(buf, sizeof(buf), "%d ms", (int)std::round(ms));
+        name(4.f, y2, "TIME");
+        value(xv, y2, buf, NVG_ALIGN_LEFT, 7.5f, oled::amber());
+        name(xr, y2, "CLK");
+        if (bpm > 0.f) {
+            snprintf(buf, sizeof(buf), "%d BPM", (int)std::round(bpm));
+            value(xe, y2, buf, NVG_ALIGN_RIGHT, 7.5f, oled::green());
+        } else value(xe, y2, "FREE", NVG_ALIGN_RIGHT, 7.5f, oled::dim());
 
-        for (int y = 1; y < box.size.y; y += 2) {
+        // repeats: each bar is one echo, fb^k loud; HOLD keeps them all
+        float bx = mm2px(2.5f), bw = (W - 2.f * bx) / 8.f, by = mm2px(kDlBarsY), bh = mm2px(kDlBarsH);
+        for (int k = 0; k < 8; k++) {
+            float a = hold ? 1.f : std::pow(fb, (float)k);
+            float h = std::max(bh * a, 0.6f);
             nvgBeginPath(vg);
-            nvgMoveTo(vg, 1, y);
-            nvgLineTo(vg, box.size.x - 1, y);
-            nvgStrokeColor(vg, nvgRGBA(255, 200, 120, 18));
-            nvgStrokeWidth(vg, 0.4f);
-            nvgStroke(vg);
-        }
-    }
-};
-
-struct DivOLED : TransparentWidget {
-    SynTHBloKFXModule* module = nullptr;
-
-    float animPhase = 0.f;
-    float idlePhase = 0.f;
-    float flash     = 0.f;
-
-    std::shared_ptr<Font> font;
-
-    DivOLED(SynTHBloKFXModule* m) {
-        module = m;
-        font = APP->window->loadFont(asset::system("res/fonts/ShareTechMono-Regular.ttf"));
-        box.size = Vec(30.f, 14.f);   // same footprint style as DelayTypeOLED
-    }
-
-    void step() override {
-        const float dt = 1.f / 60.f;
-
-        // --- CLOCK-SYNCED ANIMATION SPEED ---
-        float speed = 0.5f;   // default free-run speed
-
-        if (module && module->inputs[SynTHBloKFXModule::CLOCK_INPUT].isConnected()) {
-            float period = module->clockPeriod;
-
-            if (period < 0.05f) period = 0.05f;
-            if (period > 2.0f)  period = 2.0f;
-
-            float bpmSpeed = 1.f / period;
-            speed = bpmSpeed * 0.25f;
-        }
-
-        animPhase += dt * speed;
-        if (animPhase > 1.f)
-            animPhase -= 1.f;
-
-        idlePhase += dt * 0.2f;
-        if (idlePhase > 2.f * M_PI)
-            idlePhase -= 2.f * M_PI;
-
-        if (module && module->inputs[SynTHBloKFXModule::CLOCK_INPUT].isConnected()) {
-            float clk = module->inputs[SynTHBloKFXModule::CLOCK_INPUT].getVoltage();
-            if (clk > 1.f)
-                flash = 1.f;
-        }
-
-        flash *= 0.9f;
-
-        TransparentWidget::step();
-    }
-
-    void draw(const DrawArgs& args) override {
-        NVGcontext* vg = args.vg;
-        nvgSave(vg);
-
-        NVGpaint bg = nvgLinearGradient(
-            vg,
-            0, 0, 0, box.size.y,
-            nvgRGBA(10, 10, 10, 255),
-            nvgRGBA(0, 0, 0, 255)
-        );
-
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgFillPaint(vg, bg);
-        nvgFill(vg);
-
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgStrokeColor(vg, nvgRGBA(255, 180, 90, 80));
-        nvgStrokeWidth(vg, 1.0f);
-        nvgStroke(vg);
-
-        int divMode = 0;
-        if (module) {
-            divMode = (int)std::round(module->params[SynTHBloKFXModule::SUBDIV_PARAM].getValue());
-            divMode = clamp(divMode, 0, 2);
-        }
-
-        const char* divText = "1/1";
-        if (divMode == 1) divText = "3/4";
-        else if (divMode == 2) divText = "2/3";
-
-        float baseBright = 1.f;
-        if (!module)
-            baseBright = 0.6f + 0.3f * std::sin(idlePhase);
-
-        float flashBright = 0.25f * flash;
-        float textBright  = clamp(baseBright + flashBright, 0.f, 1.f);
-
-        NVGcolor textColor = nvgRGBA(
-            255,
-            240,
-            180,
-            (unsigned char)(255 * textBright)
-        );
-
-        nvgFontSize(vg, 9.f);
-        nvgFontFaceId(vg, font->handle);
-        nvgFillColor(vg, textColor);
-        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-        nvgText(vg, 3.f, 3.f, divText, nullptr);
-
-        float barX = 3.f;
-        float barY = 12.f;
-        float barW = box.size.x - 6.f;
-        float barH = box.size.y - barY - 3.f;
-
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, barX, barY, barW, barH, 1.5f);
-        nvgFillColor(vg, nvgRGBA(20, 12, 4, 255));
-        nvgFill(vg);
-
-        nvgStrokeWidth(vg, 0.8f);
-        nvgStrokeColor(vg, nvgRGBA(255, 180, 90, 40));
-        nvgStroke(vg);
-
-        float barBright = 0.9f;
-        if (!module)
-            barBright = 0.5f + 0.3f * std::sin(idlePhase * 0.8f);
-
-        barBright = clamp(barBright + flashBright, 0.f, 1.f);
-
-        NVGcolor barColor = nvgRGBA(
-            255,
-            200,
-            120,
-            (unsigned char)(255 * barBright)
-        );
-
-        nvgFillColor(vg, barColor);
-
-        if (divMode == 0) {
-            float t = animPhase;
-            float e = t * t * (3.f - 2.f * t);
-            float fillW = barW * e;
-
-            nvgBeginPath(vg);
-            nvgRoundedRect(vg, barX, barY, fillW, barH, 1.2f);
+            nvgRect(vg, bx + k * bw + bw * 0.3f, by + bh - h, bw * 0.4f, h);
+            nvgFillColor(vg, hold ? oled::litFill() : oled::amber((int)(50 + 205 * a)));
             nvgFill(vg);
         }
-        else if (divMode == 1) {
-            int   clusters     = 3;
-            float clusterWidth = barW / clusters;
-            float localT       = animPhase * clusters;
-
-            for (int i = 0; i < clusters; i++) {
-                float phase = localT - i;
-                if (phase < 0.f) phase += clusters;
-                if (phase > 1.f) continue;
-
-                float e  = phase * phase * (3.f - 2.f * phase);
-                float cw = clusterWidth * 0.7f;
-                float cx = barX + clusterWidth * i + (clusterWidth - cw) * 0.5f;
-                float fillW = cw * e;
-
-                nvgBeginPath(vg);
-                nvgRoundedRect(vg, cx, barY, fillW, barH, 1.2f);
-                nvgFill(vg);
-            }
-        }
-        else {
-            int   segments = 4;
-            float segWidth = barW / segments;
-            float localT   = animPhase * segments;
-
-            for (int i = 0; i < segments; i++) {
-                float phase = localT - i;
-                if (phase < 0.f) phase += segments;
-                if (phase > 1.f) continue;
-
-                float e  = phase * phase * (3.f - 2.f * phase);
-                float sw = segWidth * 0.9f;
-                float sx = barX + segWidth * i + (segWidth - sw) * 0.5f;
-                float fillW = sw * e;
-
-                nvgBeginPath(vg);
-                nvgRoundedRect(vg, sx, barY, fillW, barH, 1.0f);
-                nvgFill(vg);
-            }
-        }
-
-        for (int y = 1; y < box.size.y; y += 2) {
-            nvgBeginPath(vg);
-            nvgMoveTo(vg, 1, y);
-            nvgLineTo(vg, box.size.x - 1, y);
-            nvgStrokeColor(vg, nvgRGBA(255, 200, 120, 18));
-            nvgStrokeWidth(vg, 0.4f);
-            nvgStroke(vg);
-        }
-
-        nvgRestore(vg);
     }
 };
+
+// The DIV value: click / scroll up steps forward, right-click / scroll down steps back.
+struct DelayDivHit : OpaqueWidget {
+    DL* module = NULL;
+    void nudge(int d) {
+        if (!module) return;
+        ParamQuantity* pq = module->paramQuantities[DL::SUBDIV_PARAM];
+        pq->setValue((float)(((int)std::round(pq->getValue()) + d + 3) % 3));
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.action == GLFW_PRESS && (e.button == GLFW_MOUSE_BUTTON_LEFT || e.button == GLFW_MOUSE_BUTTON_RIGHT)) {
+            nudge(e.button == GLFW_MOUSE_BUTTON_LEFT ? 1 : -1);
+            e.consume(this);
+        }
+    }
+    void onHoverScroll(const HoverScrollEvent& e) override {
+        if (e.scrollDelta.y == 0.f) return;
+        nudge(e.scrollDelta.y > 0.f ? 1 : -1);
+        e.consume(this);
+    }
+};
+
 struct SynTHBloKFXWidget : ModuleWidget {
-    SynTHBloKFXWidget(SynTHBloKFXModule* module) {
+    oled::Cell* cell(DL* module, Vec posMm, Vec sizeMm, int param, const char* label) {
+        oled::Cell* c = createParam<oled::Cell>(mm2px(posMm), module, param);
+        c->box.size = mm2px(sizeMm);
+        c->module = module;
+        c->label = label;
+        addParam(c);
+        return c;
+    }
+
+    SynTHBloKFXWidget(DL* module) {
         setModule(module);
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKFX.svg")));
 
@@ -469,81 +336,60 @@ struct SynTHBloKFXWidget : ModuleWidget {
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 125.0f))));
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(57.46f, 125.0f))));
 
-        const float x0 = 10.f;
-        const float x1 = 30.f;
-        const float x2 = 50.f;
+        DelayDisplay* oledW = new DelayDisplay;
+        oledW->module = module;
+        oledW->box.pos = mm2px(Vec(kDlOx, kDlOy));
+        oledW->box.size = mm2px(Vec(kDlOw, kDlOh));
+        addChild(oledW);
+        DelayDivHit* divHit = new DelayDivHit;
+        divHit->module = module;
+        divHit->box.pos = mm2px(Vec(kDlOx + 32.f, kDlOy));
+        divHit->box.size = mm2px(Vec(kDlOw - 32.f, 5.f));
+        addChild(divHit);
+        // mode cells: 4 x 2, 2 mm side padding, 1 mm column gap
+        const float cw = (kDlOw - 4.f - 3.f) / 4.f;
+        for (int i = 0; i < 8; i++) {
+            oled::Cell* c = cell(module, Vec(kDlOx + 2.f + (i % 4) * (cw + 1.f), kDlOy + kDlCells + (i / 4) * (oled::kCellH + kDlCellGap)),
+                                 Vec(cw, oled::kCellH), DL::DELAY_TYPE_PARAM, kDlCellNames[i]);
+            c->setTo = i;
+            c->fontSize = 6.f;
+        }
 
-        addChild(createLightCentered<SmallLight<GreenLight>>(
-            mm2px(Vec(41.0f, 87.0f)),
-            module,
-            SynTHBloKFXModule::DELAY_TYPE_LIGHT));
+        // knobs (rows 47.3 / 70.8 / 94.3) with their CV jacks below and a light between
+        const float KX[3] = {10.f, 30.5f, 51.f}, KY[3] = {47.3f, 70.8f, 94.3f}, JY[3] = {58.2f, 81.7f, 104.2f};
+        const int knob[8] = {DL::TIME_PARAM, DL::FEEDBACK_PARAM, DL::MIX_PARAM, DL::COLOR_PARAM,
+                             DL::MOD_DEPTH_PARAM, DL::MOD_RATE_PARAM, DL::DUCKING_PARAM, DL::WIDTH_PARAM};
+        const int cv[8] = {DL::TIME_CV_INPUT, DL::FEEDBACK_CV_INPUT, DL::MIX_CV_INPUT, DL::COLOR_CV_INPUT,
+                           DL::MOD_DEPTH_CV_INPUT, DL::MOD_RATE_CV_INPUT, DL::DUCKING_CV_INPUT, DL::WIDTH_CV_INPUT};
+        const int led[8] = {DL::TIME_CV_LED_RED, DL::FEEDBACK_CV_LED_RED, DL::MIX_CV_LED_RED, DL::COLOR_CV_TINY_RED,
+                            DL::MOD_DEPTH_CV_TINY_RED, DL::MOD_RATE_CV_TINY_RED, DL::DUCKING_CV_TINY_RED, DL::WIDTH_CV_TINY_RED};
+        for (int i = 0; i < 8; i++) {
+            float x = KX[i % 3];
+            addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x, KY[i / 3])), module, knob[i]));
+            addInput(createInputCentered<BlackJack>(mm2px(Vec(x, JY[i / 3])), module, cv[i]));
+            addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x, JY[i / 3] - 4.6f)), module, led[i]));
+        }
 
-        addParam(createParamCentered<TL1105>(
-            mm2px(Vec(41.0f, 87.0f)),
-            module,
-            SynTHBloKFXModule::DELAY_TYPE_BUTTON_PARAM));
+        // HOLD (latch: the buffer loops as it is) and CLEAR (wipes the buffer) in a box beside WIDTH
+        oled::Box* hb = new oled::Box;
+        hb->box.pos = mm2px(Vec(44.5f, 88.15f));
+        hb->box.size = mm2px(Vec(13.f, 2.f * oled::kCellH + kDlCellGap + 1.6f));
+        addChild(hb);
+        cell(module, Vec(46.f, 88.95f), Vec(10.f, oled::kCellH), DL::SYNC_PARAM, "HOLD")->latch = true;
+        cell(module, Vec(46.f, 88.95f + oled::kCellH + kDlCellGap), Vec(10.f, oled::kCellH), DL::RESET_PARAM, "CLEAR");
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(KX[2], JY[2])), module, DL::CLOCK_INPUT));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(56.3f, JY[2])), module, DL::CLOCK_TINY_RED));
 
-        auto* typeOLED = new DelayTypeOLED(module);
-        typeOLED->box.pos = mm2px(Vec(45.0f, 83.5f));
-        addChild(typeOLED);
-
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x0, 20)), module, SynTHBloKFXModule::TIME_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x1, 20)), module, SynTHBloKFXModule::FEEDBACK_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x2, 20)), module, SynTHBloKFXModule::MIX_PARAM));
-
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x0, 50)), module, SynTHBloKFXModule::COLOR_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x1, 50)), module, SynTHBloKFXModule::MOD_DEPTH_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x2, 50)), module, SynTHBloKFXModule::MOD_RATE_PARAM));
-
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x0, 85)), module, SynTHBloKFXModule::DUCKING_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x1, 85)), module, SynTHBloKFXModule::WIDTH_PARAM));
-        addParam(createParamCentered<CKSSThree>(mm2px(Vec(x2, 75)), module, SynTHBloKFXModule::SUBDIV_PARAM));
-
-        auto* divOLED = new DivOLED(module);
-        divOLED->box.pos  = mm2px(Vec(37.0f, 71.0f));
-        divOLED->box.size = mm2px(Vec(8.0f, 8.0f));
-        addChild(divOLED);
-
-        // bottom row: L OUT, R OUT, SIDE, L IN, R IN
-        const float bx[5] = {8.0f, 19.25f, 30.5f, 41.75f, 53.0f};
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(bx[3], 115.0f)), module, SynTHBloKFXModule::IN_L_INPUT));
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(bx[4], 115.0f)), module, SynTHBloKFXModule::IN_R_INPUT));
-
-        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(bx[0], 115.0f)), module, SynTHBloKFXModule::LEFT_OUTPUT));
-        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(bx[1], 115.0f)), module, SynTHBloKFXModule::RIGHT_OUTPUT));
-        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(bx[2], 115.0f)), module, SynTHBloKFXModule::SIDE_OUT_OUTPUT));
-
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(x0, 33)), module, SynTHBloKFXModule::TIME_CV_INPUT));
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(x1, 33)), module, SynTHBloKFXModule::FEEDBACK_CV_INPUT));
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(x2, 33)), module, SynTHBloKFXModule::MIX_CV_INPUT));
-
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(x0, 62)), module, SynTHBloKFXModule::COLOR_CV_INPUT));
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(x1, 62)), module, SynTHBloKFXModule::MOD_DEPTH_CV_INPUT));
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(x2, 62)), module, SynTHBloKFXModule::MOD_RATE_CV_INPUT));
-
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(x0, 98)), module, SynTHBloKFXModule::DUCKING_CV_INPUT));
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(x1, 98)), module, SynTHBloKFXModule::WIDTH_CV_INPUT));
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(x2, 98)), module, SynTHBloKFXModule::CLOCK_INPUT));
-
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x0, 27)), module, SynTHBloKFXModule::TIME_CV_LED_RED));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x1, 27)), module, SynTHBloKFXModule::FEEDBACK_CV_LED_RED));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x2, 27)), module, SynTHBloKFXModule::MIX_CV_LED_RED));
-
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x0, 57)), module, SynTHBloKFXModule::COLOR_CV_TINY_RED));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x1, 57)), module, SynTHBloKFXModule::MOD_DEPTH_CV_TINY_RED));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x2, 57)), module, SynTHBloKFXModule::MOD_RATE_CV_TINY_RED));
-
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x0, 92)), module, SynTHBloKFXModule::DUCKING_CV_TINY_RED));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x1, 92)), module, SynTHBloKFXModule::WIDTH_CV_TINY_RED));
-        // the CLK label sits above the clock jack, so its light goes beside it
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(56.0f, 98)), module, SynTHBloKFXModule::CLOCK_TINY_RED));
-
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(bx[3], 120.0f)), module, SynTHBloKFXModule::IN_L_TINY_RED));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(bx[4], 120.0f)), module, SynTHBloKFXModule::IN_R_TINY_RED));
-
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(bx[0], 120.0f)), module, SynTHBloKFXModule::OUT_L_TINY_RED));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(bx[1], 120.0f)), module, SynTHBloKFXModule::OUT_R_TINY_RED));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(bx[2], 120.0f)), module, SynTHBloKFXModule::SIDE_TINY_RED));
+        // bottom row: IN L, IN R, then OUT L, OUT R, SIDE on the output plate
+        const float BX[5] = {7.3f, 18.1f, 30.5f, 41.6f, 52.7f}, BY = 115.6f, LY = 120.3f;
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(BX[0], BY)), module, DL::IN_L_INPUT));
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(BX[1], BY)), module, DL::IN_R_INPUT));
+        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(BX[2], BY)), module, DL::LEFT_OUTPUT));
+        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(BX[3], BY)), module, DL::RIGHT_OUTPUT));
+        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(BX[4], BY)), module, DL::SIDE_OUT_OUTPUT));
+        const int bl[5] = {DL::IN_L_TINY_RED, DL::IN_R_TINY_RED, DL::OUT_L_TINY_RED, DL::OUT_R_TINY_RED, DL::SIDE_TINY_RED};
+        for (int i = 0; i < 5; i++)
+            addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(BX[i], LY)), module, bl[i]));
     }
 };
 // -----------------------------------------------------------------------------
@@ -693,6 +539,9 @@ void SynTHBloKFXModule::process(const ProcessArgs& args) {
     float maxDelaySec  = 2.0f;
     float delaySec     = minDelaySec + time * (maxDelaySec - minDelaySec);
     float delaySamples = clamp(delaySec * sr, 1.f, maxDelay - 3.f);
+    shownDelayMs = delaySamples / sr * 1000.f;
+    shownBpm = clockActive ? 60.f / std::max(clockPeriod, 1e-3f) : 0.f;
+    shownFb = fb;
 
     writePos++;
     if (writePos >= maxDelayI)
@@ -962,7 +811,8 @@ break;
     dl *= duckGain;
     dr *= duckGain;
 
-    bool freeze = (fb > 0.98f && resetPressed);
+    // HOLD: the buffer keeps what it has and loops it; new input is not written
+    bool freeze = params[SYNC_PARAM].getValue() > 0.5f;
     float fbSafe = freeze ? 0.999f : fb;
 
     float fbL = dl * fbSafe;
@@ -974,8 +824,9 @@ break;
     fbL = softSat(fbL);
     fbR = softSat(fbR);
 
-    float writeL = freeze ? dl : (inL + fbL);
-    float writeR = freeze ? dr : (inR + fbR);
+    // held: copy the stored sample one delay back forward unchanged, so the loop neither fades nor darkens
+    float writeL = freeze ? delayBufferL[readPos0] : (inL + fbL);
+    float writeR = freeze ? delayBufferR[readPos0] : (inR + fbR);
 
     writeL = clamp(writeL, -6.f, 6.f);
     writeR = clamp(writeR, -6.f, 6.f);
