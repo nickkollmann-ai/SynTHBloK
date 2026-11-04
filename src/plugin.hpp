@@ -32,6 +32,7 @@ extern Model* modelSynTHBloKEcho;
 extern Model* modelSynTHBloKMatrixFx;
 extern Model* modelSynTHBloKMatrixSong;
 extern Model* modelSynTHBloKLoop;
+extern Model* modelSynTHBloKMtxQuad;
 
 // VCV-size jack (23.7 px, the same as Rack's PJ301M): black body with a silver ring.
 // Used on every module but the JAM and MIX-24.

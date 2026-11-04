@@ -87,6 +87,44 @@ main{display:grid;grid-template-columns:minmax(260px,.7fr) minmax(0,1fr) minmax(
 @keyframes feedin{from{margin-top:-18px;opacity:0}to{margin-top:0;opacity:1}}
 #feed b,#gitfeed b{color:var(--cy);font-weight:500}
 #gitfeed i{font-style:normal;color:var(--or)}
+/* CHAT: the conversation with Claude (tools/chat_feed.json, written by tools/chat_feed.py), newest on top */
+#chat{flex:none;border-top:1px solid var(--line)}
+#chat .head{padding:3px 12px;font-size:10px}
+#chatfeed{height:150px;overflow:hidden auto;scrollbar-width:none;padding:6px 12px;font-size:11px;line-height:15px;color:var(--mut);background:#070b10}
+#chatfeed::-webkit-scrollbar{display:none}
+#chatfeed div{margin-bottom:5px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:#9fb6c0}
+#chatfeed div.in{animation:feedin .25s ease}
+#chatfeed b{font-weight:500;color:var(--cy)}#chatfeed b.you{color:var(--mg)}
+/* PATCH MAP: Rack's live patch (tools/patch_feed.json, written by tools/patch_feed.py), opened from the top bar.
+   Modules sit where they are in the rack; each cable is drawn in its Rack colour and listed with its jack names. */
+#patch-btn{background:transparent;border:1px solid var(--line);color:var(--cy);font:inherit;font-size:11px;letter-spacing:.12em;padding:2px 10px;cursor:pointer}
+#patch-btn b{color:var(--tx);font-weight:500;margin-left:4px}
+#patch-btn.hot{border-color:var(--mg);color:var(--mg);animation:gpulse 1s ease 3}
+#patch{position:fixed;inset:0;z-index:9;display:none;grid-template-rows:auto minmax(0,1fr);background:var(--bg)}
+#patch.on{display:grid}
+#patch .head{position:sticky;top:0}
+#patch-close{background:transparent;border:1px solid var(--line);color:var(--cy);font:inherit;font-size:10px;letter-spacing:.12em;padding:1px 8px;cursor:pointer}
+#patch-body{display:grid;grid-template-columns:minmax(0,1fr) 400px;min-height:0}
+@media(max-width:900px){#patch-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1.1fr) minmax(0,1fr)}}
+#patch-map{min-height:0;padding:12px;background:repeating-conic-gradient(#0a1016 0 25%,#0c131a 0 50%) 0 0/24px 24px}
+#patch-map svg{width:100%;height:100%}
+#patch-map .m rect{fill:#0d161d;stroke:#1d4b58;stroke-width:.25}
+#patch-map .m text{fill:var(--tx);font-size:2.2px;letter-spacing:.05px}
+#patch-map .m .pl{fill:var(--mut);font-size:1.6px}
+#patch-map .m{cursor:pointer}
+#patch-map .c{fill:none;stroke-width:.7;stroke-linecap:round;opacity:.85}
+#patch-map .j{stroke:#070b10;stroke-width:.25}
+#patch-map.sel .c,#patch-map.sel .j{opacity:.12}#patch-map.sel .m:not(.on){opacity:.45}
+#patch-map.sel .c.on{opacity:1;stroke-width:1.1}#patch-map.sel .j.on{opacity:1}#patch-map .m.on rect{stroke:var(--mg)}
+#patch-list{overflow:hidden auto;scrollbar-width:thin;border-left:1px solid var(--line);background:#070b10;font-size:11px;line-height:16px}
+@media(max-width:900px){#patch-list{border-left:0;border-top:1px solid var(--line)}}
+#patch-list h4{margin:0;padding:6px 12px 2px;font-weight:500;font-size:10px;letter-spacing:.14em;color:var(--mut)}
+#patch-list div{display:grid;grid-template-columns:10px minmax(0,1fr);gap:8px;padding:3px 12px;cursor:pointer;color:#9fb6c0}
+#patch-list div:hover,#patch-list div.on{background:#00e5ff12;color:var(--tx)}
+#patch-list div.in{animation:pnew 2.5s ease}
+@keyframes pnew{0%,40%{background:#ff00aa33}}
+#patch-list i{width:10px;height:10px;margin-top:3px;border-radius:50%}
+#patch-list b{color:var(--cy);font-weight:500}#patch-list em{font-style:normal;color:var(--mut)}
 /* the thumbnail strip works like the site's Synth Builds tab row: ‹ › step to the previous / next tile (wrapping),
    a click picks a tile, and the picked tile slides to the middle of the strip */
 footer{display:flex;gap:8px;align-items:stretch;min-width:0;overflow:hidden;padding:8px 12px;border-top:1px solid var(--line);background:#070b10}
@@ -121,6 +159,7 @@ footer .nav:hover{border-color:var(--cy)}
 <body>
 <header><b>SYNTHBLOK.WORKBENCH</b><span>panel art + compiler, live</span>
   <div class="modes"><button type="button" class="on" data-s="mod">MODULES <span id="nmod"></span></button><button type="button" data-s="file">FILES</button></div>
+  <button type="button" id="patch-btn" title="Rack's live patch">PATCH MAP<b id="patch-n"></b></button>
   <div id="git"><span id="g-commit">COMMIT<b>-</b></span><i>→</i><span id="g-push">PUSH<b>-</b></span></div>
   <span id="live">● watching</span></header>
 <main>
@@ -143,9 +182,12 @@ footer .nav:hover{border-color:var(--cy)}
   <section class="pane" id="p-draw">
     <div class="head"><span>LIVE.DRAWING <b>the SVG being built</b></span></div>
     <div id="draw">Save an SVG in res/ and it is drawn here, piece by piece.</div>
+    <div id="chat"><div class="head"><span>CHAT <b>you + Claude</b></span><span id="chat-at"></span></div><div id="chatfeed"></div></div>
   </section>
 </main>
 <footer><button type="button" class="nav" id="s-prev" title="Previous (←)">&lsaquo;</button><div id="strip"></div><button type="button" class="nav" id="s-next" title="Next (→)">&rsaquo;</button><span id="s-count"></span></footer>
+<div id="patch"><div class="head"><span>PATCH MAP <b id="patch-at">waiting for tools/patch_feed.json</b></span><button type="button" id="patch-close">CLOSE · Esc</button></div>
+  <div id="patch-body"><div id="patch-map"></div><div id="patch-list"></div></div></div>
 <div id="zoom"><img alt=""><span id="zoom-cap">click the image for actual size · click outside or press Esc to close</span></div>
 <script>
 const ROOTS = ['/res/', '/web-images/'], IMG = /\.(svg|png|webp|jpe?g)$/i, POLL = 1500;
@@ -609,9 +651,111 @@ function replay({p, before, now}) {
   }, 30);
 }
 
+// CHAT: the last messages of the conversation, newest on top; new ones slide in
+let chatSeen = '';
+async function scanChat() {
+  const txt = await getText('/tools/chat_feed.json');
+  if (txt === null || txt === chatSeen) return;
+  chatSeen = txt;
+  let d; try { d = JSON.parse(txt); } catch (e) { return; }
+  const f = document.getElementById('chatfeed'), had = f.children.length;
+  const items = (d.items || []).slice().reverse();
+  const old = new Set([...f.children].map(e => e.dataset.k));
+  f.innerHTML = items.map(m => {
+    const k = m.t + m.who + m.text.length;
+    return `<div data-k="${k}"${had && !old.has(k) ? ' class="in"' : ''}>${time(m.t)} <b class="${m.who}">${m.who === 'you' ? 'YOU' : 'CLAUDE'}</b> ${esc(m.text)}</div>`;
+  }).join('');
+  f.scrollTop = 0;
+  document.getElementById('chat-at').textContent = d.session || '';
+}
+
+// PATCH MAP: the modules at their rack positions (x in HP, one band per rack row) and every cable, drawn with a
+// Rack-like sag in its own colour; the list names each end's jack. Tap a module or a cable to pick out its wires.
+let patchSeen = '', patchData = null, patchKeys = null, patchSel = null;
+const pShort = n => String(n).replace(/^SynTHBloK\s+/, '');
+const pJack = n => String(n).split(/:| \(/)[0].trim();
+const pKey = c => `${c.from}.${c.fo}>${c.to}.${c.ti}`;
+async function scanPatch() {
+  const txt = await getText('/tools/patch_feed.json');
+  if (txt === null || txt === patchSeen) return;
+  let d; try { d = JSON.parse(txt); } catch (e) { return; }
+  const keys = new Set(d.cables.map(pKey));
+  const fresh = patchKeys ? [...keys].filter(k => !patchKeys.has(k)) : [];
+  const changed = patchKeys && (fresh.length || keys.size !== patchKeys.size);
+  patchSeen = txt; patchData = d; patchKeys = keys;
+  document.getElementById('patch-n').textContent = d.cables.length;
+  if (changed && !document.getElementById('patch').classList.contains('on')) {
+    const b = document.getElementById('patch-btn'); b.classList.remove('hot'); void b.offsetWidth; b.classList.add('hot');
+  }
+  drawPatch(new Set(fresh));
+}
+function drawPatch(fresh) {
+  const d = patchData; if (!d) return;
+  document.getElementById('patch-at').textContent = `${d.modules.length} modules · ${d.cables.length} cables · Rack autosave ${time(d.t)}`;
+  const ROW = 30, BOX = 18;
+  const ys = [...new Set(d.modules.map(m => m.y))].sort((a, b) => a - b);
+  const x0 = Math.min(...d.modules.map(m => m.x)) - 2, x1 = Math.max(...d.modules.map(m => m.x + m.w)) + 2;
+  const mod = {};
+  d.modules.forEach(m => { mod[m.id] = { ...m, top: ys.indexOf(m.y) * ROW + 4 }; });
+  // each jack along its module: inputs across the upper part, outputs across the lower part
+  const at = (m, i, n, out) => [m.x + m.w * (i + 1) / ((n || i + 1) + 1), m.top + BOX * (out ? .8 : .45)];
+  let svg = `<svg viewBox="${x0} 0 ${x1 - x0} ${ys.length * ROW + 6}" preserveAspectRatio="xMidYMid meet">`;
+  d.modules.forEach(m0 => {
+    const m = mod[m0.id];
+    svg += `<g class="m" data-id="${m.id}"><title>${esc(m.plugin)} · ${esc(m.name)}</title><rect x="${m.x + .15}" y="${m.top}" width="${m.w - .3}" height="${BOX}" rx=".4"/>` +
+      `<text x="${m.x + .8}" y="${m.top + 2.8}" textLength="${Math.max(1, Math.min(m.w - 1.6, pShort(m.name).length * 1.3))}" lengthAdjust="spacingAndGlyphs">${esc(pShort(m.name))}</text>` +
+      `<text class="pl" x="${m.x + .8}" y="${m.top + 4.8}">${esc(m.w > 8 ? m.plugin : '')}</text></g>`;
+  });
+  d.cables.forEach((c, k) => {
+    const a = mod[c.from], b = mod[c.to];
+    const [ax, ay] = at(a, c.fo, a.nout, true), [bx, by] = at(b, c.ti, b.nin, false);
+    const sag = 4 + Math.hypot(bx - ax, by - ay) * .18;
+    svg += `<path class="c" data-k="${k}" stroke="${esc(c.color)}" d="M${ax} ${ay}C${ax} ${ay + sag} ${bx} ${by + sag} ${bx} ${by}"/>` +
+      `<circle class="j" data-k="${k}" cx="${ax}" cy="${ay}" r=".55" fill="${esc(c.color)}"/><circle class="j" data-k="${k}" cx="${bx}" cy="${by}" r=".55" fill="${esc(c.color)}"/>`;
+  });
+  document.getElementById('patch-map').innerHTML = svg + '</svg>';
+  // the list, grouped by the module each cable plugs into
+  const groups = {};
+  d.cables.forEach((c, k) => (groups[c.to] = groups[c.to] || []).push(k));
+  const order = Object.keys(groups).sort((p, q) => pShort(mod[p].name).localeCompare(pShort(mod[q].name)));
+  document.getElementById('patch-list').innerHTML = order.map(id => `<h4>INTO ${esc(pShort(mod[id].name).toUpperCase())}</h4>` +
+    groups[id].map(k => {
+      const c = d.cables[k];
+      return `<div data-k="${k}"${fresh.has(pKey(c)) ? ' class="in"' : ''} title="${esc(c.fn)} → ${esc(c.tn)}"><i style="background:${esc(c.color)}"></i>` +
+        `<span><b>${esc(pJack(c.tn))}</b> <em>←</em> ${esc(pShort(mod[c.from].name))} <em>·</em> ${esc(pJack(c.fn))}</span></div>`;
+    }).join('')).join('');
+  pickPatch(patchSel);
+}
+function pickPatch(sel) {
+  patchSel = sel;
+  const map = document.getElementById('patch-map'), d = patchData;
+  map.classList.toggle('sel', !!sel);
+  document.querySelectorAll('#patch-map .on, #patch-list .on').forEach(e => e.classList.remove('on'));
+  if (!sel || !d) return;
+  const ks = sel.k !== undefined ? [sel.k] : d.cables.map((c, k) => (c.from == sel.id || c.to == sel.id) ? k : -1).filter(k => k >= 0);
+  ks.forEach(k => {
+    document.querySelectorAll(`#patch-map [data-k="${k}"], #patch-list [data-k="${k}"]`).forEach(e => e.classList.add('on'));
+    const c = d.cables[k];
+    [c.from, c.to].forEach(id => { const g = map.querySelector(`.m[data-id="${id}"]`); if (g) g.classList.add('on'); });
+  });
+  if (sel.k !== undefined) { const r = document.querySelector(`#patch-list [data-k="${sel.k}"]`); if (r && sel.scroll) r.scrollIntoView({ block: 'nearest' }); }
+}
+document.getElementById('patch-btn').onclick = () => { const p = document.getElementById('patch'); p.classList.add('on'); document.getElementById('patch-btn').classList.remove('hot'); drawPatch(new Set()); };
+document.getElementById('patch-close').onclick = () => document.getElementById('patch').classList.remove('on');
+document.addEventListener('keydown', e => { if (e.key === 'Escape') document.getElementById('patch').classList.remove('on'); });
+document.getElementById('patch-map').onclick = e => {
+  const c = e.target.closest('[data-k]'), m = e.target.closest('.m');
+  const sel = c ? { k: +c.dataset.k, scroll: true } : m ? { id: m.dataset.id } : null;
+  pickPatch(sel && patchSel && JSON.stringify(sel) === JSON.stringify(patchSel) ? null : sel);
+};
+document.getElementById('patch-list').onclick = e => {
+  const r = e.target.closest('[data-k]'); if (!r) return;
+  pickPatch(patchSel && patchSel.k === +r.dataset.k ? null : { k: +r.dataset.k });
+};
+
 async function tick(first) {
   try {
-    await Promise.all([scanArt(first), scanModules(first), scanLog(), scanCode(first), scanGit(first), scanFocus(first)]);
+    await Promise.all([scanArt(first), scanModules(first), scanLog(), scanCode(first), scanGit(first), scanFocus(first), scanChat(), scanPatch()]);
     if (!running && pendingReview) review(pendingReview);
     if (first) await cacheAll();
     if (first) show(latest());

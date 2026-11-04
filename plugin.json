@@ -25,6 +25,17 @@
       }
     },
     {
+      "slug": "SynTHBloKMtxQuad",
+      "name": "SynTHBloK MTX Quad Oscillator Synth",
+      "description": "The quad-oscillator synth voice played by an 8x8 note grid with per-step accent, cutoff, gate, glide, chance, ratchet, octave and resonance sliders",
+      "tags": [
+        "Synth voice",
+        "Oscillator",
+        "Sequencer",
+        "Polyphonic"
+      ]
+    },
+    {
       "slug": "SynTHBloKPoly",
       "name": "SynTHBloK-P Poly",
       "description": "Polyphonic unison engine for SynTHBloK",

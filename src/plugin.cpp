@@ -54,5 +54,6 @@ void init(Plugin* p) {
     p->addModel(modelSynTHBloKMatrixFx);
     p->addModel(modelSynTHBloKMatrixSong);
     p->addModel(modelSynTHBloKLoop);
+    p->addModel(modelSynTHBloKMtxQuad);
 }
 
