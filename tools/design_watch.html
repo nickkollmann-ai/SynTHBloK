@@ -8,6 +8,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SynTHBloK Workbench</title>
+<script>
+// A phone goes to the phone workbench (tools/mobile.html). Its DESKTOP link comes back with ?desktop=1,
+// which is remembered until mobile.html is opened again.
+(() => {
+  const q = new URLSearchParams(location.search);
+  let keep = false;
+  try { if (q.has('desktop')) localStorage.setItem('wb-desktop', '1'); keep = localStorage.getItem('wb-desktop') === '1'; } catch (e) { keep = q.has('desktop'); }
+  const phone = /iPhone|iPod|Android.+Mobile/.test(navigator.userAgent) || (matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 600);
+  if (phone && !keep) location.replace('mobile.html');
+})();
+</script>
 <style>
 :root{--bg:#0d0d14;--card:#0d161d;--line:#0e2f39;--cy:#00e5ff;--mg:#ff00aa;--or:#ff7a00;--tx:#e8f4f8;--mut:#5a7a8a;--ok:#3dff9a;--bad:#ff3b5c}
 *{box-sizing:border-box}

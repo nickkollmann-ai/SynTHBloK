@@ -19,6 +19,7 @@ button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:poin
 /* top bar: name, and the commit -> push readout */
 .top{display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top) + 8px) 14px 8px;background:#070b10;border-bottom:1px solid var(--line)}
 .top>b{color:var(--mg);letter-spacing:.14em;font-weight:600;font-size:12px}
+#desk{font-size:9px;letter-spacing:.12em;color:var(--mut);border:1px solid var(--line);padding:1px 5px;text-decoration:none}
 #git{margin-left:auto;display:flex;gap:4px;font-size:10px;letter-spacing:.06em}
 #git span{border:1px solid var(--line);padding:1px 6px;color:var(--mut);white-space:nowrap}
 #git .ok{border-color:var(--ok);color:var(--ok)}#git .wait{border-color:var(--or);color:var(--or)}
@@ -37,7 +38,7 @@ main{min-height:0;position:relative}
 .card h3{margin:0;padding:6px 10px;font-weight:500;font-size:10px;letter-spacing:.14em;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
 .card h3 b{color:var(--cy);font-weight:500}.card h3 em{font-style:normal;color:var(--mut)}
 /* tab bar */
-nav{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);background:#070b10;padding-bottom:env(safe-area-inset-bottom)}
+nav{display:grid;grid-template-columns:repeat(6,1fr);border-top:1px solid var(--line);background:#070b10;padding-bottom:env(safe-area-inset-bottom)}
 nav button{position:relative;padding:8px 0 6px;font-size:10px;letter-spacing:.1em;color:var(--mut)}
 nav button i{display:block;font-style:normal;font-size:18px;line-height:22px}
 nav button.on{color:var(--mg);box-shadow:inset 0 2px 0 var(--mg)}
@@ -49,6 +50,20 @@ nav button.new::after{content:"";position:absolute;top:7px;right:calc(50% - 16px
 #d-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:10px;background:var(--chk);position:relative}
 #d-stage img{max-width:100%;max-height:100%;object-fit:contain;box-shadow:0 0 0 1px var(--line),0 14px 40px #000c}
 #d-stage .none{color:var(--bad);text-align:center;font-size:11px;padding:20px;border:1px dashed var(--line)}
+/* live drawing: a saved SVG builds up piece by piece (an edit: removed pieces flash red and fade, kept ones dim) */
+#d-stage>svg{width:100%;height:100%}
+#d-stage .pc{visibility:hidden}#d-stage .pc.on{visibility:visible;animation:pc 1s ease}
+@keyframes pc{0%{filter:drop-shadow(0 0 4px #ff00aa) brightness(1.8)}100%{filter:none}}
+#d-stage.edit>svg>*:not(.gone){transition:opacity .4s}#d-stage.edit.busy .keep{opacity:.45}
+#d-stage .gone{opacity:0}#d-stage .gone.on{animation:gone 1.4s ease forwards}
+@keyframes gone{0%{opacity:1;filter:drop-shadow(0 0 3px #ff3b5c)}100%{opacity:0}}
+#d-tag{position:absolute;top:8px;left:8px;right:8px;width:fit-content;max-width:calc(100% - 16px);padding:1px 7px;font-size:10px;letter-spacing:.1em;color:#070b10;background:var(--cy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#d-tag.edit{background:var(--or)}#d-tag.done{background:var(--line);color:var(--mut)}#d-tag.review{background:var(--mg)}
+#d-note{position:absolute;left:8px;right:8px;bottom:8px;padding:3px 8px;font-size:11px;color:var(--tx);background:#070b10e0;border-left:2px solid var(--mg)}
+#d-stage .scan{fill:url(#wbm-scan);pointer-events:none}
+#d-stage .focus-box{fill:#ff00aa14;stroke:var(--mg);stroke-width:1.8px;vector-effect:non-scaling-stroke;stroke-dasharray:6 4;animation:fbox 1.1s linear infinite}
+@keyframes fbox{to{stroke-dashoffset:-20}}
+#d-seg button[data-v="live"]{display:none}#d-seg.haslive button[data-v="live"]{display:inline}
 #d-stage.flash::after{content:"UPDATED";position:absolute;top:8px;right:8px;background:var(--mg);color:#070b10;padding:1px 6px;font-size:10px;letter-spacing:.14em}
 #d-strip{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;flex:none}
 #d-strip::-webkit-scrollbar{display:none}
@@ -101,15 +116,18 @@ nav button.new::after{content:"";position:absolute;top:7px;right:calc(50% - 16px
 #code u{display:inline-block;width:24px;margin-right:6px;text-align:right;color:#2c4652;text-decoration:none;text-indent:0}
 #code .ctx{color:#4f6a76}#code .add{color:var(--tx);background:#00e5ff14}#code .del{color:var(--bad);text-decoration:line-through;opacity:.75}
 #code .gap{color:var(--mut);font-style:italic;padding-left:40px;text-indent:0}
+/* RACK: a picture of the Rack window, taken after each build (tools/rack_view.ps1) */
+#r-stage{display:flex;align-items:center;justify-content:center;background:var(--chk);min-height:240px;padding:6px}
+#r-stage img{max-width:100%;height:auto;box-shadow:0 0 0 1px var(--line)}
 .hint{color:var(--mut);font-style:italic;font-size:11px;padding:10px}
 </style>
 </head>
 <body>
-<div class="top"><b>SYNTHBLOK</b><div id="git"><span id="g-commit">COMMIT -</span><span id="g-push">PUSH -</span></div></div>
+<div class="top"><b>SYNTHBLOK</b><a id="desk" href="design_watch.html?desktop=1" title="The full desktop workbench">DESKTOP</a><div id="git"><span id="g-commit">COMMIT -</span><span id="g-push">PUSH -</span></div></div>
 <div class="stat"><span id="s-build">BUILD -</span><span id="s-rack">RACK -</span><span id="s-save">waiting…</span></div>
 <main>
   <section class="scr on" id="t-design">
-    <div class="card" id="d-view"><h3><span>DESIGN <b id="d-name">-</b></span><span id="d-seg"><button data-v="panel" class="on">PANEL</button><button data-v="shot">RACK</button></span></h3>
+    <div class="card" id="d-view"><h3><span>DESIGN <b id="d-name">-</b></span><span id="d-seg"><button data-v="live">LIVE</button><button data-v="panel" class="on">PANEL</button><button data-v="shot">RACK</button></span></h3>
       <div id="d-stage"><div class="hint">Loading modules…</div></div></div>
     <div id="d-strip"></div>
     <div class="row"><button id="d-prev">‹ PREV</button><button id="d-follow" class="on">FOLLOWING</button><button id="d-next">NEXT ›</button></div>
@@ -125,6 +143,9 @@ nav button.new::after{content:"";position:absolute;top:7px;right:calc(50% - 16px
     <div class="card" id="p-list"><div class="hint">Start tools/patch_feed.py on the PC to fill this.</div></div>
   </section>
   <section class="scr" id="t-chat"><div id="chat"><div class="hint">Start tools/chat_feed.py on the PC to fill this.</div></div></section>
+  <section class="scr" id="t-rack">
+    <div class="card"><h3><span>RACK <b>after the last build</b></span><em id="r-at"></em></h3><div id="r-stage"><div class="hint">A picture of Rack shows here when a build reopens it. Tap it to zoom; for the live screen, open AnyDesk.</div></div></div>
+  </section>
   <section class="scr" id="t-code">
     <div class="card"><h3><span>CODE <b id="c-file">waiting for a save</b></span><em id="c-at"></em></h3><pre id="code"><div class="gap">Save a file in src/ or res/ and its changes show here.</div></pre></div>
   </section>
@@ -135,10 +156,13 @@ nav button.new::after{content:"";position:absolute;top:7px;right:calc(50% - 16px
   <button data-t="patch"><i>⌇</i>PATCH<sup id="n-patch"></sup></button>
   <button data-t="chat"><i>✉</i>CHAT</button>
   <button data-t="code"><i>≡</i>CODE</button>
+  <button data-t="rack"><i>▤</i>RACK</button>
 </nav>
 <div id="zoom"><img alt=""><span id="zoom-cap">pinch to zoom · tap to close · double-tap for 250%</span></div>
 <script>
 const POLL = 3000;
+// opening this page means the phone layout is wanted again: design_watch.html redirects here once more
+try { localStorage.removeItem('wb-desktop'); } catch (e) {}
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const time = t => new Date(t).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit', second: '2-digit'});
@@ -187,9 +211,20 @@ function showMod(slug, flash) {
   const m = mods.find(x => x.slug === slug); if (!m) return;
   shown = slug;
   $('d-name').textContent = shortName(m);
-  const p = view === 'panel' ? panelOf(slug) : shotOf(slug);
+  if (view === 'live' && (!live || live.slug !== slug)) view = 'panel';
   const st = $('d-stage');
-  st.innerHTML = p ? `<img src="${url(p)}" alt="">` : `<div class="none">${view === 'panel' ? 'No panel SVG for ' + esc(slug) : 'No Rack screenshot yet'}</div>`;
+  if (view === 'live') {
+    // the drawing keeps running while you look at PANEL or RACK; LIVE puts it back
+    if (!live.nodes.every(n => n.parentNode === st)) { st.innerHTML = ''; st.append(...live.nodes); }
+    st.classList.toggle('edit', live.edit); st.classList.toggle('busy', !!liveRunning && live.edit);
+    flash = false;
+  } else {
+    const p = view === 'panel' ? panelOf(slug) : shotOf(slug);
+    st.classList.remove('edit', 'busy');
+    st.innerHTML = p ? `<img src="${url(p)}" alt="">` : `<div class="none">${view === 'panel' ? 'No panel SVG for ' + esc(slug) : 'No Rack screenshot yet'}</div>`;
+  }
+  $('d-seg').classList.toggle('haslive', !!live);
+  $('d-seg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.v === view));
   if (flash) { st.classList.remove('flash'); void st.offsetWidth; st.classList.add('flash'); setTimeout(() => st.classList.remove('flash'), 2500); }
   $('d-follow').classList.toggle('on', follow);
   $('d-follow').textContent = follow ? 'FOLLOWING' : 'FOLLOW LATEST';
@@ -211,14 +246,117 @@ const step = n => { const s = [...$('d-strip').children], i = s.findIndex(b => b
 $('d-prev').onclick = () => step(-1);
 $('d-next').onclick = () => step(1);
 $('d-follow').onclick = () => { follow = true; const m = latestMod(); if (m) showMod(m.slug); };
-$('d-seg').onclick = e => { const b = e.target.closest('button'); if (!b) return; view = b.dataset.v; $('d-seg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); if (shown) showMod(shown); };
+$('d-seg').onclick = e => { const b = e.target.closest('button'); if (!b) return; view = b.dataset.v; if (view === 'live' && live) shown = live.slug; if (shown) showMod(shown); };
+
+// ---- LIVE drawing: each saved panel SVG is drawn piece by piece, as in the desktop's LIVE.DRAWING ----
+// A new SVG builds from nothing; an edit dims what stays, flashes the removed pieces red and fades them, and puts
+// the new or changed ones in one at a time. tools/wb_focus.json (Claude looking over an SVG) shows it with a
+// sweep and the area in question boxed; {"clear": true} ends it.
+let live = null, liveRunning = null, liveNext = null, focusText = null;
+const NS = 'http://www.w3.org/2000/svg';
+const svgEl = (tag, at) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); return e; };
+function leaves(root) {
+  const out = [], skip = /^(defs|style|title|desc|metadata|script|lineargradient|radialgradient|clippath|mask|pattern|filter|symbol)$/i;
+  (function walk(n) { for (const c of n.children) { if (skip.test(c.tagName)) continue; if (/^(g|a|svg|switch)$/i.test(c.tagName)) walk(c); else out.push(c); } })(root);
+  return out;
+}
+function parseSvg(text) {
+  const svg = new DOMParser().parseFromString(text, 'image/svg+xml').documentElement;
+  if (svg.tagName.toLowerCase() !== 'svg') return null;
+  const s = document.importNode(svg, true);
+  if (!s.getAttribute('viewBox') && s.getAttribute('width')) s.setAttribute('viewBox', `0 0 ${parseFloat(s.getAttribute('width'))} ${parseFloat(s.getAttribute('height'))}`);
+  s.removeAttribute('width'); s.removeAttribute('height');
+  return [svg, s];
+}
+const tagSpan = (cls, text) => { const t = document.createElement('span'); t.id = 'd-tag'; t.className = cls; t.textContent = text; return t; };
+// a panel not in plugin.json yet (a new module's draft) gets a tile of its own until plugin.json lists it
+function modFor(p) {
+  let m = mods.find(x => p === panelOf(x.slug));
+  if (!m && /^\/res\/[^/]+\.svg$/i.test(p)) { const s = p.slice(5, -4); m = {slug: s, name: s + ' (draft)'}; mods.push(m); }
+  return m;
+}
+function liveDraw(job) {
+  const m = modFor(job.p);
+  if (!m || !(follow || shown === m.slug)) return;
+  if (liveRunning) { liveNext = job; return; }   // one waits; a newer save replaces it
+  const parsed = parseSvg(job.now); if (!parsed) return;
+  const [src, svg] = parsed, before = job.before;
+  const old = new Map();
+  (before ? leaves(new DOMParser().parseFromString(before, 'image/svg+xml').documentElement) : []).forEach(e => old.set(e.outerHTML, (old.get(e.outerHTML) || []).concat([e])));
+  const pieces = [], gone = [], dst = leaves(svg);
+  leaves(src).forEach((e, k) => {
+    const same = old.get(e.outerHTML);
+    if (same && same.length) { same.pop(); dst[k].classList.add('keep'); } else { dst[k].classList.add('pc'); pieces.push(dst[k]); }
+  });
+  for (const l of old.values()) l.forEach(e => { const g = document.importNode(e, true); g.classList.add('gone'); svg.appendChild(g); gone.push(g); });
+  const name = job.p.replace(/^.*\//, ''), tag = tagSpan(before ? 'edit' : '', '');
+  const setTag = (n, done) => {
+    tag.textContent = (before ? `EDITING · +${pieces.length} / -${gone.length}` : `BUILDING · ${name}`) + (done ? ' · DONE' : ` · ${n}/${pieces.length}`);
+    if (done) tag.classList.add('done');
+  };
+  live = {slug: m.slug, text: job.now, edit: !!before, nodes: [svg, tag]};
+  view = 'live'; setTag(0, false);
+  liveRunning = true;
+  showMod(m.slug);
+  news('design');
+  gone.forEach(g => g.classList.add('on'));
+  const total = Math.min(9000, Math.max(1500, pieces.length * 45)), t0 = performance.now();
+  let n = 0;
+  liveRunning = setInterval(() => {
+    const f = Math.min(1, (performance.now() - t0) / total), want = Math.round(pieces.length * f);
+    if (n < want) { while (n < want) pieces[n++].classList.add('on'); setTag(n, false); }
+    if (f < 1) return;
+    clearInterval(liveRunning); liveRunning = null;
+    gone.forEach(g => g.remove()); setTag(pieces.length, true);
+    $('d-stage').classList.remove('busy');
+    const next = liveNext; liveNext = null;
+    if (next) liveDraw(next); else if (pendingReview) review(pendingReview);
+  }, 30);
+}
+let pendingReview = null;
+async function scanFocus() {
+  const txt = await getText('/tools/wb_focus.json');
+  if (txt === null || txt === focusText) return;
+  const first = focusText === null; focusText = txt;
+  if (first) return;
+  try { pendingReview = JSON.parse(txt); } catch (e) { return; }
+  if (!liveRunning) review(pendingReview);
+}
+async function review(job) {
+  pendingReview = null;
+  if (job.clear) { live = null; if (view === 'live') view = 'panel'; if (shown) showMod(shown); return; }
+  const p = job.path && ('/' + job.path.replace(/\\/g, '/').replace(/^\/+/, ''));
+  const m = p && modFor(p); if (!m) return;
+  const text = await getText(p); if (text === null) return;
+  const parsed = parseSvg(text); if (!parsed) return;
+  const svg = parsed[1], [vx, vy, vw, vh] = (svg.getAttribute('viewBox') || '0 0 100 100').split(/[\s,]+/).map(Number);
+  const defs = svgEl('defs', {}), grad = svgEl('linearGradient', {id: 'wbm-scan', x1: 0, y1: 0, x2: 0, y2: 1});
+  grad.append(svgEl('stop', {offset: 0, 'stop-color': '#00e5ff', 'stop-opacity': 0}), svgEl('stop', {offset: .85, 'stop-color': '#00e5ff', 'stop-opacity': .28}), svgEl('stop', {offset: 1, 'stop-color': '#00e5ff', 'stop-opacity': .7}));
+  defs.append(grad); svg.append(defs);
+  if (Array.isArray(job.box) && job.box.length === 4) {
+    const [bx, by, bw, bh] = job.box.map(Number);
+    svg.append(svgEl('rect', {class: 'focus-box', x: bx, y: by, width: bw, height: bh, rx: Math.min(bw, bh) * .08}));
+  }
+  const band = vh * .08, scan = svgEl('rect', {class: 'scan', x: vx, y: vy - band, width: vw, height: band});
+  scan.append(svgEl('animate', {attributeName: 'y', from: vy - band, to: vy + vh, dur: '2.6s', repeatCount: 'indefinite'}));
+  svg.append(scan);
+  const nodes = [svg, tagSpan('review', 'REVIEWING · ' + p.replace(/^.*\//, ''))];
+  if (job.note) { const d = document.createElement('span'); d.id = 'd-note'; d.textContent = String(job.note); nodes.push(d); }
+  live = {slug: m.slug, text, edit: false, nodes};
+  view = 'live';
+  showMod(m.slug);
+  news('design');
+}
 // swipe the panel left / right for the next / previous module
 let sx = null;
 $('d-stage').addEventListener('touchstart', e => { sx = e.touches.length === 1 ? e.touches[0].clientX : null; }, {passive: true});
 $('d-stage').addEventListener('touchend', e => { if (sx === null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (Math.abs(dx) > 60) step(dx < 0 ? 1 : -1); }, {passive: true});
 // tap the panel to see it full screen (pinch zooms there)
 const zoom = $('zoom'), zimg = zoom.querySelector('img');
-$('d-stage').addEventListener('click', e => { if (e.target.tagName === 'IMG') { zimg.src = e.target.src; zoom.className = 'on'; zoom.scrollTop = 0; } });
+$('d-stage').addEventListener('click', e => {
+  const src = e.target.tagName === 'IMG' ? e.target.src : view === 'live' && live && e.target.closest('svg') ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(live.text) : null;
+  if (src) { zimg.src = src; zoom.className = 'on'; zoom.scrollTop = 0; }
+});
 let lastTap = 0;
 zoom.onclick = () => { const now = Date.now(); if (now - lastTap < 300) { zoom.classList.toggle('full'); lastTap = 0; return; } lastTap = now; setTimeout(() => { if (lastTap === now) zoom.className = ''; }, 320); };
 
@@ -253,7 +391,7 @@ async function scanFiles() {
     if (m) freshMods.add(m.slug);
   }
   const svg = fresh.filter(p => p.startsWith('/res/')).map(p => mods.find(x => p === panelOf(x.slug))).filter(Boolean).pop();
-  if (svg && follow) { showMod(svg.slug, true); news('design'); }
+  if (svg && follow) news('design');   // codeChange draws it in LIVE
   else if (freshMods.has(shown)) showMod(shown, true);
   else drawStrip(freshMods);
 }
@@ -417,6 +555,7 @@ async function codeChange(p) {
   texts.set(p, now);
   $('c-file').textContent = p.replace(/^\//, ''); $('c-at').textContent = time(stamps.get(p) || Date.now());
   news('code');
+  if (p.startsWith('/res/') && /\.svg$/i.test(p)) liveDraw({p, before: was, now});
   const a = (was || '').split('\n'), b = now.split('\n');
   let s = 0; while (s < a.length && s < b.length && a[s] === b[s]) s++;
   let ea = a.length, eb = b.length; while (ea > s && eb > s && a[ea - 1] === b[eb - 1]) { ea--; eb--; }
@@ -444,8 +583,29 @@ async function codeChange(p) {
   $('code').innerHTML = rows.join('');
 }
 
+// ---- RACK: the newest picture of the Rack window; a new one (a build just reopened Rack) brings this tab up ----
+let rackSeen = null;
+async function scanRack() {
+  const txt = await getText('/tools/rack_live.json');
+  if (txt === null || txt === rackSeen) return;
+  let d; try { d = JSON.parse(txt); } catch (e) { return; }
+  const first = rackSeen === null; rackSeen = txt;
+  $('r-stage').innerHTML = `<img src="/tools/rack_live.png?t=${d.t}" alt="Rack">`;
+  $('r-at').textContent = time(d.t);
+  if (!first && Date.now() - d.t < 120000) pick('rack');
+}
+$('r-stage').addEventListener('click', e => { if (e.target.tagName === 'IMG') { zimg.src = e.target.src; zoom.className = 'on'; zoom.scrollTop = 0; } });
+
+// a new version of this page reloads itself (the tab you're on is remembered)
+let selfStamp = null;
+async function scanSelf() {
+  const t = await stamp('/tools/mobile.html');
+  if (selfStamp && t && t !== selfStamp) location.reload();
+  selfStamp = t || selfStamp;
+}
 async function tick() {
-  await Promise.all([scanModules(), scanFiles(), scanLog(), scanGit(), scanPatch(), scanChat()]);
+  scanSelf();
+  await Promise.all([scanModules(), scanFiles(), scanLog(), scanGit(), scanPatch(), scanChat(), scanFocus(), scanRack()]);
   setTimeout(tick, POLL);
 }
 pick(tab);

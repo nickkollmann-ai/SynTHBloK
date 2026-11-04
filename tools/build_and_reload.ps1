@@ -7,6 +7,7 @@
 #   4. Screenshot every SynTHBloK module as Rack draws it into web-images/screenshots (tools/rack_shots.ps1,
 #      about 10 s, on a private Rack folder). -NoShots skips it.
 #   5. Reopen Rack if it was open (it reloads the autosaved patch). -Open starts Rack even if it was closed.
+#      tools/rack_view.ps1 then brings Rack to the front and saves pictures of it for the phone's RACK tab.
 # When OBS is open with its WebSocket server on, OBS records the workbench from the start of the build until
 # a few seconds after it ends (tools/obs_record.ps1). -NoRecord skips it.
 param(
@@ -58,6 +59,8 @@ if (-not $NoShots) { & (Join-Path $PSScriptRoot 'rack_shots.ps1') -Rack $Rack }
 if ($wasOpen -or $Open) {
     Start-Process -FilePath $Rack -WorkingDirectory (Split-Path $Rack)
     Write-Host 'Rack reopened.'
+    # Rack to the front (for AnyDesk) and pictures of it for the phone workbench's RACK tab
+    Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $PSScriptRoot 'rack_view.ps1')`""
 }
 
 } finally {

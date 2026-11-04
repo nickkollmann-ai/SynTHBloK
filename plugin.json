@@ -36,6 +36,19 @@
       ]
     },
     {
+      "slug": "SynTHBloKDualFilter",
+      "name": "SynTHBloK DUAL FILTER",
+      "description": "Two stereo multimode filters (LP / BP / notch / HP sweep) with drive, run in series, parallel or stereo, linked cutoffs, an LFO and an envelope follower",
+      "tags": [
+        "Filter",
+        "Dual",
+        "Stereo",
+        "Distortion",
+        "Low-frequency oscillator",
+        "Envelope follower"
+      ]
+    },
+    {
       "slug": "SynTHBloKPoly",
       "name": "SynTHBloK-P Poly",
       "description": "Polyphonic unison engine for SynTHBloK",
