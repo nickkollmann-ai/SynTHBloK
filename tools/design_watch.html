@@ -70,8 +70,9 @@ main{display:grid;grid-template-columns:minmax(260px,.7fr) minmax(0,1fr) minmax(
 #log .e{color:var(--bad)}#log .w{color:var(--or)}#log .c{color:var(--cy)}
 /* the save list: 4 rows high, no scroll bar; each new file slides in at the top and the rest scroll down */
 #feeds{display:flex;border-top:1px solid var(--line)}
-#feed,#gitfeed{flex:1;min-width:0;height:72px;box-sizing:content-box;overflow:hidden auto;scrollbar-width:none;padding:6px 12px;font-size:11px;line-height:18px;color:var(--mut)}
-#gitfeed{border-left:1px solid var(--line)}
+#feeds>div{flex:1;min-width:0}#feeds>div+div{border-left:1px solid var(--line)}
+#feeds .head{padding:3px 12px;font-size:10px}
+#feed,#gitfeed{height:72px;box-sizing:content-box;overflow:hidden auto;scrollbar-width:none;padding:6px 12px;font-size:11px;line-height:18px;color:var(--mut)}
 #feed::-webkit-scrollbar,#gitfeed::-webkit-scrollbar{display:none}
 /* no scroll bars on the code and compiler windows either: they follow the work as it runs (the wheel still scrolls) */
 #code,#log{scrollbar-width:none}#code::-webkit-scrollbar,#log::-webkit-scrollbar{display:none}
@@ -117,7 +118,10 @@ footer button em{display:block;font-style:normal;background:var(--cy);color:#070
   <section class="pane" id="p-comp">
     <div class="head"><span>COMPILER <b>build.log</b></span><span id="state">IDLE</span></div>
     <pre id="log">No build.log yet. It fills in when a build starts.</pre>
-    <div id="feeds"><div id="feed"></div><div id="gitfeed"></div></div>
+    <div id="feeds">
+      <div><div class="head"><span>FILES <b>saves</b></span></div><div id="feed"></div></div>
+      <div><div class="head"><span>GIT <b>commits + pushes</b></span></div><div id="gitfeed"></div></div>
+    </div>
   </section>
   <section class="pane" id="p-draw">
     <div class="head"><span>LIVE.DRAWING <b>the SVG being built</b></span></div>
