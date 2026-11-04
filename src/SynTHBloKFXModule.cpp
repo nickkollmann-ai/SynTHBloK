@@ -100,6 +100,10 @@ struct SynTHBloKFXModule : Module {
     float wowPhase = 0.f;
     float flutterPhase = 0.f;
 
+    // REVERSE: two read heads play the last chunk backwards, half a chunk apart, crossfaded
+    float revPhase = 0.f;
+    int revAnchorA = 0, revAnchorB = 0;
+
     SynTHBloKFXModule() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
 
@@ -114,8 +118,8 @@ struct SynTHBloKFXModule : Module {
         configParam(WIDTH_PARAM,     0.f, 1.f, 0.50f, "Width");
 
         configButton(DELAY_TYPE_BUTTON_PARAM, "Mode");
-        configSwitch(DELAY_TYPE_PARAM, 0.f, 7.f, 0.f, "ModeSel",
-            {"Cln", "Tape", "Anlg", "Mod", "Ping", "Dyn", "Space", "Rev"});
+        configSwitch(DELAY_TYPE_PARAM, 0.f, 7.f, 0.f, "Delay mode",
+            {"Clean", "Tape", "Analog", "Modern", "Ping-pong", "Dynamic", "Space", "Reverse"});
 
         configSwitch(SUBDIV_PARAM, 0.f, 2.f, 0.f, "Div",
             {"1/1", "3/4", "2/3"});
@@ -132,7 +136,7 @@ struct SynTHBloKFXModule : Module {
         configInput(MOD_RATE_CV_INPUT,  "Rate CV");
         configInput(DUCKING_CV_INPUT,   "Duck CV");
         configInput(WIDTH_CV_INPUT,     "Width CV");
-        configParam(PREPOST_MIX_PARAM, 0.f, 1.f, 0.5f, "Pre/Post");
+        configParam(PREPOST_MIX_PARAM, 0.f, 1.f, 0.5f, "Pre/Post (unused)");   // kept so old patches load
         configInput(CLOCK_INPUT, "Clk");
         configInput(IN_L_INPUT,  "In L");
         configInput(IN_R_INPUT,  "In R");
@@ -217,7 +221,6 @@ struct DelayTypeOLED : TransparentWidget {
     }
 
     void draw(const DrawArgs& args) override {
-        if (!module) return;
         NVGcontext* vg = args.vg;
 
         NVGpaint bg = nvgLinearGradient(vg, 0, 0, 0, box.size.y,
@@ -240,7 +243,8 @@ struct DelayTypeOLED : TransparentWidget {
             "PING", "DYNAMIC", "SPACE", "REVERSE"
         };
 
-        int mode = (int)module->params[SynTHBloKFXModule::DELAY_TYPE_PARAM].getValue();
+        // the module browser preview has no module: show the default mode
+        int mode = module ? (int)module->params[SynTHBloKFXModule::DELAY_TYPE_PARAM].getValue() : 0;
         mode = clamp(mode, 0, 7);
 
         nvgFontSize(vg, 9.f);
@@ -480,7 +484,7 @@ struct SynTHBloKFXWidget : ModuleWidget {
             SynTHBloKFXModule::DELAY_TYPE_BUTTON_PARAM));
 
         auto* typeOLED = new DelayTypeOLED(module);
-        typeOLED->box.pos = mm2px(Vec(45.0f, 84.0f));
+        typeOLED->box.pos = mm2px(Vec(45.0f, 83.5f));
         addChild(typeOLED);
 
         addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x0, 20)), module, SynTHBloKFXModule::TIME_PARAM));
@@ -500,11 +504,14 @@ struct SynTHBloKFXWidget : ModuleWidget {
         divOLED->box.size = mm2px(Vec(8.0f, 8.0f));
         addChild(divOLED);
 
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(39.0f, 115.0f)), module, SynTHBloKFXModule::IN_L_INPUT));
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(52.0f, 115.0f)), module, SynTHBloKFXModule::IN_R_INPUT));
+        // bottom row: L OUT, R OUT, SIDE, L IN, R IN
+        const float bx[5] = {8.0f, 19.25f, 30.5f, 41.75f, 53.0f};
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(bx[3], 115.0f)), module, SynTHBloKFXModule::IN_L_INPUT));
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(bx[4], 115.0f)), module, SynTHBloKFXModule::IN_R_INPUT));
 
-        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(10.0f, 115.0f)), module, SynTHBloKFXModule::LEFT_OUTPUT));
-        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(24.0f, 115.0f)), module, SynTHBloKFXModule::RIGHT_OUTPUT));
+        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(bx[0], 115.0f)), module, SynTHBloKFXModule::LEFT_OUTPUT));
+        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(bx[1], 115.0f)), module, SynTHBloKFXModule::RIGHT_OUTPUT));
+        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(bx[2], 115.0f)), module, SynTHBloKFXModule::SIDE_OUT_OUTPUT));
 
         addInput(createInputCentered<BlackJack>(mm2px(Vec(x0, 33)), module, SynTHBloKFXModule::TIME_CV_INPUT));
         addInput(createInputCentered<BlackJack>(mm2px(Vec(x1, 33)), module, SynTHBloKFXModule::FEEDBACK_CV_INPUT));
@@ -528,17 +535,15 @@ struct SynTHBloKFXWidget : ModuleWidget {
 
         addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x0, 92)), module, SynTHBloKFXModule::DUCKING_CV_TINY_RED));
         addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x1, 92)), module, SynTHBloKFXModule::WIDTH_CV_TINY_RED));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x2, 92)), module, SynTHBloKFXModule::CLOCK_TINY_RED));
+        // the CLK label sits above the clock jack, so its light goes beside it
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(56.0f, 98)), module, SynTHBloKFXModule::CLOCK_TINY_RED));
 
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(39.0f, 120.0f)), module, SynTHBloKFXModule::IN_L_TINY_RED));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(52.0f, 120.0f)), module, SynTHBloKFXModule::IN_R_TINY_RED));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(bx[3], 120.0f)), module, SynTHBloKFXModule::IN_L_TINY_RED));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(bx[4], 120.0f)), module, SynTHBloKFXModule::IN_R_TINY_RED));
 
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(10.0f, 120.0f)), module, SynTHBloKFXModule::OUT_L_TINY_RED));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(24.0f, 120.0f)), module, SynTHBloKFXModule::OUT_R_TINY_RED));
-
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(17.0f, 120.0f)), module, SynTHBloKFXModule::SIDE_TINY_RED));
-
-        addParam(createParamCentered<Trimpot>(mm2px(Vec(32.0f, 120.0f)), module, SynTHBloKFXModule::PREPOST_MIX_PARAM));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(bx[0], 120.0f)), module, SynTHBloKFXModule::OUT_L_TINY_RED));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(bx[1], 120.0f)), module, SynTHBloKFXModule::OUT_R_TINY_RED));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(bx[2], 120.0f)), module, SynTHBloKFXModule::SIDE_TINY_RED));
     }
 };
 // -----------------------------------------------------------------------------
@@ -591,7 +596,8 @@ void SynTHBloKFXModule::process(const ProcessArgs& args) {
         resetState = true;
 
     float inL = inputs[IN_L_INPUT].isConnected() ? inputs[IN_L_INPUT].getVoltage() : 0.f;
-    float inR = inputs[IN_R_INPUT].isConnected() ? inputs[IN_R_INPUT].getVoltage() : 0.f;
+    // a mono patch into IN L feeds both sides
+    float inR = inputs[IN_R_INPUT].isConnected() ? inputs[IN_R_INPUT].getVoltage() : inL;
 
     float time     = params[TIME_PARAM].getValue();
     float fb       = params[FEEDBACK_PARAM].getValue();
@@ -657,24 +663,22 @@ void SynTHBloKFXModule::process(const ProcessArgs& args) {
 
     fb = clamp(fb, 0.f, 0.95f);
 
-    bool colorModeOn =
-        (delayType == 1) ||
-        (delayType == 2) ||
-        (delayType == 6);
+    // TONE shapes every mode (CLEAN included)
+    bool colorModeOn = true;
 
     bool colorActive = colorModeOn &&
         ((params[COLOR_PARAM].getValue() > 0.f) || inputs[COLOR_CV_INPUT].isConnected());
 
-    bool modModeOn =
-        (delayType == 1) ||
-        (delayType == 3);
+    // DEPTH / RATE move the read head in every mode but REVERSE
+    bool modModeOn = delayType != 7;
 
     bool modDepthActive = modModeOn &&
         ((params[MOD_DEPTH_PARAM].getValue() > 0.f) || inputs[MOD_DEPTH_CV_INPUT].isConnected());
     bool modRateActive = modModeOn &&
         ((params[MOD_RATE_PARAM].getValue() > 0.f) || inputs[MOD_RATE_CV_INPUT].isConnected());
 
-    bool duckModeOn = (delayType == 5);
+    // DUCK works in every mode (the wet signal dips under the input)
+    bool duckModeOn = true;
     bool duckingActive = duckModeOn &&
         ((params[DUCKING_PARAM].getValue() > 0.f) || inputs[DUCKING_CV_INPUT].isConnected());
 
@@ -696,7 +700,7 @@ void SynTHBloKFXModule::process(const ProcessArgs& args) {
 
     float modOffset = 0.f;
 
-    if (delayType == 3) {
+    if (delayType != 1 && delayType != 7) {   // a plain sine wobble; TAPE has its own wow + flutter
         float rate = 0.1f + modRate * 3.f;
         wowPhase += 2.f * M_PI * rate * args.sampleTime;
         modOffset = sinf(wowPhase) * (modDepth * 0.003f * sr);
@@ -756,9 +760,9 @@ void SynTHBloKFXModule::process(const ProcessArgs& args) {
     }
     switch (delayType) {
         case 0: { // CLEAN (studio-grade)
-            // Gentle HF damping (removes digital harshness)
-            dl = toneFilter(dl, toneZL, 0.45f, sr);
-            dr = toneFilter(dr, toneZR, 0.45f, sr);
+            // HF damping set by TONE (the old fixed 0.45 at noon)
+            dl = toneFilter(dl, toneZL, 0.20f + color * 0.50f, sr);
+            dr = toneFilter(dr, toneZR, 0.20f + color * 0.50f, sr);
 
             // Micro‑decorrelation (adds width without coloration)
             float widen = 0.002f;
@@ -843,8 +847,8 @@ void SynTHBloKFXModule::process(const ProcessArgs& args) {
         case 5: { // DYNAMIC (finally implemented)
             float env = clamp(envFollower * 0.25f, 0.f, 1.f);
 
-            // Dynamic feedback reduction
-            float dyn = 1.f - env * duckAmt;
+            // Dynamic feedback reduction (fixed amount: DUCK is applied to every mode below)
+            float dyn = 1.f - env * 0.5f;
             dl *= dyn;
             dr *= dyn;
 
@@ -900,32 +904,27 @@ case 6: { // SPACE (lush, evolving, cinematic)
 break;
 
 case 7: { // TRUE REVERSE (actual backwards playback)
-    // Reverse read head moves BACKWARD from writePos
-    float readPosF_rev = (float)writePos - delaySamples;
+    // Each head takes the chunk recorded just before it started (chunk = TIME) and plays it backwards:
+    // it reads anchor - phase while the writer moves on, so it runs back through the buffer.
+    // Two heads half a chunk apart, with sin^2 windows that sum to 1, hide the jump at each chunk start.
+    // A head reaches up to 2 chunks behind the writer, so a chunk is at most half the buffer.
+    float chunk = clamp(delaySamples, 64.f, maxDelay * 0.5f - 4.f);
+    revPhase += 1.f;
+    if (revPhase >= chunk) revPhase = fmodf(revPhase, chunk);
+    float phA = revPhase, phB = revPhase + chunk * 0.5f;
+    if (phB >= chunk) phB -= chunk;
+    if (phA < 1.f) revAnchorA = writePos;
+    if (phB < 1.f) revAnchorB = writePos;
 
-    // Wrap properly
-    while (readPosF_rev < 0.f)
-        readPosF_rev += maxDelay;
-
-    int r0 = (int)readPosF_rev;
-    int r1 = r0 + 1;
-    if (r1 >= maxDelayI) r1 -= maxDelayI;
-
-    float fracR = readPosF_rev - (float)r0;
-
-    // Hermite interpolation (smooth reverse)
-    float rl0 = delayBufferL[(r0 - 1 + maxDelayI) % maxDelayI];
-    float rl1 = delayBufferL[r0];
-    float rl2 = delayBufferL[r1];
-    float rl3 = delayBufferL[(r1 + 1) % maxDelayI];
-
-    float rr0 = delayBufferR[(r0 - 1 + maxDelayI) % maxDelayI];
-    float rr1 = delayBufferR[r0];
-    float rr2 = delayBufferR[r1];
-    float rr3 = delayBufferR[(r1 + 1) % maxDelayI];
-
-    dl = hermite4(rl0, rl1, rl2, rl3, fracR);
-    dr = hermite4(rr0, rr1, rr2, rr3, fracR);
+    auto at = [&](const std::vector<float>& buf, int anchor, float ph) {
+        int i = anchor - (int)ph;
+        while (i < 0) i += maxDelayI;
+        return buf[i % maxDelayI];
+    };
+    float wA = sinf((float)M_PI * phA / chunk); wA *= wA;
+    float wB = 1.f - wA;
+    dl = at(delayBufferL, revAnchorA, phA) * wA + at(delayBufferL, revAnchorB, phB) * wB;
+    dr = at(delayBufferR, revAnchorA, phA) * wA + at(delayBufferR, revAnchorB, phB) * wB;
 
     // Optional: tiny modulation for life
     float revMod = (random::uniform() - 0.5f) * 0.002f;
@@ -996,13 +995,9 @@ break;
     outL = clamp(outL, -5.f, 5.f);
     outR = clamp(outR, -5.f, 5.f);
 
-    float pmix = params[PREPOST_MIX_PARAM].getValue();
-
-    float finalL = inL * (1.f - pmix) + outL * pmix;
-    float finalR = inR * (1.f - pmix) + outR * pmix;
-
-    outputs[LEFT_OUTPUT].setVoltage(finalL);
-    outputs[RIGHT_OUTPUT].setVoltage(finalR);
+    // MIX is the only dry/wet: the old Pre/Post trim (a second dry/wet after it) is gone from the panel
+    outputs[LEFT_OUTPUT].setVoltage(outL);
+    outputs[RIGHT_OUTPUT].setVoltage(outR);
     outputs[SIDE_OUT_OUTPUT].setVoltage(side);
 
     lights[SYNC_LIGHT].setBrightness(params[SYNC_PARAM].getValue());
