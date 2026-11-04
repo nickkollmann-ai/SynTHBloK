@@ -146,7 +146,7 @@
     },
     {
       "slug": "SynTHBloKPlayerView",
-      "name": "SynTHBloK MIDI + Expansion Module",
+      "name": "SynTHBloK MIDI + Expansion",
       "description": "MIDI display for Player Plus: scrolling piano roll of the loaded MIDI with playhead, track activity and transport readout",
       "tags": [
         "Visual",
