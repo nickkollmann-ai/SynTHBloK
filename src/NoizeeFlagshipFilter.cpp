@@ -1,5 +1,7 @@
 #include "plugin.hpp"
 
+// SynTHBloK Morph Filter (slug kept as NoizeeFlagshipFilter so old patches load).
+// Stereo drive -> TPT state-variable filter per side -> LP/BP/HP morph.
 struct NoizeeFlagshipFilter : Module {
     enum ParamIds {
         CUTOFF_PARAM,
@@ -66,48 +68,69 @@ struct NoizeeFlagshipFilter : Module {
         NUM_LIGHTS
     };
 
-    float hp = 0.f, bp = 0.f, lp = 0.f;
-    float fmHP = 0.f;
+    // Zavalishin TPT state-variable filter: stable at any cutoff, tuned to the cutoff in Hz
+    struct Svf {
+        float s1 = 0.f, s2 = 0.f;
+        float lp = 0.f, bp = 0.f, hp = 0.f;
+
+        void process(float x, float g, float k) {
+            hp = (x - (k + g) * s1 - s2) / (1.f + g * (k + g));
+            float v1 = g * hp;
+            bp = v1 + s1;
+            s1 = bp + v1;
+            float v2 = g * bp;
+            lp = v2 + s2;
+            s2 = lp + v2;
+            // a NaN or inf input would otherwise stick in the state for good
+            if (!std::isfinite(s1) || !std::isfinite(s2))
+                reset();
+        }
+        void reset() { s1 = s2 = lp = bp = hp = 0.f; }
+    };
+
+    Svf svf[2];
+    float fmLP = 0.f;                       // DC tracker for the FM input
+    float chaosPhase = 0.f, chaosTarget = 0.f, chaosVal = 0.f;
+    dsp::ClockDivider lightDivider;
 
     NoizeeFlagshipFilter() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
+        lightDivider.setDivision(32);
 
-        configParam(CUTOFF_PARAM, 0.f, 1.f, 0.5f, "Cutoff");
-        configParam(RES_PARAM, 0.f, 1.f, 0.f, "Resonance");
-        configParam(MORPH_PARAM, 0.f, 1.f, 0.5f, "Morph");
-        configParam(DRIVE_PARAM, 0.f, 1.f, 0.f, "Drive");
+        // cutoff knob is 20 Hz * 2^(10 x)
+        configParam(CUTOFF_PARAM, 0.f, 1.f, 0.5f, "Cutoff", " Hz", 1024.f, 20.f);
+        configParam(RES_PARAM, 0.f, 1.f, 0.f, "Resonance", "%", 0.f, 100.f);
+        configParam(MORPH_PARAM, 0.f, 1.f, 0.5f, "Morph (LP - BP - HP)", "%", 0.f, 100.f);
+        configParam(DRIVE_PARAM, 0.f, 1.f, 0.f, "Drive", "%", 0.f, 100.f);
 
-        configParam(FM_PARAM, 0.f, 1.f, 0.f, "FM amount");
-        configParam(KEY_PARAM, 0.f, 1.f, 0.f, "Keytrack");
-        configParam(CHAOS_PARAM, 0.f, 1.f, 0.f, "Chaos");
-        configParam(WIDTH_PARAM, 0.f, 1.f, 0.5f, "Stereo width");
+        configParam(FM_PARAM, 0.f, 1.f, 0.f, "FM amount", "%", 0.f, 100.f);
+        configParam(KEY_PARAM, 0.f, 1.f, 0.f, "Keytrack (100% = 1V/oct)", "%", 0.f, 100.f);
+        configParam(CHAOS_PARAM, 0.f, 1.f, 0.f, "Chaos (random cutoff drift)", "%", 0.f, 100.f);
+        configParam(WIDTH_PARAM, 0.f, 1.f, 0.5f, "Stereo width (0% mono, 50% as input, 100% cutoff spread)", "%", 0.f, 100.f);
 
-        configParam(MIX_PARAM, 0.f, 1.f, 1.f, "Mix");
+        configParam(MIX_PARAM, 0.f, 1.f, 1.f, "Dry/wet mix", "%", 0.f, 100.f);
 
-        for (int i = 0; i < NUM_INPUTS; i++)
-            configInput(i, "CV");
-
-        configInput(CUTOFF_IN,  "Cutoff CV");
+        configInput(CUTOFF_IN,  "Cutoff CV (1V/oct)");
         configInput(RES_IN,     "Resonance CV");
         configInput(MORPH_IN,   "Morph CV");
         configInput(DRIVE_IN,   "Drive CV");
 
-        configInput(FM_IN,      "FM");
-        configInput(KEY_IN,     "Keytrack");
-        configInput(CHAOS_IN,   "Chaos");
+        configInput(FM_IN,      "Audio-rate FM");
+        configInput(KEY_IN,     "Keytrack (pitch CV)");
+        configInput(CHAOS_IN,   "Chaos (external cutoff jitter source)");
         configInput(WIDTH_IN,   "Width CV");
 
-        configInput(MODE_IN,    "Morph Bias CV");
-        configInput(PDECAY_IN,  "Ping decay CV");
+        configInput(MODE_IN,    "Mode (morph offset) CV");
+        configInput(PDECAY_IN,  "Damping CV");
         configInput(CRATE_IN,   "Chaos rate CV");
-        configInput(PTONE_IN,   "Ping tone CV");
+        configInput(PTONE_IN,   "LP/HP tilt CV");
 
-        configInput(OFFSET_IN,  "Offset CV");
-        configInput(RBOOST_IN,  "Res boost CV");
-        configInput(DTONE_IN,   "Drive tone CV");
-        configInput(NWIDTH_IN,  "Noise width CV");
+        configInput(OFFSET_IN,  "Drive asymmetry (DC offset) CV");
+        configInput(RBOOST_IN,  "Resonance boost CV");
+        configInput(DTONE_IN,   "Drive gain CV");
+        configInput(NWIDTH_IN,  "Width offset CV");
 
-        configInput(IN_L, "Left in");
+        configInput(IN_L, "Left in (normalled to right)");
         configInput(IN_R, "Right in");
 
         configOutput(AUDIO_L_OUT, "Left out");
@@ -128,199 +151,154 @@ struct NoizeeFlagshipFilter : Module {
         b = C[i][2] + (C[i + 1][2] - C[i][2]) * f;
     }
 
-    inline void setWidthStyleLED(int baseId, float x) {
-        float w = clamp(x, 0.f, 1.f);
-        float blue  = clamp(1.f - (w * 2.f), 0.f, 1.f);
-        float red   = clamp((w - 0.5f) * 2.f, 0.f, 1.f);
-        float yellow = clamp(1.f - fabsf(w - 0.5f) * 2.f, 0.f, 1.f);
-        float rr, gg, bb; ledRamp(w, rr, gg, bb);
-        lights[baseId + 0].setSmoothBrightness(rr, 1);
-        lights[baseId + 1].setSmoothBrightness(gg, 1);
-        lights[baseId + 2].setSmoothBrightness(bb, 1);
+    inline void setWidthStyleLED(int baseId, float x, float dt) {
+        float rr, gg, bb; ledRamp(clamp(x, 0.f, 1.f), rr, gg, bb);
+        lights[baseId + 0].setSmoothBrightness(rr, dt);
+        lights[baseId + 1].setSmoothBrightness(gg, dt);
+        lights[baseId + 2].setSmoothBrightness(bb, dt);
     }
 
-    inline void setBipolarLED(int baseId, float v) {
+    inline void setBipolarLED(int baseId, float v, float dt) {
         float n = clamp(v / 5.f, -1.f, 1.f);
         if (n < 0.f) {
-            lights[baseId + 2].setSmoothBrightness(-n, 1);
-            lights[baseId + 0].setSmoothBrightness(0.f, 1);
-            lights[baseId + 1].setSmoothBrightness(0.f, 1);
+            lights[baseId + 2].setSmoothBrightness(-n, dt);
+            lights[baseId + 0].setSmoothBrightness(0.f, dt);
+            lights[baseId + 1].setSmoothBrightness(0.f, dt);
         } else {
-            lights[baseId + 0].setSmoothBrightness(n, 1);
-            lights[baseId + 1].setSmoothBrightness(n * 0.6f, 1);
-            lights[baseId + 2].setSmoothBrightness(0.f, 1);
+            lights[baseId + 0].setSmoothBrightness(n, dt);
+            lights[baseId + 1].setSmoothBrightness(n * 0.6f, dt);
+            lights[baseId + 2].setSmoothBrightness(0.f, dt);
         }
+    }
+
+    void onReset() override {
+        svf[0].reset();
+        svf[1].reset();
+        fmLP = chaosPhase = chaosTarget = chaosVal = 0.f;
+    }
+
+    float cv(int id, float scale, float lo, float hi) {
+        return inputs[id].isConnected() ? clamp(inputs[id].getVoltage() * scale, lo, hi) : 0.f;
     }
 
     void process(const ProcessArgs& args) override {
 
+        // a mono source on IN L feeds both sides
         float inL = inputs[IN_L].getVoltage();
-        float inR = inputs[IN_R].getVoltage();
-        float in = 0.5f * (inL + inR);
+        float inR = inputs[IN_R].isConnected() ? inputs[IN_R].getVoltage() : inL;
 
-        float offset = inputs[OFFSET_IN].isConnected() ? clamp(inputs[OFFSET_IN].getVoltage() * 0.1f, -1.f, 1.f) : 0.f;
+        // === WIDTH: 0 .. 0.5 narrows the input to mono, 0.5 .. 1 spreads the two cutoffs apart ===
+        float width = params[WIDTH_PARAM].getValue() + cv(WIDTH_IN, 0.1f, -1.f, 1.f);
+        width = clamp(width, 0.f, 1.f);
+        float wEff = clamp(width + cv(NWIDTH_IN, 0.025f, -0.25f, 0.25f), 0.f, 1.f);
+        float sideGain = std::min(wEff * 2.f, 1.f);
+        float spread = std::max(wEff - 0.5f, 0.f);            // 0 .. 0.5 -> up to +-0.5 octave
+        float mid = 0.5f * (inL + inR), side = 0.5f * (inL - inR);
+        float x[2] = {(mid + side * sideGain) * 0.2f, (mid - side * sideGain) * 0.2f};   // +-5 V -> +-1
 
-        float drive = params[DRIVE_PARAM].getValue();
-        if (inputs[DRIVE_IN].isConnected())
-            drive += inputs[DRIVE_IN].getVoltage() * 0.1f;
-        drive = clamp(drive, 0.f, 1.f);
+        // === DRIVE (asymmetry from OFFSET, without passing its DC on) ===
+        float drive = clamp(params[DRIVE_PARAM].getValue() + cv(DRIVE_IN, 0.1f, -1.f, 1.f), 0.f, 1.f);
+        float driveGain = (1.f + drive * 4.f) * (1.f + cv(DTONE_IN, 0.04f, -0.4f, 0.4f));
+        float offset = cv(OFFSET_IN, 0.1f, -1.f, 1.f);
+        float dcOff = std::tanh(offset * driveGain);
 
-        float dtone = inputs[DTONE_IN].isConnected() ? clamp(inputs[DTONE_IN].getVoltage() * 0.1f, -1.f, 1.f) : 0.f;
-        float driveTone = 1.f + dtone * 0.4f;
-
-        float driven = tanhf((in + offset) * (1.0f + drive * 4.0f) * driveTone);
-
-        float cutoff = params[CUTOFF_PARAM].getValue();
-        if (inputs[CUTOFF_IN].isConnected())
-            cutoff += inputs[CUTOFF_IN].getVoltage() * 0.1f;
-
+        // === CUTOFF, in octaves above 20 Hz ===
+        float oct = params[CUTOFF_PARAM].getValue() * 10.f;
+        oct += cv(CUTOFF_IN, 1.f, -10.f, 10.f);
         float keyAmt = params[KEY_PARAM].getValue();
-        cutoff += (keyAmt - 0.5f) * 0.25f;
-        if (inputs[KEY_IN].isConnected())
-            cutoff += inputs[KEY_IN].getVoltage() * 0.08f * keyAmt;
+        oct += cv(KEY_IN, 1.f, -10.f, 10.f) * keyAmt;
 
-        if (inputs[CHAOS_IN].isConnected())
-            cutoff += inputs[CHAOS_IN].getVoltage() * 0.02f * params[CHAOS_PARAM].getValue();
+        float chaosAmt = params[CHAOS_PARAM].getValue();
+        oct += cv(CHAOS_IN, 0.2f, -2.f, 2.f) * chaosAmt;
 
-        cutoff = clamp(cutoff, 0.f, 1.f);
-        float cutoffHz = 20.f * std::pow(2.f, cutoff * 10.f);
+        // internal chaos: smoothed random steps, 2 Hz by default, C RATE 0.6 oct/V (0.25 .. 16 Hz)
+        float rate = 2.f * std::pow(2.f, cv(CRATE_IN, 0.6f, -3.f, 3.f));
+        chaosPhase += rate * args.sampleTime;
+        if (chaosPhase >= 1.f) {
+            chaosPhase -= 1.f;
+            chaosTarget = random::uniform() * 2.f - 1.f;
+        }
+        chaosVal += (chaosTarget - chaosVal) * std::min(2.f * float(M_PI) * rate * args.sampleTime, 1.f);
+        oct += chaosVal * chaosAmt;                              // up to +-1 octave
 
-        // === SAFE CHAOS (frequency jitter) ===
-        float crate = 0.f;
-        if (inputs[CRATE_IN].isConnected())
-            crate = clamp(inputs[CRATE_IN].getVoltage() * 0.05f, -0.5f, 0.5f);
-
-        float chaos = tanhf(crate * 1.3f) * params[CHAOS_PARAM].getValue() * 0.004f;
-        cutoffHz += chaos * cutoffHz;
-        cutoffHz = clamp(cutoffHz, 20.f, 20000.f);
-
+        // audio-rate FM, DC blocked at ~5 Hz, up to 0.6 oct/V
         float fmIn = inputs[FM_IN].getVoltage();
-        fmHP = fmHP + 0.995f * (fmIn - fmHP);
-        float fmClean = fmIn - fmHP;
+        fmLP += (fmIn - fmLP) * (2.f * float(M_PI) * 5.f * args.sampleTime);
         float fmAmt = params[FM_PARAM].getValue();
-        fmAmt *= fmAmt;
-        float fmScaled = tanhf(fmClean * fmAmt * (cutoffHz * 0.0015f));
-        cutoffHz = clamp(cutoffHz + fmScaled, 20.f, 20000.f);
+        oct += (fmIn - fmLP) * fmAmt * fmAmt * 0.6f;
 
-        float res = params[RES_PARAM].getValue();
-        if (inputs[RES_IN].isConnected())
-            res += inputs[RES_IN].getVoltage() * 0.1f;
-        res = clamp(res, 0.f, 1.f);
+        float fMax = std::min(20000.f, 0.45f * args.sampleRate);
 
-        float rboost = inputs[RBOOST_IN].isConnected() ? clamp(inputs[RBOOST_IN].getVoltage() * 0.1f, 0.f, 0.5f) : 0.f;
-        float resBoosted = clamp(res + rboost, 0.f, 1.f);
-
-        float pdecay = inputs[PDECAY_IN].isConnected() ? clamp(inputs[PDECAY_IN].getVoltage() * 0.1f, -0.5f, 0.5f) : 0.f;
-
-// === SAFE SVF ===
-// Pre-warped g, but clamped to avoid runaway
-float g = std::tan(M_PI * cutoffHz / args.sampleRate);
-g = clamp(g, 0.f, 1.5f);   // <-- HARD SAFETY LIMIT
-
-// Add minimum damping to prevent negative R
-float R = 1.0f - resBoosted * 0.95f + pdecay;
-R = clamp(R, 0.15f, 1.2f); // <-- slightly higher minimum
-
-// Compute denominator safely
-float denom = 1.f + g * (g + R);
-if (denom < 0.2f) denom = 0.2f;   // <-- prevents blowups
-
-// Stable SVF update
-float hp_new = (driven - (R * bp) - lp) / denom;
-float bp_new = bp + g * hp_new;
-float lp_new = lp + g * bp_new;
-
-// Soft damping to prevent DC drift
-// Frequency-dependent damping (smooth cutoff)
-float damp = clamp(cutoffHz / 18000.f, 0.f, 1.f);  
-damp = 0.9995f + (1.f - 0.9995f) * (1.f - damp);  
-// damp = 1.0 at low cutoff, 0.9995 at high cutoff
-
-bp_new *= damp;
-lp_new *= damp;
-
-// Commit
-hp = hp_new;
-bp = bp_new;
-lp = lp_new;
-
-        // === SAFE PTONE ===
-        float ptone = 0.f;
-        if (inputs[PTONE_IN].isConnected())
-            ptone = clamp(inputs[PTONE_IN].getVoltage() * 0.05f, -0.5f, 0.5f);
-
-        float tilt = tanhf(ptone * 1.2f) * 0.12f;
-
-        float hpTilt = hp * (1.f + tilt);
-        float lpTilt = lp * (1.f - tilt);
-
-        float norm = 1.f / (1.f + fabsf(tilt) * 0.5f);
-        hp = hpTilt * norm;
-        lp = lpTilt * norm;
+        // === RESONANCE: k is the SVF damping (1 = Q 0.5 .. 0.05 = Q 20) ===
+        float res = clamp(params[RES_PARAM].getValue() + cv(RES_IN, 0.1f, -1.f, 1.f), 0.f, 1.f);
+        float resBoosted = clamp(res + cv(RBOOST_IN, 0.1f, 0.f, 0.5f), 0.f, 1.f);
+        float k = clamp(1.f - resBoosted * 0.95f + cv(PDECAY_IN, 0.1f, -0.5f, 0.5f), 0.05f, 1.5f);
 
         // === MORPH + MODE BIAS ===
-        float morph = params[MORPH_PARAM].getValue();
-
-        if (inputs[MORPH_IN].isConnected())
-            morph += inputs[MORPH_IN].getVoltage() * 0.1f;
-
-        if (inputs[MODE_IN].isConnected()) {
-            float mBias = inputs[MODE_IN].getVoltage();
-            morph += mBias * 0.12f;
-        }
-
+        float morph = params[MORPH_PARAM].getValue() + cv(MORPH_IN, 0.1f, -1.f, 1.f) + cv(MODE_IN, 0.12f, -1.f, 1.f);
         morph = clamp(morph, 0.f, 1.f);
 
-        float out = (morph < 0.5f)
-            ? lp * (1.f - morph * 2.f) + bp * (morph * 2.f)
-            : bp * (1.f - (morph - 0.5f) * 2.f) + hp * ((morph - 0.5f) * 2.f);
-
-        float width = params[WIDTH_PARAM].getValue();
-        if (inputs[WIDTH_IN].isConnected())
-            width += inputs[WIDTH_IN].getVoltage() * 0.1f;
-        width = clamp(width, 0.f, 1.f);
-
-        float nwidth = inputs[NWIDTH_IN].isConnected() ? clamp(inputs[NWIDTH_IN].getVoltage() * 0.1f, -1.f, 1.f) : 0.f;
-        float decor = nwidth * 0.25f;
-
-        float outL = tanhf(out * (1.f - width + decor));
-        float outR = tanhf(out * (1.f + width - decor));
-
-        float amp = 1.2f;
-        float sigL = clamp(outL * amp, -5.f, 5.f);
-        float sigR = clamp(outR * amp, -5.f, 5.f);
+        // tilt between the LP and HP outputs (P TONE)
+        float tilt = std::tanh(cv(PTONE_IN, 0.1f, -0.5f, 0.5f) * 1.2f) * 0.5f;
+        float tiltNorm = 1.f / (1.f + std::fabs(tilt) * 0.5f);
 
         float mix = params[MIX_PARAM].getValue();
-        float outMixL = tanhf(inL * (1.f - mix) + sigL * mix);
-        float outMixR = tanhf(inR * (1.f - mix) + sigR * mix);
+        float dry[2] = {inL, inR};
+        float outV[2];
+        float cutoffHz = 0.f;
+        for (int c = 0; c < 2; c++) {
+            float o = oct + (c == 0 ? -spread : spread);
+            float fc = clamp(20.f * std::pow(2.f, o), 10.f, fMax);
+            if (c == 0) cutoffHz = 20.f * std::pow(2.f, oct);
+            float g = std::tan(float(M_PI) * fc * args.sampleTime);
 
-        outputs[AUDIO_L_OUT].setVoltage(outMixL);
-        outputs[AUDIO_R_OUT].setVoltage(outMixR);
+            float driven = std::tanh((x[c] + offset) * driveGain) - dcOff;
+            Svf& f = svf[c];
+            f.process(driven, g, k);
 
-        setWidthStyleLED(CUTOFF_LED_RED, cutoffHz / 20000.f);
-        setWidthStyleLED(RES_LED_RED, res);
-        setWidthStyleLED(MORPH_LED_RED, morph);
-        setWidthStyleLED(DRIVE_LED_RED, drive);
+            float lp = f.lp * (1.f - tilt) * tiltNorm;
+            float hp = f.hp * (1.f + tilt) * tiltNorm;
+            float out = (morph < 0.5f)
+                ? lp * (1.f - morph * 2.f) + f.bp * (morph * 2.f)
+                : f.bp * (1.f - (morph - 0.5f) * 2.f) + hp * ((morph - 0.5f) * 2.f);
 
-        setBipolarLED(FM_LED_RED, fmIn);
-        setWidthStyleLED(KEY_LED_RED, keyAmt);
-        setBipolarLED(CHAOS_LED_RED, inputs[CHAOS_IN].getVoltage());
-        setWidthStyleLED(WIDTH_LED_RED, width);
+            float wet = 5.f * std::tanh(out);                    // back to +-5 V, soft-limited
+            outV[c] = clamp(dry[c] * (1.f - mix) + wet * mix, -12.f, 12.f);
+        }
 
-        setBipolarLED(MODE_LED_RED, inputs[MODE_IN].getVoltage());
-        setBipolarLED(PDECAY_LED_RED, inputs[PDECAY_IN].getVoltage());
-        setBipolarLED(CRATE_LED_RED, inputs[CRATE_IN].getVoltage());
-        setBipolarLED(PTONE_LED_RED, inputs[PTONE_IN].getVoltage());
+        outputs[AUDIO_L_OUT].setVoltage(outV[0]);
+        outputs[AUDIO_R_OUT].setVoltage(outV[1]);
 
-        setBipolarLED(OFFSET_LED_RED, inputs[OFFSET_IN].getVoltage());
-        setBipolarLED(RBOOST_LED_RED, inputs[RBOOST_IN].getVoltage());
-        setBipolarLED(DTONE_LED_RED, inputs[DTONE_IN].getVoltage());
-        setBipolarLED(NWIDTH_LED_RED, inputs[NWIDTH_IN].getVoltage());
+        // 60 lights: update them every 32 samples, not every sample
+        if (!lightDivider.process())
+            return;
+        float dt = args.sampleTime * lightDivider.getDivision();
 
-        setBipolarLED(IN_L_LED_RED, inL);
-        setBipolarLED(IN_R_LED_RED, inR);
-        setBipolarLED(OUT_L_LED_RED, outMixL);
-        setBipolarLED(OUT_R_LED_RED, outMixR);
+        // log position of the cutoff (20 Hz .. 20 kHz)
+        setWidthStyleLED(CUTOFF_LED_RED, std::log2(clamp(cutoffHz, 20.f, 20000.f) / 20.f) / 9.966f, dt);
+        setWidthStyleLED(RES_LED_RED, res, dt);
+        setWidthStyleLED(MORPH_LED_RED, morph, dt);
+        setWidthStyleLED(DRIVE_LED_RED, drive, dt);
+
+        setBipolarLED(FM_LED_RED, fmIn, dt);
+        setWidthStyleLED(KEY_LED_RED, keyAmt, dt);
+        setBipolarLED(CHAOS_LED_RED, inputs[CHAOS_IN].isConnected() ? inputs[CHAOS_IN].getVoltage() : chaosVal * chaosAmt * 5.f, dt);
+        setWidthStyleLED(WIDTH_LED_RED, width, dt);
+
+        setBipolarLED(MODE_LED_RED, inputs[MODE_IN].getVoltage(), dt);
+        setBipolarLED(PDECAY_LED_RED, inputs[PDECAY_IN].getVoltage(), dt);
+        setBipolarLED(CRATE_LED_RED, inputs[CRATE_IN].getVoltage(), dt);
+        setBipolarLED(PTONE_LED_RED, inputs[PTONE_IN].getVoltage(), dt);
+
+        setBipolarLED(OFFSET_LED_RED, inputs[OFFSET_IN].getVoltage(), dt);
+        setBipolarLED(RBOOST_LED_RED, inputs[RBOOST_IN].getVoltage(), dt);
+        setBipolarLED(DTONE_LED_RED, inputs[DTONE_IN].getVoltage(), dt);
+        setBipolarLED(NWIDTH_LED_RED, inputs[NWIDTH_IN].getVoltage(), dt);
+
+        setBipolarLED(IN_L_LED_RED, inL, dt);
+        setBipolarLED(IN_R_LED_RED, inR, dt);
+        setBipolarLED(OUT_L_LED_RED, outV[0], dt);
+        setBipolarLED(OUT_R_LED_RED, outV[1], dt);
     }
 };
 
@@ -347,7 +325,7 @@ struct NoizeeFlagshipFilterWidget : ModuleWidget {
         addInput(createInputCentered<BlackJack>(mm2px(Vec(56.25, 38)), module, NoizeeFlagshipFilter::DRIVE_IN));
 
         addInput(createInputCentered<BlackJack>(mm2px(Vec(11.25, 68)), module, NoizeeFlagshipFilter::FM_IN));
-                addInput(createInputCentered<BlackJack>(mm2px(Vec(26.25, 68)), module, NoizeeFlagshipFilter::KEY_IN));
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(26.25, 68)), module, NoizeeFlagshipFilter::KEY_IN));
         addInput(createInputCentered<BlackJack>(mm2px(Vec(41.25, 68)), module, NoizeeFlagshipFilter::CHAOS_IN));
         addInput(createInputCentered<BlackJack>(mm2px(Vec(56.25, 68)), module, NoizeeFlagshipFilter::WIDTH_IN));
 

@@ -100,8 +100,8 @@
     },
     {
       "slug": "NoizeeFlagshipFilter",
-      "name": "SynTHBloK-F Flagship Filter",
-      "description": "Stereo state-variable filter with morph, drive, FM, keytrack and chaos",
+      "name": "SynTHBloK Morph Filter",
+      "description": "Stereo drive into a state-variable filter that morphs LP to BP to HP, with audio-rate FM, 1V/oct keytrack, random chaos drift and cutoff spread",
       "tags": [
         "Filter"
       ]
