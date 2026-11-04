@@ -16,23 +16,20 @@ header{display:flex;align-items:center;gap:14px;padding:8px 14px;border-bottom:1
 header b{color:var(--mg);letter-spacing:.16em;font-weight:600}
 header span{color:var(--mut)}
 #live{margin-left:auto;color:var(--cy)}
-/* DESIGN and COMPILER stacked on the left; LIVE.ASSEMBLY takes the large right side. */
-main{display:grid;grid-template-columns:minmax(300px,.75fr) minmax(0,1.6fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"design asm" "comp asm";min-height:0}
-#p-design{grid-area:design}#p-asm{grid-area:asm;border-right:0}#p-comp{grid-area:comp;border-top:1px solid var(--line)}
-@media(max-width:900px){main{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1.6fr) minmax(0,1fr);grid-template-areas:"asm asm" "design comp"}#p-design,#p-comp{border-top:1px solid var(--line)}}
+/* DESIGN on the left; everything that shows code (LIVE.ASSEMBLY over COMPILER) stacked in the centre;
+   LIVE.DRAWING (the SVG being built) on the right. */
+main{display:grid;grid-template-columns:minmax(260px,.7fr) minmax(0,1fr) minmax(0,1.2fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"design asm draw" "design comp draw";min-height:0}
+#p-design{grid-area:design}#p-asm{grid-area:asm}#p-comp{grid-area:comp;border-top:1px solid var(--line)}#p-draw{grid-area:draw;border-right:0}
+@media(max-width:900px){main{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1.4fr) minmax(0,1fr);grid-template-areas:"design draw" "asm comp"}#p-asm,#p-comp{border-top:1px solid var(--line)}#p-draw{border-right:0}}
 /* LIVE.ASSEMBLY window: replays each save, typing the changed lines and drawing new SVG pieces one at a time */
-/* Once an SVG has been drawn, the drawing stays and takes most of the window; the code is a narrow strip
-   (a quarter of its old half). */
+/* The drawing stays up in LIVE.DRAWING while code saves replay in the centre. */
 #asm{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr)}
-#asm.svg{grid-template-rows:minmax(0,.25fr) minmax(0,1fr)}
-#asm.svg #draw{border-left:0;border-top:1px solid var(--line)}
-#asm.svg #code{font-size:9px}
-#code{margin:0;overflow:auto;padding:8px 0;font-size:11px;line-height:1.55;background:#070b10;white-space:pre}
-#code div{padding:0 10px 0 0}#code u{display:inline-block;width:44px;padding-right:10px;text-align:right;color:#2c4652;text-decoration:none;user-select:none}
+/* long lines wrap to the window, the wrapped part indented past the line number */
+#code{margin:0;overflow:hidden auto;padding:8px 0;font-size:11px;line-height:1.55;background:#070b10;white-space:pre-wrap;overflow-wrap:anywhere}
+#code div{padding:0 10px 0 54px;text-indent:-54px}#code u{display:inline-block;width:44px;padding-right:10px;text-align:right;color:#2c4652;text-decoration:none;user-select:none;text-indent:0}
 #code .ctx{color:#4f6a76}#code .del{color:var(--bad);text-decoration:line-through;opacity:.7}#code .add{color:var(--tx);background:#00e5ff12}
-#code .add.typing::after{content:"▌";color:var(--mg)}#code .more{color:var(--mut);font-style:italic;padding-left:54px}
-#draw{display:none;position:relative;align-items:center;justify-content:center;padding:12px;min-height:0;border-left:1px solid var(--line);background:repeating-conic-gradient(#0a1016 0 25%,#0c131a 0 50%) 0 0/24px 24px}
-#asm.svg #draw{display:flex}
+#code .add.typing::after{content:"▌";color:var(--mg)}#code .more{color:var(--mut);font-style:italic;padding-left:54px;text-indent:0}
+#draw{flex:1;display:flex;position:relative;align-items:center;justify-content:center;padding:12px;min-height:0;color:var(--mut);font-style:italic;background:repeating-conic-gradient(#0a1016 0 25%,#0c131a 0 50%) 0 0/24px 24px}
 #draw svg{width:100%;height:100%}
 #draw .pc{visibility:hidden}#draw .pc.on{visibility:visible;animation:pc 1s ease}
 @keyframes pc{0%{filter:drop-shadow(0 0 4px #ff00aa) brightness(1.8)}100%{filter:none}}
@@ -60,9 +57,14 @@ main{display:grid;grid-template-columns:minmax(300px,.75fr) minmax(0,1.6fr);grid
 #name{color:var(--tx)}
 #state{padding:1px 8px}
 #state.run{background:var(--or);color:#070b10}#state.ok{background:var(--ok);color:#070b10}#state.bad{background:var(--bad);color:#070b10}
-#log{flex:1;min-height:0;overflow:auto;margin:0;padding:10px 12px;white-space:pre-wrap;word-break:break-word;color:#9fb6c0;font-size:11px}
+#log{flex:1;min-height:0;overflow:hidden auto;overflow-wrap:anywhere;margin:0;padding:10px 12px;white-space:pre-wrap;word-break:break-word;color:#9fb6c0;font-size:11px}
 #log .e{color:var(--bad)}#log .w{color:var(--or)}#log .c{color:var(--cy)}
-#feed{max-height:120px;overflow:auto;border-top:1px solid var(--line);padding:6px 12px;font-size:11px;color:var(--mut)}
+/* the save list: 4 rows high, no scroll bar; each new file slides in at the top and the rest scroll down */
+#feed{height:72px;box-sizing:content-box;overflow:hidden auto;scrollbar-width:none;border-top:1px solid var(--line);padding:6px 12px;font-size:11px;line-height:18px;color:var(--mut)}
+#feed::-webkit-scrollbar{display:none}
+#feed div{height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#feed div.in{animation:feedin .25s ease}
+@keyframes feedin{from{margin-top:-18px;opacity:0}to{margin-top:0;opacity:1}}
 #feed b{color:var(--cy);font-weight:500}
 footer{display:flex;gap:8px;overflow-x:auto;padding:8px 12px;border-top:1px solid var(--line);background:#070b10}
 footer button{flex:none;width:86px;background:var(--card);border:1px solid var(--line);color:var(--mut);padding:4px;cursor:pointer;font:inherit;font-size:10px;text-align:center}
@@ -75,12 +77,13 @@ footer button em{display:block;font-style:normal;background:var(--cy);color:#070
 .modes{display:flex;gap:0;margin-left:18px}
 .modes button{background:transparent;border:1px solid var(--line);color:var(--mut);font:inherit;font-size:11px;letter-spacing:.12em;padding:2px 10px;cursor:pointer}
 .modes button.on{background:var(--mg);border-color:var(--mg);color:#070b10}
-#mod{display:none;gap:18px;align-items:stretch;justify-content:center;width:100%;height:100%}
+/* the panel SVG over its Rack screenshot */
+#mod{display:none;flex-direction:column;gap:12px;align-items:center;justify-content:center;width:100%;height:100%}
 #stage.module #view{display:none}#stage.module #mod{display:flex}
-#mod figure{margin:0;display:flex;flex-direction:column;min-width:0;max-width:50%}
-#mod figure img{flex:1;min-height:0;width:auto;max-width:100%;object-fit:contain;box-shadow:0 0 0 1px var(--line),0 20px 60px #000c}
+#mod figure{margin:0;display:flex;flex-direction:column;align-items:center;min-height:0;flex:1 1 0;max-width:100%}
+#mod figure img{flex:1;min-height:0;width:100%;max-width:100%;object-fit:contain;box-shadow:0 0 0 1px var(--line),0 20px 60px #000c}
 #mod figcaption{margin-top:6px;font-size:10px;letter-spacing:.14em;color:var(--mut);text-align:center}
-#mod .none{flex:1;display:flex;align-items:center;justify-content:center;border:1px dashed var(--line);color:var(--bad);padding:20px;min-width:160px;text-align:center}
+#mod .none{flex:1 1 0;min-height:0;align-self:stretch;display:flex;align-items:center;justify-content:center;border:1px dashed var(--line);color:var(--bad);padding:20px;min-width:160px;text-align:center}
 </style>
 </head>
 <body>
@@ -94,12 +97,16 @@ footer button em{display:block;font-style:normal;background:var(--cy);color:#070
   </section>
   <section class="pane" id="p-asm">
     <div class="head"><span>LIVE.ASSEMBLY <b id="asm-file">waiting for a save</b> <span id="asm-meta"></span></span><button type="button" id="replay">REPLAY</button></div>
-    <div id="asm"><pre id="code"><div class="more">Save an SVG in res/ or a file in src/ and it is rebuilt here, piece by piece.</div></pre><div id="draw"></div></div>
+    <div id="asm"><pre id="code"><div class="more">Save an SVG in res/ or a file in src/ and it is rebuilt here, piece by piece.</div></pre></div>
   </section>
   <section class="pane" id="p-comp">
     <div class="head"><span>COMPILER <b>build.log</b></span><span id="state">IDLE</span></div>
     <pre id="log">No build.log yet. It fills in when a build starts.</pre>
     <div id="feed"></div>
+  </section>
+  <section class="pane" id="p-draw">
+    <div class="head"><span>LIVE.DRAWING <b>the SVG being built</b></span></div>
+    <div id="draw">Save an SVG in res/ and it is drawn here, piece by piece.</div>
   </section>
 </main>
 <footer id="strip"></footer>
@@ -210,9 +217,19 @@ async function scanModules(first) {
   if (!first && added.length && !pinned && strip === 'mod') show('mod:' + added[0].slug, 'change');
   else if (!first) drawStrip();
 }
+// A burst of saves (a build's screenshots) goes in one at a time, so the list visibly scrolls through them.
+const feedQ = [];
+let feedT = null;
 function feed(msg) {
-  const f = document.getElementById('feed');
-  f.insertAdjacentHTML('afterbegin', `<div>${time(Date.now())} ${msg}</div>`);
+  feedQ.push(`${time(Date.now())} ${msg}`);
+  if (!feedT) feedT = setInterval(feedNext, 140);
+}
+function feedNext() {
+  const f = document.getElementById('feed'), m = feedQ.shift();
+  if (m === undefined) { clearInterval(feedT); feedT = null; return; }
+  f.querySelectorAll('.in').forEach(e => e.classList.remove('in'));
+  f.insertAdjacentHTML('afterbegin', `<div class="in">${m}</div>`);
+  f.scrollTop = 0;
   while (f.children.length > 40) f.lastChild.remove();
 }
 

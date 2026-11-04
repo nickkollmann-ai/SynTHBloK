@@ -4,9 +4,12 @@
 #      writes "END" at the end of log.txt. Rack shows its "Rack crashed during the last session" warning
 #      at the next start when log.txt does not end with END, so Rack is never killed here.
 #   3. Copy the plugin in (make devinstall). Windows locks a loaded plugin DLL, so this runs after Rack exits.
-#   4. Reopen Rack if it was open (it reloads the autosaved patch). -Open starts Rack even if it was closed.
+#   4. Screenshot every SynTHBloK module as Rack draws it into web-images/screenshots (tools/rack_shots.ps1,
+#      about 10 s, on a private Rack folder). -NoShots skips it.
+#   5. Reopen Rack if it was open (it reloads the autosaved patch). -Open starts Rack even if it was closed.
 param(
     [switch]$Open,
+    [switch]$NoShots,
     [int]$CloseTimeout = 30,
     [string]$Rack = 'C:\Program Files\VCV\Rack2Pro\Rack.exe'
 )
@@ -42,6 +45,7 @@ if ($wasOpen) {
 
 if (-not (Make 'devinstall')) { Write-Host 'INSTALL FAILED - see build.log.'; exit 1 }
 Write-Host 'BUILD OK - plugin installed.'
+if (-not $NoShots) { & (Join-Path $PSScriptRoot 'rack_shots.ps1') -Rack $Rack }
 
 if ($wasOpen -or $Open) {
     Start-Process -FilePath $Rack -WorkingDirectory (Split-Path $Rack)
