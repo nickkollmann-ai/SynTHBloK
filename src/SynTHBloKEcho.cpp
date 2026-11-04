@@ -143,7 +143,7 @@ struct SynTHBloKEcho : Module, songlink::Member {   // MATRIX-SONG plays its loo
 
     SynTHBloKEcho() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
-        songlink::join(this, this, "ECHO", 0, true);
+        songlink::join(this, this, "ECHO", kGenreN, true);   // its "patterns": the first 8 presets of the bank in use
         configSwitch(TYPE_PARAM, 0.f, ET_NUM - 1, ET_CLASSIC, "Delay type",
                      {"CLASSIC (MTX ping-pong)", "2290 (clean digital)", "2290 MOD (chorused)", "ANALOG (BBD)", "TAPE (wow, flutter)",
                       "LO-FI (crushed)", "DYNAMIC (ducking)", "REVERSE", "PING-PONG", "SLAP (20-300 ms)", "CRYSTAL (octave shimmer)",
@@ -223,6 +223,9 @@ struct SynTHBloKEcho : Module, songlink::Member {   // MATRIX-SONG plays its loo
 
     ~SynTHBloKEcho() { songlink::leave(this); }
     void songDoLoop(int a) override { echoloop::songAction(looper, a); }
+    // MTX Composer's pattern p = preset p of the bank in use (an empty USER slot leaves the delay as it is)
+    int songPatternNow() override { return curBank == bank() && curSlot < kGenreN ? curSlot : -1; }
+    void songSetPattern(int p) override { loadSlot(clamp(p, 0, kGenreN - 1)); }
 
     void onSampleRateChange(const SampleRateChangeEvent& e) override {
         if (e.sampleRate != looper.sr) looper.init(e.sampleRate, 60.f);

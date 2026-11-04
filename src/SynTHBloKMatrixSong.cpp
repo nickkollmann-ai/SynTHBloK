@@ -1,8 +1,8 @@
 // ============================================================================
-// SynTHBloK MATRIX-SONG  (the conductor: sections A-H across every MATRIX module in the patch)
-//  The grid: a row per MATRIX module (found by itself through SongLink.hpp, no cables), a column per song
-//  section. A pad holds what that module does in that section: its pattern (or keeps it), a mute, a loop
-//  action (PLAY / STOP / REC / ONCE) for the ECHO / FX / LOOP loopers, and its level.
+// SynTHBloK MTX Composer  (the conductor: sections A-H across every MTX module in the patch)
+//  The grid: a row per MTX module (found by itself through SongLink.hpp, no cables), a column per song
+//  section. A pad holds what that module does in that section: its pattern (or keeps it), a mute and its
+//  level. RANDOM gives the linked modules random patterns in the selected section, or in all of them.
 //  A section header launches that section on the next bar (or beat).
 //  The strips (as MATRIX-DRUM's): a level, a MUTE and an output meter per row's module. Each section keeps
 //  its own levels and mutes; a launch moves the strips to them, and moving a strip edits the playing section.
@@ -42,7 +42,7 @@ static const char* const kLoopGlyph[songlink::L_COUNT] = {"", "PLAY", "STOP", "R
 
 struct SynTHBloKMatrixSong : Module {
     // REC_ / PLAY_ / LEN_PARAM: unused (the take is gone), kept so saved patches keep their param ids
-    enum ParamIds { RUN_PARAM, RESET_PARAM, REC_PARAM, PLAY_PARAM, QUANT_PARAM, BPM_PARAM, MIDI_ON_PARAM, LEN_PARAM, SECS_PARAM, BARS_PARAM, NUM_PARAMS };
+    enum ParamIds { RUN_PARAM, RESET_PARAM, REC_PARAM, PLAY_PARAM, QUANT_PARAM, BPM_PARAM, MIDI_ON_PARAM, LEN_PARAM, SECS_PARAM, BARS_PARAM, CYCOFF_PARAM, NUM_PARAMS };
     // RUN_ / RESET_INPUT: no jacks on the panel (the RUN / RESET outputs and buttons cover them), kept for ids
     enum InputIds { CLOCK_INPUT, RUN_INPUT, RESET_INPUT, NUM_INPUTS };
     enum OutputIds { CLOCK_OUTPUT, RUN_OUTPUT, RESET_OUTPUT, BAR_OUTPUT, SECT_OUTPUT, NUM_OUTPUTS };
@@ -52,10 +52,11 @@ struct SynTHBloKMatrixSong : Module {
     int64_t rowId[kRows];
     // the strips now (a launch loads them from the section; a strip move edits the playing section)
     float lev[kRows];
-    bool mut[kRows];
+    bool mut[kRows] = {};   // the MUTE buttons: a live mute of the module's output, kept through section changes
 
     // the song now
     int curSec = 0, barInSec = 0;
+    float beatAge = 9.f, jumpAge = 9.f;   // seconds since the last beat / section change (the panel's pulses)
     std::atomic<int> queued{-1};      // a launch waiting for its bar (or beat)
     std::atomic<int> applyNow{-1};    // stopped: a launch applies at once
     bool wasRunning = false;
@@ -87,8 +88,9 @@ struct SynTHBloKMatrixSong : Module {
         configParam(BPM_PARAM, 40.f, 240.f, 120.f, "Tempo (when CLOCK is unpatched)", " BPM");
         paramQuantities[BPM_PARAM]->snapEnabled = true;
         configSwitch(MIDI_ON_PARAM, 0.f, 1.f, 1.f, "JAM MIDI (off = ignore the JAM, its lights dark)", {"Off", "On"});
-        configSwitch(SECS_PARAM, 0.f, 7.f, 0.f, "Song cycle: RUN steps through this many sections (1: stays on one)", {"1 (no cycle)", "A-B", "A-C", "A-D", "A-E", "A-F", "A-G", "A-H"});
+        configSwitch(SECS_PARAM, 0.f, 7.f, 0.f, "Song cycle: RUN steps from A up to this section (A: stays on one)", {"A (no cycle)", "A-B", "A-C", "A-D", "A-E", "A-F", "A-G", "A-H"});
         configSwitch(BARS_PARAM, 0.f, 4.f, 2.f, "Bars each section plays in the song cycle", {"1 bar", "2 bars", "4 bars", "8 bars", "16 bars"});
+        configSwitch(CYCOFF_PARAM, 0.f, 1.f, 0.f, "Song cycle off (keeps SECTIONS; choosing one turns it back on)", {"Cycle on", "Cycle off"});
         for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
         for (int id : {RUN_PARAM, QUANT_PARAM}) paramQuantities[id]->randomizeEnabled = false;
         configInput(CLOCK_INPUT, "Clock (16th notes; the BPM knob when unpatched)");
@@ -111,7 +113,7 @@ struct SynTHBloKMatrixSong : Module {
     }
     void onReset() override {
         defaults();
-        for (int r = 0; r < kRows; r++) rowId[r] = -1;
+        for (int r = 0; r < kRows; r++) { rowId[r] = -1; mut[r] = false; }
         tick = -1;
     }
 
@@ -120,13 +122,27 @@ struct SynTHBloKMatrixSong : Module {
         return params[BPM_PARAM].getValue();
     }
     // the song cycle: sections in it (1 = none) and bars per section
-    int cycleSecs() { return clamp((int)params[SECS_PARAM].getValue(), 0, 7) + 1; }
+    int cycleSecs() { return params[CYCOFF_PARAM].getValue() > 0.5f ? 1 : clamp((int)params[SECS_PARAM].getValue(), 0, 7) + 1; }
+    int lastSecs = -1;   // SECTIONS as last seen: choosing one turns the cycle back on
     int cycleBars() { static const int b[5] = {1, 2, 4, 8, 16}; return b[clamp((int)params[BARS_PARAM].getValue(), 0, 4)]; }
-    void loadLive(int s) { for (int r = 0; r < kRows; r++) { lev[r] = cells[s][r].level; mut[r] = cells[s][r].mute; } }
+    // the section starting on the next bar, if this bar is the last before a change (the cycle's, or a launch
+    // waiting for the bar); -1: none. Its count-in is the beats left in this bar (4 .. 1).
+    int nextOnBar() {
+        if (!running || tick < 0) return -1;
+        int q = queued.load();
+        if (q >= 0) return params[QUANT_PARAM].getValue() > 0.5f ? -1 : q;
+        int cs = cycleSecs();
+        if (cs > 1 && barInSec + 1 >= cycleBars()) return curSec + 1 >= cs ? 0 : curSec + 1;
+        return -1;
+    }
+    int countIn() { return 4 - clamp(tick, 0, 15) / 4; }
+    void loadLive(int s) { for (int r = 0; r < kRows; r++) lev[r] = cells[s][r].level; }
+    // a row is silent while its MUTE button is on, or the playing section's pad mutes it (right-click a pad)
+    bool muted(int r) { return mut[r] || cells[curSec][r].mute; }
 
     // UI: a strip / MUTE moves the live state, and writes into the playing section
     void setLevel(int r, float v) { lev[r] = clamp(v, 0.f, 1.f); cells[curSec][r].level = lev[r]; }
-    void toggleMute(int r) { mut[r] = !mut[r]; cells[curSec][r].mute = mut[r]; }
+    void toggleMute(int r) { mut[r] = !mut[r]; pushCount = 0; }   // the signal only: the pads and patterns stay as they are
     // UI: the editor changed section s; if it is the one playing, the strips follow and the modules switch
     // to its patterns now (its loop actions wait for its next launch)
     void edited(int s) {
@@ -135,13 +151,41 @@ struct SynTHBloKMatrixSong : Module {
         for (int r = 0; r < kRows; r++) {
             int p = cells[s][r].pat;
             if (rowId[r] < 0 || p < 0) continue;
-            songlink::with(rowId[r], [&](songlink::Member& m) { if (m.songPatterns > 0) m.reqPattern = std::min(p, m.songPatterns - 1); });
+            conduct(r, [&](songlink::Member& m) { if (m.songPatterns > 0) m.reqPattern = std::min(p, m.songPatterns - 1); });
         }
     }
-    // a row let go (emptied, or SONG removed): its module back to full level, unmuted
+    // UI: a row name dragged onto another: the two rows trade places, each module taking its pads, level and mute along
+    void swapRows(int a, int b) {
+        if (a == b) return;
+        std::swap(rowId[a], rowId[b]);
+        for (int s = 0; s < kSecs; s++) std::swap(cells[s][a], cells[s][b]);
+        std::swap(lev[a], lev[b]);
+        std::swap(mut[a], mut[b]);
+        if (selRow == a) selRow = b; else if (selRow == b) selRow = a;
+        pushCount = 0;
+    }
+    // run f on row r's module if this Composer conducts it, taking it when it is free (false: another Composer
+    // has it, or it is gone)
+    template <typename F> bool conduct(int r, F f) {
+        if (rowId[r] < 0) return false;
+        bool ok = false;
+        const int64_t me = id;
+        songlink::with(rowId[r], [&](songlink::Member& m) {
+            int64_t o = -1;
+            if (m.songOwner.compare_exchange_strong(o, me) || o == me) { ok = true; f(m); }
+        });
+        return ok;
+    }
+    bool autoFill = true;   // place modules that are free on empty rows (right-click menu)
+    // a row let go (emptied, or the Composer removed): its module back to full level, unmuted, and free
     void release(int r) {
         if (rowId[r] < 0) return;
-        songlink::with(rowId[r], [](songlink::Member& m) { m.songLevel = 1.f; m.songMuted = false; m.songLinked = false; });
+        const int64_t me = id;
+        songlink::with(rowId[r], [&](songlink::Member& m) {
+            if (m.songOwner.load() != me) return;
+            m.songLevel = 1.f; m.songMuted = false; m.songLinked = false;
+            m.songOwner = -1;
+        });
     }
     // Rack closing / the module deleted: lights off, paced so the JAM takes every message
     ~SynTHBloKMatrixSong() {
@@ -158,12 +202,23 @@ struct SynTHBloKMatrixSong : Module {
         for (int r = 0; r < kRows; r++) {
             if (rowId[r] < 0) continue;
             const Cell c = cells[s][r];
-            songlink::with(rowId[r], [&](songlink::Member& m) {
+            conduct(r, [&](songlink::Member& m) {
                 if (c.pat >= 0 && m.songPatterns > 0) m.reqPattern = std::min(c.pat, m.songPatterns - 1);
-                if (c.loop != songlink::L_NONE && m.songHasLoop) m.reqLoop = c.loop;
             });
         }
         pushCount = 0;   // the levels and mutes go out at once
+    }
+    // UI RANDOM: a random pattern for every linked module in section s (-1: in every section)
+    float randFlash[2] = {0.f, 0.f};   // the section square, ALL
+    int randSec() { return running ? curSec : selSec; }   // RANDOM's section: the playing one while running
+    void randomize(int s) {
+        for (int r = 0; r < kRows; r++) {
+            int n = 0;
+            conduct(r, [&](songlink::Member& m) { n = m.songPatterns; });
+            if (n <= 0) continue;
+            for (int k = 0; k < kSecs; k++) if (s < 0 || k == s) cells[k][r].pat = (int)(random::u32() % (uint32_t)n);
+        }
+        edited(curSec);
     }
     void launch(int s) {   // UI: running, on the next bar / beat; stopped, at once
         s = clamp(s, 0, kSecs - 1);
@@ -199,7 +254,6 @@ struct SynTHBloKMatrixSong : Module {
         if (!down) return;
         switch (cc) {
             case CC_PLAY: toggle(params[RUN_PARAM]); break;
-            case CC_REC: { Cell& c = cells[selSec][selRow]; c.loop = c.loop == songlink::L_REC ? songlink::L_NONE : songlink::L_REC; } break;
             case CC_TEMPO: jamReset = true; break;
             case CC_GRID: toggle(params[QUANT_PARAM]); break;
             case CC_PREV: launch((curSec + kSecs - 1) % kSecs); break;
@@ -232,10 +286,10 @@ struct SynTHBloKMatrixSong : Module {
                 if (isBtn) jamButton(a, b);
                 else if (a >= kKnobFirstCC && a <= kKnobLastCC) {
                     knobCC = a;
-                    params[BPM_PARAM].setValue(std::round(40.f + 200.f * b / 127.f));
+                    if (!inputs[CLOCK_INPUT].isConnected()) params[BPM_PARAM].setValue(std::round(40.f + 200.f * b / 127.f));   // CLK IN sets the tempo
                     lastLed[kKnobLed] = b;
                 }
-                else if (a == kKnobPushCC && b > 0) paramQuantities[BPM_PARAM]->reset();
+                else if (a == kKnobPushCC && b > 0 && !inputs[CLOCK_INPUT].isConnected()) paramQuantities[BPM_PARAM]->reset();
                 else if (a >= 0 && a < 8 && b > 0) launch(a);
                 else if (a >= 8 && a < 16 && b > 0) { if (rowId[a - 8] >= 0) toggleMute(a - 8); }
                 else if (a >= 48 && a < 112) {
@@ -253,7 +307,7 @@ struct SynTHBloKMatrixSong : Module {
         if (idx >= 88) {
             switch (kBtnCC[idx - 88]) {
                 case CC_PLAY: return running ? 127 : 0;
-                case CC_REC: return cells[selSec][selRow].loop == songlink::L_REC ? 127 : 0;
+                case CC_REC: return 0;
                 case CC_SONG: return 0;
                 case CC_TEMPO: return resetFlash > 0.f ? 127 : 0;
                 case CC_GRID: return params[QUANT_PARAM].getValue() > 0.5f ? 127 : 0;
@@ -330,6 +384,9 @@ struct SynTHBloKMatrixSong : Module {
         jamReset = false;
         if (running && !wasRunning) rst = true;   // RUN starts the song from the top
         wasRunning = running;
+        int sv = (int)params[SECS_PARAM].getValue();
+        if (lastSecs >= 0 && sv != lastSecs) params[CYCOFF_PARAM].setValue(0.f);
+        lastSecs = sv;
 
         int an = applyNow.exchange(-1);
         if (an >= 0) apply(an);
@@ -362,6 +419,7 @@ struct SynTHBloKMatrixSong : Module {
             clockPulse.trigger(1e-3f);
             bool bar = tick == 0, beat = tick % 4 == 0;
             if (bar) barPulse.trigger(1e-3f);
+            if (beat) beatAge = 0.f;
             if (bar && !start) barInSec++;
             // the song cycle: its bars played, the next section launches on this bar (after the last, A)
             int cs = cycleSecs();
@@ -370,8 +428,9 @@ struct SynTHBloKMatrixSong : Module {
             int to = start ? curSec : -1;
             int q = queued.load();
             if (q >= 0 && (bar || (params[QUANT_PARAM].getValue() > 0.5f && beat))) { queued = -1; to = q; }
-            if (to >= 0) apply(to);
+            if (to >= 0) { if (to != curSec || start) jumpAge = 0.f; apply(to); }
         }
+        beatAge += dt; jumpAge += dt;
 
         // the strips go out to the modules (every 32 samples; at once after a launch)
         if (--pushCount <= 0) {
@@ -379,8 +438,8 @@ struct SynTHBloKMatrixSong : Module {
             for (int r = 0; r < kRows; r++) {
                 if (rowId[r] < 0) continue;
                 float l = lev[r];
-                bool m = mut[r];
-                songlink::with(rowId[r], [&](songlink::Member& mb) { mb.songLevel = l; mb.songMuted = m; mb.songLinked = true; });
+                bool m = muted(r);
+                conduct(r, [&](songlink::Member& mb) { mb.songLevel = l; mb.songMuted = m; mb.songLinked = true; });
             }
         }
 
@@ -415,6 +474,10 @@ struct SynTHBloKMatrixSong : Module {
         }
         json_object_set_new(root, "cells", cs);
         json_object_set_new(root, "section", json_integer(curSec));
+        json_t* mu = json_array();
+        for (int r = 0; r < kRows; r++) json_array_append_new(mu, json_boolean(mut[r]));
+        json_object_set_new(root, "mutes", mu);
+        json_object_set_new(root, "autoFill", json_boolean(autoFill));
         json_object_set_new(root, "in", midiIn.toJson());
         json_object_set_new(root, "out", midiOut.toJson());
         json_object_set_new(root, "jamPage", json_integer(jamPage));
@@ -431,13 +494,16 @@ struct SynTHBloKMatrixSong : Module {
                     if (v) {
                         c.pat = clamp((int)json_integer_value(json_array_get(v, 0)), -1, 7);
                         c.mute = json_is_true(json_array_get(v, 1));
-                        c.loop = clamp((int)json_integer_value(json_array_get(v, 2)), 0, songlink::L_COUNT - 1);
+                        // [2] held a loop action (no longer used: the loops follow their own scenes)
                         if (json_t* l = json_array_get(v, 3)) c.level = clamp((float)json_number_value(l), 0.f, 1.f);
                     }
                     cells[s][r] = c;
                 }
         if (json_t* j = json_object_get(root, "section")) curSec = clamp((int)json_integer_value(j), 0, kSecs - 1);
         loadLive(curSec);
+        if (json_t* af = json_object_get(root, "autoFill")) autoFill = json_boolean_value(af);
+        if (json_t* mu = json_object_get(root, "mutes"))
+            for (int r = 0; r < kRows; r++) mut[r] = json_is_true(json_array_get(mu, r));
         if (json_t* j = json_object_get(root, "in")) midiIn.fromJson(j);
         if (json_t* j = json_object_get(root, "out")) midiOut.fromJson(j);
         if (json_t* j = json_object_get(root, "jamPage")) jamPage = clamp((int)json_integer_value(j), 1, 6);
@@ -470,6 +536,7 @@ struct SongBtn : OpaqueWidget {
     std::string label;
     NVGcolor tint = oled::litFill();
     bool dimOff = false;               // off: drawn fainter (an empty choice)
+    bool tintOff = false;              // off: outline and label in the tint, dimmed (as echoloop::TintCell)
     float fontSize = 6.f;
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
@@ -479,7 +546,7 @@ struct SongBtn : OpaqueWidget {
         nvgRoundedRect(args.vg, 0.f, 0.f, W, H, 1.2f);
         nvgFillColor(args.vg, on ? tint : oled::offFill());
         nvgFill(args.vg);
-        nvgStrokeColor(args.vg, on ? tint : oled::outline(dimOff ? 50 : 110));
+        nvgStrokeColor(args.vg, on ? tint : tintOff ? nvgTransRGBA(tint, 120) : oled::outline(dimOff ? 50 : 110));
         nvgStrokeWidth(args.vg, 0.7f);
         nvgStroke(args.vg);
         std::shared_ptr<window::Font> font = songFont();
@@ -488,7 +555,7 @@ struct SongBtn : OpaqueWidget {
         nvgFontFaceId(args.vg, font->handle);
         nvgFontSize(args.vg, fontSize);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFillColor(args.vg, on ? oled::ink() : dimOff ? oled::outline(110) : oled::amber());
+        nvgFillColor(args.vg, on ? oled::ink() : tintOff ? nvgTransRGBA(tint, 190) : dimOff ? oled::outline(110) : oled::amber());
         nvgText(args.vg, W * 0.5f, H * 0.5f, s.c_str(), NULL);
     }
     void onButton(const ButtonEvent& e) override {
@@ -554,11 +621,51 @@ struct SecHead : OpaqueWidget {
     }
 };
 
-// A row's module: its name (and its pattern now) in the row's colour; click to choose the module.
+// "SCENE" before the A-H headers
+struct SecLabel : TransparentWidget {
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        std::shared_ptr<window::Font> font = songFont();
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgFontSize(args.vg, 7.f);
+        nvgTextLetterSpacing(args.vg, 0.6f);
+        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);   // set against the A button
+        nvgFillColor(args.vg, oled::amber());
+        nvgText(args.vg, box.size.x - mm2px(0.8f), box.size.y * 0.5f, "SCENE", NULL);
+    }
+};
+
+// The song cycle's tracker on the SECTIONS buttons: the playing section's button keeps a faint glow that
+// pulses softly on each beat and flashes a little brighter when the cycle jumps to it.
+struct SecTrack : TransparentWidget {
+    MS* module = NULL;
+    int i = 0;
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1 || !module || module->cycleSecs() < 2 || module->curSec != i) return;
+        float a = 0.16f;
+        if (module->running) a += 0.14f * std::exp(-module->beatAge * 6.f) + 0.3f * std::exp(-module->jumpAge * 2.5f);
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.2f);
+        nvgFillColor(args.vg, nvgRGBAf(1.f, 1.f, 1.f, a * 0.6f));
+        nvgFill(args.vg);
+        nvgStrokeColor(args.vg, nvgRGBAf(1.f, 1.f, 1.f, a));
+        nvgStrokeWidth(args.vg, 0.8f);
+        nvgStroke(args.vg);
+    }
+    // a click on a SECTIONS number (even the one chosen) turns the cycle back on; the button under it still takes the click
+    void onButton(const ButtonEvent& e) override {
+        if (module && e.action == GLFW_PRESS && e.button == GLFW_MOUSE_BUTTON_LEFT) module->params[MS::CYCOFF_PARAM].setValue(0.f);
+    }
+};
+
+// A row's module: its name (and its pattern now) in the row's colour; click to choose the module, or drag
+// it onto another row name to trade the two rows.
 struct RowLabel : OpaqueWidget {
     MS* module = NULL;
     Found* found = NULL;
     int r = 0;
+    bool dropOver = false;   // another row name is being dragged over this one
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
         std::shared_ptr<window::Font> font = songFont();
@@ -570,7 +677,8 @@ struct RowLabel : OpaqueWidget {
         if (!module) name = demo[r];
         else if (module->rowId[r] >= 0) {
             const songlink::Info* i = found ? found->get(module->rowId[r]) : NULL;
-            if (i) { name = i->name; if (i->patNow >= 0) snprintf(pat, sizeof pat, "%d", i->patNow + 1); }
+            if (i && i->owner >= 0 && i->owner != module->id) { name = i->name; snprintf(pat, sizeof pat, "IN USE"); gone = true; }   // another Composer conducts it
+            else if (i) { name = i->name; if (i->patNow >= 0) snprintf(pat, sizeof pat, "%d", i->patNow + 1); }
             else { name = "GONE"; gone = true; }
         }
         bool sel = module && module->selRow == r;
@@ -579,9 +687,28 @@ struct RowLabel : OpaqueWidget {
         nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.2f);
         nvgFillColor(args.vg, nvgRGBA(14, 9, 3, 255));
         nvgFill(args.vg);
+        // a playing row flickers faintly in its colour, a little brighter on each beat
+        if (module && module->running && module->rowId[r] >= 0 && !gone && !module->muted(r)) {
+            float a = 0.07f * std::exp(-module->beatAge * 7.f) + 0.025f * random::uniform();
+            nvgFillColor(args.vg, nvgTransRGBAf(col, a));
+            nvgFill(args.vg);
+        }
         nvgStrokeColor(args.vg, nvgTransRGBA(col, sel ? 220 : 70));
         nvgStrokeWidth(args.vg, 0.7f);
         nvgStroke(args.vg);
+        // dragging: the row being moved fades, the row it would trade with gets a bright outline
+        bool dragged = APP->event->getDraggedWidget() == this;
+        if (dropOver || dragged) {
+            nvgBeginPath(args.vg);
+            nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.2f);
+            nvgFillColor(args.vg, dragged ? nvgRGBA(14, 9, 3, 150) : nvgTransRGBA(col, 40));
+            nvgFill(args.vg);
+            if (dropOver) {
+                nvgStrokeColor(args.vg, oled::ink());
+                nvgStrokeWidth(args.vg, 1.f);
+                nvgStroke(args.vg);
+            }
+        }
         nvgFontFaceId(args.vg, font->handle);
         nvgFontSize(args.vg, 6.5f);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
@@ -591,9 +718,29 @@ struct RowLabel : OpaqueWidget {
         nvgFillColor(args.vg, oled::amber());
         nvgText(args.vg, box.size.x - 3.f, box.size.y * 0.5f, pat, NULL);
     }
+    // a left press starts a drag: let go on another row name to trade the two rows, or on this one (a click) for
+    // the menu; a right-click opens the menu at once. The left release is taken too: Rack sends the drop only to
+    // the widget that takes it.
     void onButton(const ButtonEvent& e) override {
-        if (e.action != GLFW_PRESS || !module || !found) return;
-        if (e.button != GLFW_MOUSE_BUTTON_LEFT && e.button != GLFW_MOUSE_BUTTON_RIGHT) return;
+        if (!module || !found) return;
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT) { if (e.action == GLFW_PRESS) module->selRow = r; e.consume(this); return; }
+        if (e.action != GLFW_PRESS) return;
+        if (e.button != GLFW_MOUSE_BUTTON_RIGHT) return;
+        openMenu();
+        e.consume(this);
+    }
+    void onDragDrop(const DragDropEvent& e) override {
+        dropOver = false;
+        if (e.button != GLFW_MOUSE_BUTTON_LEFT || !module) return;
+        if (e.origin == this) { openMenu(); return; }
+        if (RowLabel* from = dynamic_cast<RowLabel*>(e.origin)) module->swapRows(from->r, r);
+    }
+    void onDragEnter(const DragEnterEvent& e) override {
+        dropOver = e.origin != this && dynamic_cast<RowLabel*>(e.origin);
+    }
+    void onDragLeave(const DragLeaveEvent& e) override { dropOver = false; }
+    void openMenu() {
+        if (!module || !found) return;
         MS* m = module;
         int row = r;
         m->selRow = row;
@@ -601,12 +748,14 @@ struct RowLabel : OpaqueWidget {
         menu->addChild(createMenuLabel(string::f("Row %d: the module it conducts", row + 1)));
         for (const songlink::Info& i : found->list) {
             int64_t id = i.id;
-            menu->addChild(createCheckMenuItem(string::f("%s  (module %lld)", i.name, (long long)id), "",
+            bool taken = i.owner >= 0 && i.owner != m->id;   // another Composer conducts it: shown, not choosable
+            ui::MenuItem* it = createCheckMenuItem(string::f("%s  (module %lld)", i.name, (long long)id), taken ? "in another Composer" : "",
                 [=]() { return m->rowId[row] == id; },
-                [=]() { for (int k = 0; k < kRows; k++) if (m->rowId[k] == id) m->rowId[k] = -1; m->release(row); m->rowId[row] = id; }));
+                [=]() { for (int k = 0; k < kRows; k++) if (m->rowId[k] == id) m->rowId[k] = -1; m->release(row); m->rowId[row] = id; });
+            it->disabled = taken;
+            menu->addChild(it);
         }
         menu->addChild(createMenuItem("Empty this row", "", [=]() { m->release(row); m->rowId[row] = -1; }));
-        e.consume(this);
     }
 };
 
@@ -716,16 +865,16 @@ struct EdDisplay : TransparentWidget {
             name = i ? i->name : module->rowId[r] >= 0 ? "GONE" : "EMPTY ROW";
         } else c.pat = 0;
         char val[64];
-        snprintf(val, sizeof val, "LEVEL %d%%%s%s%s", (int)std::round(c.level * 100.f), c.mute ? "  MUTED" : "", c.loop ? "  LOOP " : "", c.loop ? songlink::kLoopName[c.loop] : "");
+        snprintf(val, sizeof val, "LEVEL %d%%%s", (int)std::round(c.level * 100.f), c.mute ? "  MUTED" : "");
         float y = R * 0.5f;
         nvgFontSize(args.vg, 6.f);
         nvgFillColor(args.vg, oled::dim());
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgText(args.vg, 4.f, y, "CELL", NULL);
+        float nx = nvgText(args.vg, 4.f, y, "SCENE SELECTOR", NULL) + mm2px(2.f);
         nvgFontSize(args.vg, 7.5f);
         nvgFillColor(args.vg, kRowCol[r]);
         std::string who = string::f("%s · %s", name, kSecName[s]);
-        nvgText(args.vg, mm2px(8.f), y, who.c_str(), NULL);
+        nvgText(args.vg, nx, y, who.c_str(), NULL);
         nvgFontSize(args.vg, 6.f);
         nvgFillColor(args.vg, oled::amber());
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
@@ -734,6 +883,8 @@ struct EdDisplay : TransparentWidget {
 };
 
 // The SONG screen: state | bar | tempo; now playing, and what waits.
+const float kCycLabelH = 3.6f;   // the CYCLE LEN title's line, over its row of squares
+
 struct SongDisplay : TransparentWidget {
     MS* module = NULL;
     void drawLayer(const DrawArgs& args, int layer) override {
@@ -765,6 +916,16 @@ struct SongDisplay : TransparentWidget {
         nvgText(args.vg, mm2px(9.f), y0, run ? "RUN" : "STOP", NULL);
         nvgFillColor(args.vg, oled::amber());
         nvgText(args.vg, mm2px(20.f), y0, bar, NULL);
+        // the four count: a square per beat of this bar, lit as they pass; magenta in the bar before a change
+        int nx = module ? module->nextOnBar() : -1, bt = module && run && module->tick >= 0 ? module->tick / 4 : -1;
+        for (int i = 0; i < 4; i++) {
+            nvgBeginPath(args.vg);
+            nvgRect(args.vg, mm2px(33.f + i * 1.8f), y0 - mm2px(0.6f), mm2px(1.2f), mm2px(1.2f));
+            bool on = i <= bt;
+            nvgFillColor(args.vg, !on ? oled::offFill() : nx >= 0 ? nvgRGB(0xff, 0x00, 0xaa) : oled::amber());
+            nvgFill(args.vg);
+        }
+        nvgFillColor(args.vg, oled::amber());
         nvgFontSize(args.vg, 8.f);
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
         nvgText(args.vg, W - 4.f, y0, bpm, NULL);
@@ -782,12 +943,23 @@ struct SongDisplay : TransparentWidget {
             std::string next = string::f("> %s", kSecName[q]);
             nvgText(args.vg, mm2px(13.f), y1, next.c_str(), NULL);
         }
-        // SECTIONS / BARS, before their choices on the cycle rows
+        // the warning: the last bar before a change counts 4 3 2 1 down to it, flashing on each beat
+        if (nx >= 0) {
+            float fl = std::exp(-module->beatAge * 5.f);
+            nvgFontSize(args.vg, 7.5f);
+            nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+            NVGcolor c = kPatOnColor[nx];
+            c.a = 0.55f + 0.45f * fl;
+            nvgFillColor(args.vg, c);
+            std::string warn = string::f("%s IN %d", kSecName[nx], module->countIn());
+            nvgText(args.vg, W - 4.f, y1, warn.c_str(), NULL);
+            nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        }
+        // CYCLE LEN, before its choices on the cycle row
         nvgFontSize(args.vg, 5.5f);
         nvgFillColor(args.vg, oled::dim());
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        for (int i = 0; i < 2; i++)
-            nvgText(args.vg, mm2px(2.f), mm2px(2.f * oled::kRow + 0.4f + (i + 1) * (oled::kCellH + 0.9f) + oled::kCellH * 0.5f), i ? "BARS" : "SECTIONS", NULL);
+        nvgText(args.vg, mm2px(2.f), mm2px(2.f * oled::kRow + 0.4f + kCycLabelH * 0.5f), "CYCLE LEN", NULL);
         // the bar's progress while running
         if (run && module) {
             nvgBeginPath(args.vg);
@@ -815,35 +987,71 @@ struct SongPatSq : OpaqueWidget {
     }
 };
 
-// KEEP beside the patterns: the cell leaves its module on whatever pattern it plays.
-struct SongKeepBtn : OpaqueWidget {
+// RANDOM beside the patterns: a titled box (not a button itself) holding two square buttons. ALL gives every
+// linked module a random pattern in every section; the section square (its letter in its colour) does it in
+// that section: the playing one while RUN is on (it follows the song), else the selected one. Each flashes
+// when pressed.
+struct SongRandBtn : OpaqueWidget {
+    static constexpr float kMg = 1.1f, kTop = 4.4f;
     MS* module = NULL;
+    // square i (0: ALL, 1: the section): its rectangle in the box
+    Rect sq(int i) {
+        float mg = mm2px(kMg), q = box.size.y - mm2px(kTop) - mg;
+        return Rect(Vec(mg + i * (q + mg), mm2px(kTop)), Vec(q, q));
+    }
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
-        bool on = module ? module->cells[module->selSec][module->selRow].pat < 0 : false;
         float W = box.size.x, H = box.size.y;
         nvgBeginPath(args.vg);
+        // the holder in the green of the other modules' random buttons
+        const NVGcolor g = oled::green();
         nvgRoundedRect(args.vg, 0.f, 0.f, W, H, 1.4f);
-        nvgFillColor(args.vg, on ? oled::litFill() : oled::offFill());
+        nvgFillColor(args.vg, nvgTransRGBA(g, 18));
         nvgFill(args.vg);
-        nvgStrokeColor(args.vg, on ? oled::litFill() : oled::outline(110));
-        nvgStrokeWidth(args.vg, on ? 1.2f : 0.8f);
+        nvgStrokeColor(args.vg, nvgTransRGBA(g, 150));
+        nvgStrokeWidth(args.vg, 0.8f);
         nvgStroke(args.vg);
         std::shared_ptr<window::Font> font = songFont();
         if (!font) return;
         nvgFontFaceId(args.vg, font->handle);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFillColor(args.vg, on ? oled::ink() : oled::amber());
-        nvgFontSize(args.vg, 9.f);
-        nvgText(args.vg, W * 0.5f, H * 0.4f, "KEEP", NULL);
-        nvgFontSize(args.vg, 5.5f);
-        nvgFillColor(args.vg, on ? oled::ink() : oled::dim());
-        nvgText(args.vg, W * 0.5f, H * 0.68f, "NO CHANGE", NULL);
+        // RANDOM over ALL
+        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgFontSize(args.vg, 6.f);
+        nvgFillColor(args.vg, nvgTransRGBA(g, 200));
+        nvgText(args.vg, sq(0).pos.x + mm2px(0.2f), mm2px(2.4f), "RANDOM", NULL);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        int s = module ? module->randSec() : 0;
+        for (int i = 0; i < 2; i++) {
+            Rect r = sq(i);
+            float fl = module ? module->randFlash[i ? 0 : 1] : 0.f, k = std::min(1.f, fl * 3.f);
+            NVGcolor c = i ? kPatOnColor[s] : nvgRGB(255, 165, 30);   // ALL: yellow-orange
+            nvgBeginPath(args.vg);
+            nvgRoundedRect(args.vg, r.pos.x, r.pos.y, r.size.x, r.size.y, 1.2f);
+            nvgFillColor(args.vg, nvgLerpRGBA(nvgTransRGBA(c, 28), c, k));
+            nvgFill(args.vg);
+            nvgStrokeColor(args.vg, nvgTransRGBA(c, 150));
+            nvgStrokeWidth(args.vg, 0.7f);
+            nvgStroke(args.vg);
+            nvgFontSize(args.vg, i ? 10.f : 7.f);
+            nvgFillColor(args.vg, k > 0.4f ? oled::ink() : nvgTransRGBA(c, 200));
+            nvgText(args.vg, r.pos.x + r.size.x * 0.5f, r.pos.y + r.size.y * 0.53f, i ? kSecName[s] : "ALL", NULL);
+        }
+    }
+    void step() override {
+        if (module) for (float& f : module->randFlash) f = std::max(0.f, f - (float)APP->window->getLastFrameDuration());
+        OpaqueWidget::step();
     }
     void onButton(const ButtonEvent& e) override {
         if (e.button != GLFW_MOUSE_BUTTON_LEFT || e.action != GLFW_PRESS) return;
-        if (module) { module->cells[module->selSec][module->selRow].pat = -1; module->edited(module->selSec); }
-        e.consume(this);
+        for (int i = 0; i < 2; i++) if (sq(i).contains(e.pos)) {
+            if (module) {
+                module->randomize(i ? module->randSec() : -1);
+                module->randFlash[i ? 0 : 1] = 0.35f;
+            }
+            e.consume(this);
+            return;
+        }
     }
 };
 
@@ -865,7 +1073,7 @@ struct SongStrip : OpaqueWidget {
             float h = (box.size.y - 3.f) * get();
             nvgBeginPath(args.vg);
             nvgRoundedRect(args.vg, 1.5f, box.size.y - 1.5f - h, box.size.x - 3.f, h, 1.f);
-            nvgFillColor(args.vg, nvgLerpRGBA(kIdle, col, module && module->mut[r] ? 0.35f : 0.8f));
+            nvgFillColor(args.vg, nvgLerpRGBA(kIdle, col, module && module->muted(r) ? 0.35f : 0.8f));
             nvgFill(args.vg);
         }
         nvgBeginPath(args.vg);
@@ -982,6 +1190,27 @@ struct SongJamDisplay : TransparentWidget {
         e.consume(this);
     }
 };
+// The BPM knob, locked (and dimmed) while CLK IN is patched: the clock sets the tempo then.
+struct BpmKnob : RoundSmallBlackKnob {
+    bool locked() {
+        MS* m = dynamic_cast<MS*>(module);
+        return m && m->inputs[MS::CLOCK_INPUT].isConnected();
+    }
+    void onDragStart(const DragStartEvent& e) override { if (!locked()) RoundSmallBlackKnob::onDragStart(e); }
+    void onDragMove(const DragMoveEvent& e) override { if (!locked()) RoundSmallBlackKnob::onDragMove(e); }
+    void onDragEnd(const DragEndEvent& e) override { if (!locked()) RoundSmallBlackKnob::onDragEnd(e); else APP->window->cursorUnlock(); }
+    void onHoverScroll(const HoverScrollEvent& e) override { if (!locked()) RoundSmallBlackKnob::onHoverScroll(e); }
+    void onDoubleClick(const DoubleClickEvent& e) override { if (!locked()) RoundSmallBlackKnob::onDoubleClick(e); }
+    void draw(const DrawArgs& args) override {
+        RoundSmallBlackKnob::draw(args);
+        if (!locked()) return;
+        nvgBeginPath(args.vg);
+        nvgCircle(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, box.size.x * 0.5f);
+        nvgFillColor(args.vg, nvgRGBA(0, 0, 0, 140));
+        nvgFill(args.vg);
+    }
+};
+
 struct SynTHBloKMatrixSongWidget : ModuleWidget {
     Found found;
     void onButton(const ButtonEvent& e) override {   // clicking the module hands it the JAM
@@ -992,8 +1221,10 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
         MS* m = getModule<MS>();
         if (m) {
             found.list = songlink::list();
-            // a module that is not on a row yet takes the first empty row
+            // a free module that is not on a row yet takes the first empty row (unless placing is off; one another
+            // Composer conducts is left alone)
             for (const songlink::Info& i : found.list) {
+                if (!m->autoFill || (i.owner >= 0 && i.owner != m->id)) continue;
                 bool placed = false;
                 for (int r = 0; r < kRows; r++) if (m->rowId[r] == i.id) placed = true;
                 if (placed) continue;
@@ -1028,6 +1259,11 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
         // ---------------- left: the grid (rows = modules, columns = sections) ----------------
         // sized as MATRIX-DRUM's: 6.6 mm pads on a 7.4 mm pitch, the block centred on the left plate
         const float GX = 25.2f, GP = 7.4f, GS = 6.6f, GY = 19.5f;
+        {
+            SecLabel* sl = createWidget<SecLabel>(mm2px(Vec(3.6f, 10.5f)));
+            sl->box.size = mm2px(Vec(GX - 1.2f - 3.6f, 6.6f));
+            addChild(sl);
+        }
         for (int s = 0; s < kSecs; s++) {
             SecHead* h = createWidget<SecHead>(mm2px(Vec(GX + GP * s, 10.5f)));
             h->box.size = mm2px(Vec(GS, 6.6f)); h->module = module; h->s = s;
@@ -1089,83 +1325,80 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
             addChild(b);
             return b;
         };
-        // SONG: state | bar | tempo, NOW; then RUN | RESET | BAR | BEAT
-        const float SH = 2.f * oled::kRow + 0.4f + 3.f * CH + 2.f * GAP + 1.2f, ctY = SY + 2.f * oled::kRow + 0.4f;
-        SongDisplay* sd = createWidget<SongDisplay>(mm2px(Vec(SX, SY)));
+        // SCENE SELECTOR on top, SONG under it
+        const float PS = 6.6f, PP = 7.4f, PH = PS + 0.8f + PS;
+        const float EY = SY, EH = oled::kRow + 0.6f + PH + 0.8f;
+        // SONG: state | bar | tempo, NOW; then CYCLE LEN, BAR | BEAT and the bars, RUN | RESET along the bottom
+        // CYCLE LEN: its title on a line of its own, then OFF and A-H as squares across the whole row
+        const float Q = (inner - 8.f * CG) / 9.f;
+        const float SH = 2.f * oled::kRow + 0.4f + kCycLabelH + Q + 2.f * CH + 2.f * GAP + 1.2f;
+        // its bottom in line with the grid's holder (the panel's rect at y 18.3, 60.8 high)
+        const float TY = 18.3f + 60.8f - SH, ctY = TY + 2.f * oled::kRow + 0.4f;
+        const float yC = ctY + kCycLabelH, yB = yC + Q + GAP, yR = yB + CH + GAP;
+        SongDisplay* sd = createWidget<SongDisplay>(mm2px(Vec(SX, TY)));
         sd->box.size = mm2px(Vec(SW, SH)); sd->module = module;
         addChild(sd);
         {
-            const float w = (inner - 3.f * CG) / 4.f;
-            tint(x0, ctY, w, MS::RUN_PARAM, "RUN", oled::green(), -1);
-            oled::Cell* rs = pcell(x0 + (w + CG), ctY, w, CH, MS::RESET_PARAM, "RESET");
+            const float w = (inner - CG) / 2.f;
+            tint(x0, yR, w, MS::RUN_PARAM, "RUN", oled::green(), -1);
+            oled::Cell* rs = pcell(x0 + (w + CG), yR, w, CH, MS::RESET_PARAM, "RESET");
             if (module) rs->flash = &module->resetFlash;
-            pcell(x0 + 2.f * (w + CG), ctY, w, CH, MS::QUANT_PARAM, "BAR")->setTo = 0;
-            pcell(x0 + 3.f * (w + CG), ctY, w, CH, MS::QUANT_PARAM, "BEAT")->setTo = 1;
-            // the song cycle: SECTIONS 1-8, then BARS 1 2 4 8 16
-            const float lx = x0 + 11.f;
-            static const char* const sn[8] = {"1", "2", "3", "4", "5", "6", "7", "8"};
+            // the song cycle: CYCLE LEN OFF A-H, then launches on BAR / BEAT and the bars per section 1 2 4 8 16
+            static const char* const sn[8] = {"A", "B", "C", "D", "E", "F", "G", "H"};   // the cycle runs A up to this one
             static const char* const bn[5] = {"1", "2", "4", "8", "16"};
-            const float sw = (x0 + inner - lx - 7.f * CG) / 8.f, bw = (x0 + inner - lx - 4.f * CG) / 5.f;
-            for (int i = 0; i < 8; i++) pcell(lx + i * (sw + CG), ctY + CH + GAP, sw, CH, MS::SECS_PARAM, sn[i])->setTo = i;
-            for (int i = 0; i < 5; i++) pcell(lx + i * (bw + CG), ctY + 2.f * (CH + GAP), bw, CH, MS::BARS_PARAM, bn[i])->setTo = i;
+            // CYCLE LEN: OFF (the cycle off, the count kept), then A-H
+            const float sw = Q, bw = (inner - 6.f * CG) / 7.f, nx = x0 + Q + CG;
+            pcell(x0, yB, bw, CH, MS::QUANT_PARAM, "BAR")->setTo = 0;
+            pcell(x0 + bw + CG, yB, bw, CH, MS::QUANT_PARAM, "BEAT")->setTo = 1;
+            {
+                SongBtn* off = btn(x0, yC, Q, Q, "OFF");
+                off->fontSize = 4.8f;
+                off->tint = nvgRGB(0x5c, 0xc8, 0xf2); off->tintOff = true;   // ice blue, as ECHO's FREEZE / STORE
+                off->lit = [=]() { return module && module->cycleSecs() < 2; };
+                off->press = [=](int b) {
+                    if (!module || b) return;
+                    Param& p = module->params[MS::CYCOFF_PARAM];
+                    p.setValue(p.getValue() > 0.5f ? 0.f : 1.f);
+                };
+            }
+            // each count in its section's colour (A yellow .. H red), as the section headers
+            for (int i = 0; i < 8; i++) {
+                echoloop::TintCell* c = createParam<echoloop::TintCell>(mm2px(Vec(nx + i * (sw + CG), yC)), module, MS::SECS_PARAM);
+                c->box.size = mm2px(Vec(Q, Q)); c->module = module; c->label = sn[i]; c->setTo = i;
+                c->tint = kPatOnColor[i];
+                addParam(c);
+            }
+            for (int i = 0; i < 8; i++) {
+                SecTrack* t = createWidget<SecTrack>(mm2px(Vec(nx + i * (sw + CG), yC)));
+                t->box.size = mm2px(Vec(Q, Q)); t->module = module; t->i = i;
+                addChild(t);
+            }
+            for (int i = 0; i < 5; i++) pcell(x0 + (i + 2) * (bw + CG), yB, bw, CH, MS::BARS_PARAM, bn[i])->setTo = i;
         }
 
-        auto selCell = [=]() -> MS::Cell* { return module ? &module->cells[module->selSec][module->selRow] : NULL; };
 
-        // ---------------- CELL: the selected pad (pattern, KEEP, loop action, edits) ----------------
-        const float EY = SY + SH + 2.f, PS = 6.6f, PP = 7.4f, PH = PS + 0.8f + PS;
-        const float EH = oled::kRow + 0.6f + PH + GAP + CH + GAP + CH + 0.8f;
+        // ---------------- SCENE SELECTOR: the selected pad (RANDOM, its pattern) ----------------
         EdDisplay* ed = createWidget<EdDisplay>(mm2px(Vec(SX, EY)));
         ed->box.size = mm2px(Vec(SW, EH)); ed->module = module; ed->found = &found;
         addChild(ed);
         {
             float y = EY + oled::kRow + 0.6f;
-            // KEEP, then patterns 1-8 as two rows of four squares
+            // RANDOM (ALL, the section), then patterns 1-8 as two rows of four squares
             const float px = x0 + inner - (4.f * PP - 0.8f);
-            SongKeepBtn* kb = createWidget<SongKeepBtn>(mm2px(Vec(x0, y)));
-            kb->box.size = mm2px(Vec(px - 1.2f - x0, PH)); kb->module = module;
-            addChild(kb);
+            const float rq = PH - SongRandBtn::kTop - SongRandBtn::kMg;
+            SongRandBtn* rb = createWidget<SongRandBtn>(mm2px(Vec(x0, y)));
+            rb->box.size = mm2px(Vec(2.f * rq + 3.f * SongRandBtn::kMg, PH)); rb->module = module;
+            addChild(rb);
             for (int p = 0; p < 8; p++) {
                 SongPatSq* q = createWidget<SongPatSq>(mm2px(Vec(px + PP * (p % 4), y + (PS + 0.8f) * (p / 4))));
                 q->box.size = mm2px(Vec(PS, PS)); q->module = module; q->p = p;
                 addChild(q);
             }
-            // the looper (ECHO / FX / LOOP) as the section launches: NONE PLAY STOP REC ONCE
-            y += PH + GAP;
-            static const char* const ln[5] = {"NO LOOP", "PLAY", "STOP", "REC", "ONCE"};
-            static const int la[5] = {songlink::L_NONE, songlink::L_PLAY, songlink::L_STOP, songlink::L_REC, songlink::L_ONCE};
-            const float lw = (inner - 4.f * CG) / 5.f;
-            for (int i = 0; i < 5; i++) {
-                SongBtn* b = btn(x0 + i * (lw + CG), y, lw, CH, ln[i]);
-                int a = la[i];
-                if (i == 0) b->fontSize = 4.6f;
-                if (a == songlink::L_REC) b->tint = nvgRGB(0xff, 0x32, 0x28);
-                if (a == songlink::L_PLAY || a == songlink::L_ONCE) b->tint = oled::green();
-                b->lit = [=]() { MS::Cell* c = selCell(); return c ? c->loop == a : a == songlink::L_NONE; };
-                b->press = [=](int) { if (MS::Cell* c = selCell()) c->loop = a; };
-            }
-            // the cell, the cell across its row, the section to the next
-            y += CH + GAP;
-            static const char* const tn[3] = {"CLEAR CELL", "CELL TO ROW", "COPY SECTION >"};
-            const float tw = (inner - 2.f * CG) / 3.f;
-            for (int i = 0; i < 3; i++) {
-                SongBtn* b = btn(x0 + i * (tw + CG), y, tw, CH, tn[i]);
-                b->lit = []() { return false; };
-                b->press = [=](int) {
-                    if (!module) return;
-                    MS* m = module;
-                    int s = m->selSec, r = m->selRow;
-                    if (i == 0) m->cells[s][r] = MS::Cell();
-                    if (i == 1) for (int k = 0; k < kSecs; k++) m->cells[k][r] = m->cells[s][r];
-                    if (i == 2) { int to = (s + 1) % kSecs; for (int k = 0; k < kRows; k++) m->cells[to][k] = m->cells[s][k]; m->selSec = to; }
-                    m->edited(m->curSec);
-                };
-            }
         }
-        // BPM on the left of the input row, CLK IN beside it
-        const float KY = 98.f, KX = SX + 14.f;
+        // BPM on the left of the input row, CLK IN beside it (their plate starts level with the strips' tops, y 93.5)
+        const float KY = 103.f, KX = SX + 14.f;
         addChild(KnobTicks::create(Vec(KX, KY)));
-        ParamWidget* kn = createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(KX, KY)), module, MS::BPM_PARAM);
+        ParamWidget* kn = createParamCentered<BpmKnob>(mm2px(Vec(KX, KY)), module, MS::BPM_PARAM);
         if (Knob* k = dynamic_cast<Knob*>(kn)) k->snap = true;
         addParam(kn);
         label(KX, KY - 7.f, "BPM");
@@ -1186,7 +1419,8 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
         MS* m = getModule<MS>();
         if (!m) return;
         menu->addChild(new MenuSeparator);
-        menu->addChild(createMenuItem("Empty every row (modules are placed again)", "", [=]() { for (int r = 0; r < kRows; r++) { m->release(r); m->rowId[r] = -1; } }));
+        menu->addChild(createBoolPtrMenuItem("Place free modules on empty rows", "", &m->autoFill));
+        menu->addChild(createMenuItem("Empty every row", m->autoFill ? "free modules are placed again" : "", [=]() { for (int r = 0; r < kRows; r++) { m->release(r); m->rowId[r] = -1; } }));
         menu->addChild(createMenuItem("Clear every section", "", [=]() {
             for (int s = 0; s < kSecs; s++) for (int r = 0; r < kRows; r++) m->cells[s][r] = MS::Cell();
             m->edited(m->curSec);

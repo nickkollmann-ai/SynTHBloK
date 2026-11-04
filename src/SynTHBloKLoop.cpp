@@ -1698,6 +1698,9 @@ struct LScreen : TransparentWidget {
     float viewX0 = 0.f, viewX1 = 0.f, randX0 = 0.f, randX1 = 0.f;   // the VIEW and RAND tags, for clicks
     float padX0 = 0.f, padY0 = 0.f, padW = 1.f, padH = 1.f;          // RAND's 4 x 2 pads: the grid's corner, one step
     int hoverPad = -1;                                               // the RAND pad under the mouse (-1: none)
+    float vgX0 = 0.f, vgY0 = 0.f, vgW = 1.f, vgH = 1.f;              // VIEW's 2 x 2 boxes: the grid's corner, one step
+    int hoverView = -1;                                              // the VIEW box under the mouse (-1: none)
+    int hoverTag = 0;                                                // the tag under the mouse: 1 VIEW, 2 RAND, 0 neither
     double viewPressT = -1.0, randPressT = -1.0;   // when each was last clicked (its glow)
     LScreen() {
         for (int i = 0; i < kFft; i++) win[i] = 0.5f - 0.5f * std::cos(2.f * (float)M_PI * i / kFft);
@@ -1894,6 +1897,7 @@ struct LScreen : TransparentWidget {
         pressGlow(args, randPressT, x, y, w, h, g);
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, x, y, w, h, 1.f);
+        if (hoverTag == 2) { nvgFillColor(args.vg, nvgTransRGBA(g, 22)); nvgFill(args.vg); }   // under the mouse: a faint fill
         nvgStrokeColor(args.vg, all ? g : nvgTransRGBA(g, 90));
         nvgStrokeWidth(args.vg, 0.6f);
         nvgStroke(args.vg);
@@ -1918,12 +1922,22 @@ struct LScreen : TransparentWidget {
         if (p.x < padX0 || p.y < padY0 || c > 3 || r > 1) return -1;
         return r * 4 + c;
     }
-    // over a pad: its name in the tag (consumed there only, so the panel under the screen still gets the rest)
-    void onHover(const HoverEvent& e) override {
-        hoverPad = module ? padAt(e.pos) : -1;
-        if (hoverPad >= 0) e.consume(this);
+    // the VIEW box at p (-1: none)
+    int viewAt(Vec p) {
+        int c = (int)std::floor((p.x - vgX0) / vgW), r = (int)std::floor((p.y - vgY0) / vgH);
+        if (p.x < vgX0 || p.y < vgY0 || c > 1 || r > 1) return -1;
+        return r * 2 + c;
     }
-    void onLeave(const LeaveEvent& e) override { hoverPad = -1; }
+    // over a pad or a VIEW box: its name in the tag; over either tag: a faint fill (consumed over the tags only, so
+    // the panel under the screen still gets the rest)
+    void onHover(const HoverEvent& e) override {
+        bool info = module && e.pos.y >= mm2px(ls::yInfo) && e.pos.y < mm2px(ls::yInfo + oled::kRow);
+        hoverPad = module ? padAt(e.pos) : -1;
+        hoverView = info ? viewAt(e.pos) : -1;
+        hoverTag = !info ? 0 : e.pos.x >= viewX0 && e.pos.x <= viewX1 ? 1 : e.pos.x >= randX0 && e.pos.x <= randX1 ? 2 : 0;
+        if (hoverPad >= 0 || hoverTag) e.consume(this);
+    }
+    void onLeave(const LeaveEvent& e) override { hoverPad = -1; hoverView = -1; hoverTag = 0; }
 
     // MON | LVL (as the buttons), what is heard: the selected one lit, the other dim; right-aligned to xRight,
     // returns its width
@@ -1959,18 +1973,22 @@ struct LScreen : TransparentWidget {
         pressGlow(args, viewPressT, x, y, w, h, accent());
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, x, y, w, h, 1.f);
+        if (hoverTag == 1) { nvgFillColor(args.vg, nvgTransRGBA(accent(), 22)); nvgFill(args.vg); }   // under the mouse: a faint fill
         nvgStrokeColor(args.vg, accent());
         nvgStrokeWidth(args.vg, 0.6f);
         nvgStroke(args.vg);
+        // over a box: that view's name stands in for VIEW
+        static const char* const vn[4] = {"WAVE", "SPEC", "LIVE", "SCOP"};
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
         nvgFillColor(args.vg, accent());
-        nvgText(args.vg, x + pad, yc + 0.2f, "VIEW", NULL);
+        nvgText(args.vg, x + pad, yc + 0.2f, hoverView >= 0 ? vn[hoverView] : "VIEW", NULL);
         const float gx = x + w - pad - 2.f * cw - 0.8f, gy = y + pad;
+        vgX0 = gx; vgY0 = gy; vgW = cw + 0.8f; vgH = ch + 0.8f;
         for (int i = 0; i < 4; i++) {
             nvgBeginPath(args.vg);
-            nvgRoundedRect(args.vg, gx + (i % 2) * (cw + 0.8f), gy + (i / 2) * (ch + 0.8f), cw, ch, 0.4f);
+            nvgRoundedRect(args.vg, gx + (i % 2) * vgW, gy + (i / 2) * vgH, cw, ch, 0.4f);
             if (i == view) { nvgFillColor(args.vg, accent()); nvgFill(args.vg); }
-            else { nvgStrokeColor(args.vg, nvgTransRGBA(accent(), 100)); nvgStrokeWidth(args.vg, 0.4f); nvgStroke(args.vg); }
+            else { nvgStrokeColor(args.vg, nvgTransRGBA(accent(), i == hoverView ? 230 : 100)); nvgStrokeWidth(args.vg, 0.4f); nvgStroke(args.vg); }
         }
         viewX0 = x; viewX1 = x + w;
     }
@@ -2318,8 +2336,9 @@ struct LScreen : TransparentWidget {
             return;
         }
         if (e.button != GLFW_MOUSE_BUTTON_LEFT) return;
-        if (info && e.pos.x >= viewX0 && e.pos.x <= viewX1) {
-            module->laneView() = (module->laneView() + 1) % 4;
+        if (info && e.pos.x >= viewX0 && e.pos.x <= viewX1) {   // a box: that view; elsewhere on VIEW: the next one
+            const int v = viewAt(e.pos);
+            module->laneView() = v >= 0 ? v : (module->laneView() + 1) % 4;
             viewPressT = system::getTime();
             e.consume(this);
             return;

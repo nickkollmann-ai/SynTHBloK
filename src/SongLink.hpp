@@ -24,6 +24,9 @@ struct Member {
     // requests from MATRIX-SONG (-1 / L_NONE: none)
     std::atomic<int> reqPattern{-1}, reqLoop{L_NONE};
     std::atomic<bool> songMuted{false}, songLinked{false};
+    // the Composer conducting this module (its module id; -1: free). One at a time: a second Composer leaves an
+    // owned module alone until its owner lets it go (empties the row, or is deleted).
+    std::atomic<int64_t> songOwner{-1};
     std::atomic<float> songLevel{1.f};   // MATRIX-SONG's level strip for this module (0..1)
     std::atomic<float> songPk{0.f};      // the member's output peak (V), for the strip's meter
     float songGainSm = 1.f, songDt = 1.f / 48000.f, songPkHold = 0.f;
@@ -74,13 +77,14 @@ inline void leave(Member* mb) {
 }
 
 // what MATRIX-SONG may know of a member (copied out under the lock)
-struct Info { int64_t id; const char* name; int patterns; bool hasLoop; int patNow; };
+struct Info { int64_t id; const char* name; int patterns; bool hasLoop; int patNow; int64_t owner; };
 inline std::vector<Info> list() {
     Registry& r = reg();
     std::lock_guard<std::mutex> lk(r.m);
     std::vector<Info> out;
     for (Member* mb : r.v)
-        if (mb->self && mb->self->id >= 0) out.push_back({mb->self->id, mb->songName, mb->songPatterns, mb->songHasLoop, mb->songPatternNow()});
+        if (mb->self && mb->self->id >= 0)
+            out.push_back({mb->self->id, mb->songName, mb->songPatterns, mb->songHasLoop, mb->songPatternNow(), mb->songOwner.load()});
     std::sort(out.begin(), out.end(), [](const Info& a, const Info& b) { return a.id < b.id; });
     return out;
 }
