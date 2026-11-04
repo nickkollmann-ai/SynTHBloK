@@ -7,9 +7,13 @@
 #   4. Screenshot every SynTHBloK module as Rack draws it into web-images/screenshots (tools/rack_shots.ps1,
 #      about 10 s, on a private Rack folder). -NoShots skips it.
 #   5. Reopen Rack if it was open (it reloads the autosaved patch). -Open starts Rack even if it was closed.
+# When OBS is open with its WebSocket server on, OBS records the workbench from the start of the build until
+# a few seconds after it ends (tools/obs_record.ps1). -NoRecord skips it.
 param(
     [switch]$Open,
     [switch]$NoShots,
+    [switch]$NoRecord,
+    [int]$RecordTail = 8,
     [int]$CloseTimeout = 30,
     [string]$Rack = 'C:\Program Files\VCV\Rack2Pro\Rack.exe'
 )
@@ -24,6 +28,10 @@ function Make([string]$target) {
     & $bash -lc "cd ~/SynTHBloK && export RACK_DIR=~/Rack-SDK && make -j4 $target 2>&1 | tee build.log; exit `${PIPESTATUS[0]}" | Out-Host
     return $LASTEXITCODE -eq 0
 }
+
+$obs = Join-Path $PSScriptRoot 'obs_record.ps1'
+if (-not $NoRecord) { & $obs start -Mine }
+try {
 
 if (-not (Make 'all')) { Write-Host 'BUILD FAILED - see build.log. Rack was not touched.'; exit 1 }
 
@@ -50,4 +58,11 @@ if (-not $NoShots) { & (Join-Path $PSScriptRoot 'rack_shots.ps1') -Rack $Rack }
 if ($wasOpen -or $Open) {
     Start-Process -FilePath $Rack -WorkingDirectory (Split-Path $Rack)
     Write-Host 'Rack reopened.'
+}
+
+} finally {
+    # Stopped in the background so the build returns now while the recording catches Rack coming back up.
+    if (-not $NoRecord) {
+        Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$obs`"", 'stop', '-Mine', '-Delay', $RecordTail
+    }
 }
