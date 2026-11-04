@@ -1,7 +1,8 @@
 #pragma once
 // MATRIX-SONG's link to the MATRIX modules, with no cables: a module that can be conducted derives from
 // songlink::Member and joins in its constructor (leaves in its destructor). MATRIX-SONG finds the members by
-// module id and, on a section change, asks each for a pattern, a mute or a loop action. The requests are
+// module id and, on a section change, asks each for a pattern, a mute or a loop action; its level strip sets
+// the member's level, and the member reports its output peak for the strip's meter. The requests are
 // atomics the member takes in its own process() (songPoll), so nothing crosses engine threads unguarded.
 #include "plugin.hpp"
 #include <atomic>
@@ -23,7 +24,9 @@ struct Member {
     // requests from MATRIX-SONG (-1 / L_NONE: none)
     std::atomic<int> reqPattern{-1}, reqLoop{L_NONE};
     std::atomic<bool> songMuted{false}, songLinked{false};
-    float songGainSm = 1.f;
+    std::atomic<float> songLevel{1.f};   // MATRIX-SONG's level strip for this module (0..1)
+    std::atomic<float> songPk{0.f};      // the member's output peak (V), for the strip's meter
+    float songGainSm = 1.f, songDt = 1.f / 48000.f, songPkHold = 0.f;
 
     // the member's own pattern now (0-based; -1: none), read by MATRIX-SONG's display
     virtual int songPatternNow() { return -1; }
@@ -31,16 +34,23 @@ struct Member {
     virtual void songSetPattern(int p) {}
     virtual void songDoLoop(int a) {}
 
-    // every sample, first thing in process(): takes the requests, and ramps the mute (5 ms). Returns the gain
-    // for the member's main outputs.
+    // every sample, first thing in process(): takes the requests, and glides to the level (0 while muted;
+    // 5 ms, so strip moves and mutes never click). Returns the gain for the member's main outputs.
     float songPoll(float dt) {
         int p = reqPattern.exchange(-1);
         if (p >= 0) songSetPattern(p);
         int a = reqLoop.exchange(L_NONE);
         if (a != L_NONE) songDoLoop(a);
-        float tg = songMuted.load() ? 0.f : 1.f;
+        float tg = songMuted.load() ? 0.f : clamp(songLevel.load(), 0.f, 1.f);
         songGainSm += (tg - songGainSm) * std::min(1.f, dt / 0.005f);
+        songDt = dt;
         return songGainSm;
+    }
+    // after the outputs are set: their peak (falls about 20 dB a second), shown on MATRIX-SONG's strip
+    void songMeter(float l, float r) {
+        float a = std::max(std::fabs(l), std::fabs(r));
+        songPkHold = std::max(a, songPkHold * (1.f - 2.3f * songDt));
+        songPk.store(songPkHold, std::memory_order_relaxed);
     }
     virtual ~Member() {}
 };

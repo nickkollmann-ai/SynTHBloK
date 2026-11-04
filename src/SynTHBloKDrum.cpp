@@ -811,6 +811,7 @@ struct SynTHBloKDrum : Module, songlink::Member {   // MATRIX-SONG picks its pat
         masterVol += (params[MASTER_PARAM].getValue() - masterVol) * km;
         outputs[OUT_L_OUTPUT].setVoltage((dryL + (5.f * fxL - dryL) * fxOnSm) * masterVol * songG);
         outputs[OUT_R_OUTPUT].setVoltage((dryR + (5.f * fxR - dryR) * fxOnSm) * masterVol * songG);
+        songMeter(outputs[OUT_L_OUTPUT].getVoltage(), outputs[OUT_R_OUTPUT].getVoltage());
 
         // ---- STRIP CV = the strips (the voices' levels), KNOB CV = the knob's page ----
         bool bip = params[RANGE_PARAM].getValue() > 0.5f;

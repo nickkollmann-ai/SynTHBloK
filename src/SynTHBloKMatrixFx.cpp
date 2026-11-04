@@ -768,6 +768,7 @@ struct SynTHBloKMatrixFx : Module, songlink::Member {   // MATRIX-SONG picks its
         if (!pre) { looper.process(l, r, lL, lR); l += lL * loopSm; r += lR * loopSm; }
         outputs[OUT_L_OUTPUT].setVoltage(clamp(5.f * mfx::safe(l * masterVol), -11.f, 11.f) * songG);
         outputs[OUT_R_OUTPUT].setVoltage(clamp(5.f * mfx::safe(r * masterVol), -11.f, 11.f) * songG);
+        songMeter(outputs[OUT_L_OUTPUT].getVoltage(), outputs[OUT_R_OUTPUT].getVoltage());
         if (prevSt == EchoLooper::REC && looper.st != EchoLooper::REC) takeGen++;
         prevSt = looper.st;
         blink += dt;

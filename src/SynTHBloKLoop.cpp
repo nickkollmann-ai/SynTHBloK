@@ -1079,6 +1079,7 @@ struct SynTHBloKLoop : Module, songlink::Member {   // MATRIX-SONG picks its sce
         };
         outputs[MIX_L_OUTPUT].setVoltage(outCeil(5.f * mixL * masterSm));
         outputs[MIX_R_OUTPUT].setVoltage(outCeil(5.f * mixR * masterSm));
+        songMeter(outputs[MIX_L_OUTPUT].getVoltage(), outputs[MIX_R_OUTPUT].getVoltage());
 
         // the selected track's cells: lit with its state; an armed action blinks until the grid edge
         blink += dt;

@@ -62,6 +62,8 @@ main{display:grid;grid-template-columns:minmax(260px,.7fr) minmax(0,1fr) minmax(
 /* the save list: 4 rows high, no scroll bar; each new file slides in at the top and the rest scroll down */
 #feed{height:72px;box-sizing:content-box;overflow:hidden auto;scrollbar-width:none;border-top:1px solid var(--line);padding:6px 12px;font-size:11px;line-height:18px;color:var(--mut)}
 #feed::-webkit-scrollbar{display:none}
+/* no scroll bars on the code and compiler windows either: they follow the work as it runs (the wheel still scrolls) */
+#code,#log{scrollbar-width:none}#code::-webkit-scrollbar,#log::-webkit-scrollbar{display:none}
 #feed div{height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #feed div.in{animation:feedin .25s ease}
 @keyframes feedin{from{margin-top:-18px;opacity:0}to{margin-top:0;opacity:1}}

@@ -445,6 +445,7 @@ struct SynTHBloKEcho : Module, songlink::Member {   // MATRIX-SONG plays its loo
         };
         outputs[OUT_L_OUTPUT].setVoltage(outCeil(5.f * oL * masterSm) * songG);
         outputs[OUT_R_OUTPUT].setVoltage(outCeil(5.f * oR * masterSm) * songG);
+        songMeter(outputs[OUT_L_OUTPUT].getVoltage(), outputs[OUT_R_OUTPUT].getVoltage());
 
         // cells: lit with the state; an armed action blinks its cell until the grid edge
         blink += dt;
