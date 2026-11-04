@@ -674,7 +674,19 @@ struct SynTHBloKLoop : Module, songlink::Member {   // MATRIX-SONG picks its sce
     // MATRIX-SONG: its pattern is a scene (U1-U8); PLAY / STOP / ONCE act on every track that holds a loop,
     // REC records the selected track
     int songPatternNow() override { return curScene; }
-    void songSetPattern(int p) override { if (p >= 0 && p < 8) recallScene(p); }
+    // a section picks a scene: selected as on the panel, and (a stored scene) its tracks start and stop to
+    // match what it noted, so each section brings LOOP's tracks in and out
+    void songSetPattern(int p) override {
+        if (p < 0 || p > 7) return;
+        recallScene(p);
+        if (!sceneUsed[p]) return;
+        for (int t = 0; t < kTracks; t++) {
+            const EchoLooper& lp = loop[t];
+            if (lp.len <= 0 || lp.st == EchoLooper::REC || lp.st == EchoLooper::DUB || lp.arm != EchoLooper::A_NONE) continue;
+            bool want = (sceneMask[p] >> t) & 1;
+            if (want != lp.playing()) act(t, 1);
+        }
+    }
     void songDoLoop(int a) override {
         if (a == songlink::L_REC) {
             const EchoLooper& lp = loop[sel()];

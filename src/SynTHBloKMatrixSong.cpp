@@ -6,12 +6,10 @@
 //  A section header launches that section on the next bar (or beat).
 //  The strips (as MATRIX-DRUM's): a level, a MUTE and an output meter per row's module. Each section keeps
 //  its own levels and mutes; a launch moves the strips to them, and moving a strip edits the playing section.
-//  REC records a performance: from the next bar, the launches, mutes and strip moves (on the 16th grid) until
-//  the bar after REC goes off. PLAY replays the take from its first bar, round and round.
 //  Master clock: CLOCK (16ths), RUN, RESET, BAR and SECT (0-7 V) out; CLOCK in (16ths) or the BPM knob.
 //  JAM ("JAM Template 1 Live", as the other MATRIX modules; click SONG to hand it the JAM): the pads are
 //  the grid (a press selects the cell; MUTE + pad mutes it, CLEAR + pad clears it), scenes launch A-H,
-//  A-H mute the rows, the touch strips are the levels. PLAY = RUN, REC = REC, SONG = PLAY the take,
+//  A-H mute the rows, the touch strips are the levels. PLAY = RUN, REC = the selected cell's looper REC,
 //  TEMPO = RESET, GRID = bar / beat, PREV / NEXT launch the section before / after, the cross pad moves
 //  the selected cell, DUPLICATE copies the section to the next, the knob is the BPM.
 // ============================================================================
@@ -34,14 +32,16 @@
 
 namespace {
 
-static const int kRows = 8, kSecs = 8, kEvMax = 20000;
+static const int kRows = 8, kSecs = 8;
 static const char* const kSecName[kSecs] = {"A", "B", "C", "D", "E", "F", "G", "H"};
 // rows (and their strips) in the fire colours the MATRIX modules all use, as the section columns are
 static const NVGcolor* const kRowCol = kPatOnColor;
 static const char* const kLoopGlyph[songlink::L_COUNT] = {"", "PLAY", "STOP", "REC", "ONCE"};
 
 struct SynTHBloKMatrixSong : Module {
+    // REC_ / PLAY_ / LEN_PARAM: unused (the take is gone), kept so saved patches keep their param ids
     enum ParamIds { RUN_PARAM, RESET_PARAM, REC_PARAM, PLAY_PARAM, QUANT_PARAM, BPM_PARAM, MIDI_ON_PARAM, LEN_PARAM, NUM_PARAMS };
+    // RUN_ / RESET_INPUT: no jacks on the panel (the RUN / RESET outputs and buttons cover them), kept for ids
     enum InputIds { CLOCK_INPUT, RUN_INPUT, RESET_INPUT, NUM_INPUTS };
     enum OutputIds { CLOCK_OUTPUT, RUN_OUTPUT, RESET_OUTPUT, BAR_OUTPUT, SECT_OUTPUT, NUM_OUTPUTS };
 
@@ -52,30 +52,13 @@ struct SynTHBloKMatrixSong : Module {
     float lev[kRows];
     bool mut[kRows];
 
-    // the take: what happened, tick by tick (16 a bar) from its first bar, and the state it started from
-    enum { EV_SEC, EV_LEV, EV_MUTE };
-    struct Ev { int t, type, row; float v; };
-    std::vector<Ev> take, rec;
-    int takeLen = 0, takeSec = 0;            // takeLen: ticks, 0 = no take
-    float takeLev[kRows];
-    bool takeMut[kRows];
-    std::mutex takeM;                        // the take, against saving (rec is the engine's alone)
-    enum { R_OFF, R_ARM, R_ON, R_END };      // REC: waiting for the bar, recording, ending on the next bar
-    enum { P_OFF, P_ARM, P_ON };             // PLAY: waiting for the bar, playing
-    int recState = R_OFF, playState = P_OFF, recT = 0, playT = 0;
-    size_t playIx = 0;
-    int recSec = 0;
-    float recLev[kRows], recLastLev[kRows];
-    bool recMut[kRows], recLastMut[kRows];
-
     // the song now
     int curSec = 0, barInSec = 0;
     std::atomic<int> queued{-1};      // a launch waiting for its bar (or beat)
     std::atomic<int> applyNow{-1};    // stopped: a launch applies at once
-    bool wasRunning = false, recPrev = false, playPrev = false;
+    bool wasRunning = false;
     int selSec = 0, selRow = 0;       // the pad the editor shows (UI)
     int pushCount = 0;
-    std::atomic<bool> clearTakeReq{false};   // UI: clear the take (done in process, where it is played)
 
     // clock
     int tick = -1;
@@ -84,13 +67,12 @@ struct SynTHBloKMatrixSong : Module {
     dsp::SchmittTrigger clkTrig, runTrig, rstTrig, rstBtnTrig;
     dsp::PulseGenerator clockPulse, resetPulse, barPulse;
     float resetFlash = 0.f, blink = 0.f;
-    float recFlash[kRows] = {};   // a row's REC just pressed (UI)
 
     // Maschine JAM, as on MATRIX-DRUM: the last clicked module owns it (JamOwner.hpp)
     midi::InputQueue midiIn;
     midi::Output midiOut;
     jamown::Link jam;
-    bool slowSend = false, soloHeld = false, muteHeld = false, clearHeld = false, jamReset = false;
+    bool slowSend = false, muteHeld = false, clearHeld = false, jamReset = false;
     int jamPage = 1, stripPage = 0, lastStripPage = -1, lastPage = -1, knobCC = kKnobFirstCC, ledScan = 0;
     int lastLed[kNumLed];
     float tokens = 4.f, resync = 0.f;
@@ -99,16 +81,12 @@ struct SynTHBloKMatrixSong : Module {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, 0);
         configSwitch(RUN_PARAM, 0.f, 1.f, 0.f, "Run (starts the song from the top; a trigger at RUN toggles it)", {"Stopped", "Running"});
         configButton(RESET_PARAM, "Reset: the song from the top (a trigger at RESET does too)");
-        configSwitch(REC_PARAM, 0.f, 1.f, 0.f, "Record a take: launches, mutes and strip moves, from the next bar until the bar after REC goes off", {"Off", "Recording"});
-        configSwitch(PLAY_PARAM, 0.f, 1.f, 0.f, "Play the take (from the next bar, round and round)", {"Off", "Playing"});
         configSwitch(QUANT_PARAM, 0.f, 1.f, 0.f, "Launches land on the next", {"Bar", "Beat"});
         configParam(BPM_PARAM, 40.f, 240.f, 120.f, "Tempo (when CLOCK is unpatched)", " BPM");
         paramQuantities[BPM_PARAM]->snapEnabled = true;
         configSwitch(MIDI_ON_PARAM, 0.f, 1.f, 1.f, "JAM MIDI (off = ignore the JAM, its lights dark)", {"Off", "On"});
-        configSwitch(LEN_PARAM, 0.f, 6.f, 0.f, "Take length (a set length ends the take by itself)", {"Free (until REC goes off)", "1 bar", "2 bars", "4 bars", "8 bars", "16 bars", "32 bars"});
-        paramQuantities[LEN_PARAM]->randomizeEnabled = false;
         for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
-        for (int id : {RUN_PARAM, REC_PARAM, PLAY_PARAM, QUANT_PARAM}) paramQuantities[id]->randomizeEnabled = false;
+        for (int id : {RUN_PARAM, QUANT_PARAM}) paramQuantities[id]->randomizeEnabled = false;
         configInput(CLOCK_INPUT, "Clock (16th notes; the BPM knob when unpatched)");
         configInput(RUN_INPUT, "Run (trigger: toggles RUN)");
         configInput(RESET_INPUT, "Reset (trigger)");
@@ -117,9 +95,7 @@ struct SynTHBloKMatrixSong : Module {
         configOutput(RESET_OUTPUT, "Reset (trigger as the song starts or resets)");
         configOutput(BAR_OUTPUT, "Bar (trigger on each downbeat)");
         configOutput(SECT_OUTPUT, "Section (A = 0 V .. H = 7 V)");
-        for (int r = 0; r < kRows; r++) { rowId[r] = -1; takeLev[r] = 1.f; takeMut[r] = false; }
-        take.reserve(kEvMax);
-        rec.reserve(kEvMax);
+        for (int r = 0; r < kRows; r++) rowId[r] = -1;
         defaults();
     }
 
@@ -128,9 +104,6 @@ struct SynTHBloKMatrixSong : Module {
         for (int s = 0; s < kSecs; s++) for (int r = 0; r < kRows; r++) cells[s][r].pat = s;   // A..H: patterns 1..8
         curSec = 0; selSec = selRow = 0;
         loadLive(0);
-        std::lock_guard<std::mutex> lk(takeM);
-        take.clear(); takeLen = 0;
-        recState = R_OFF; playState = P_OFF;
     }
     void onReset() override {
         defaults();
@@ -142,44 +115,21 @@ struct SynTHBloKMatrixSong : Module {
         if (inputs[CLOCK_INPUT].isConnected() && clockPeriod > 0.f) return 15.f / clockPeriod;
         return params[BPM_PARAM].getValue();
     }
-    bool takePlaying() { return playState == P_ON; }
-    // the take's set length in ticks (0 = free: until REC goes off)
-    int recLenTicks() { static const int bars[7] = {0, 1, 2, 4, 8, 16, 32}; return 16 * bars[clamp((int)params[LEN_PARAM].getValue(), 0, 6)]; }
     void loadLive(int s) { for (int r = 0; r < kRows; r++) { lev[r] = cells[s][r].level; mut[r] = cells[s][r].mute; } }
 
-    // UI: a strip / MUTE moves the live state, and writes into the playing section (not while a take plays,
-    // so replaying never rewrites the sections)
-    void setLevel(int r, float v) { lev[r] = clamp(v, 0.f, 1.f); if (!takePlaying()) cells[curSec][r].level = lev[r]; }
-    void toggleMute(int r) { mut[r] = !mut[r]; if (!takePlaying()) cells[curSec][r].mute = mut[r]; }
+    // UI: a strip / MUTE moves the live state, and writes into the playing section
+    void setLevel(int r, float v) { lev[r] = clamp(v, 0.f, 1.f); cells[curSec][r].level = lev[r]; }
+    void toggleMute(int r) { mut[r] = !mut[r]; cells[curSec][r].mute = mut[r]; }
     // UI: the editor changed section s; if it is the one playing, the strips follow and the modules switch
     // to its patterns now (its loop actions wait for its next launch)
     void edited(int s) {
-        if (s != curSec || takePlaying()) return;
+        if (s != curSec) return;
         loadLive(s);
         for (int r = 0; r < kRows; r++) {
             int p = cells[s][r].pat;
             if (rowId[r] < 0 || p < 0) continue;
             songlink::with(rowId[r], [&](songlink::Member& m) { if (m.songPatterns > 0) m.reqPattern = std::min(p, m.songPatterns - 1); });
         }
-    }
-    // a row's REC: what its module plays now lands in the selected section's pad at once (its pattern, and
-    // the strip's level and mute); a looper (ECHO / FX / LOOP) also starts recording now, and the pad keeps REC
-    void captureRow(int r) {
-        if (r < 0 || r >= kRows || rowId[r] < 0) return;
-        int s = selSec;
-        Cell c = cells[s][r];
-        bool looper = false;
-        songlink::with(rowId[r], [&](songlink::Member& m) {
-            int p = m.songPatternNow();
-            if (p >= 0) c.pat = p;
-            if (m.songHasLoop) { looper = true; m.reqLoop = songlink::L_REC; }
-        });
-        if (looper) c.loop = songlink::L_REC;
-        c.level = lev[r]; c.mute = mut[r];
-        cells[s][r] = c;
-        selRow = r;
-        recFlash[r] = 0.3f;
-        edited(s);
     }
     // a row let go (emptied, or SONG removed): its module back to full level, unmuted
     void release(int r) {
@@ -214,55 +164,6 @@ struct SynTHBloKMatrixSong : Module {
         else applyNow = s;
     }
 
-    // ---- the take ----
-    void recPush(int type, int row, float v) { if ((int)rec.size() < kEvMax) rec.push_back({recT, type, row, v}); }
-    void beginRec() {
-        recState = R_ON; recT = 0;
-        rec.clear();
-        recSec = curSec;
-        for (int r = 0; r < kRows; r++) { recLev[r] = recLastLev[r] = lev[r]; recMut[r] = recLastMut[r] = mut[r]; }
-        playState = P_OFF; params[PLAY_PARAM].setValue(0.f); playPrev = false;
-    }
-    // each tick while recording: a launch (with every strip, so a replay is exact), then what moved
-    void recTick(int launched) {
-        if (launched >= 0) {
-            recPush(EV_SEC, 0, (float)launched);
-            for (int r = 0; r < kRows; r++) { recPush(EV_LEV, r, lev[r]); recPush(EV_MUTE, r, mut[r] ? 1.f : 0.f); }
-            for (int r = 0; r < kRows; r++) { recLastLev[r] = lev[r]; recLastMut[r] = mut[r]; }
-            return;
-        }
-        for (int r = 0; r < kRows; r++) {
-            if (std::fabs(lev[r] - recLastLev[r]) > 0.002f) { recPush(EV_LEV, r, lev[r]); recLastLev[r] = lev[r]; }
-            if (mut[r] != recLastMut[r]) { recPush(EV_MUTE, r, mut[r] ? 1.f : 0.f); recLastMut[r] = mut[r]; }
-        }
-    }
-    void endRec(int len) {
-        {
-            std::lock_guard<std::mutex> lk(takeM);
-            take.swap(rec);
-            takeLen = std::max(16, len);
-            takeSec = recSec;
-            for (int r = 0; r < kRows; r++) { takeLev[r] = recLev[r]; takeMut[r] = recMut[r]; }
-        }
-        rec.clear();
-        recState = R_OFF;
-        params[REC_PARAM].setValue(0.f); recPrev = false;
-    }
-    void takeStart() {   // the take's first tick: its section and strips as they were
-        playT = 0; playIx = 0;
-        apply(takeSec);
-        for (int r = 0; r < kRows; r++) { lev[r] = takeLev[r]; mut[r] = takeMut[r]; }
-    }
-    void takeTick() {
-        while (playIx < take.size() && take[playIx].t < playT) playIx++;
-        while (playIx < take.size() && take[playIx].t == playT) {
-            const Ev& e = take[playIx++];
-            if (e.type == EV_SEC) apply((int)e.v);
-            else if (e.type == EV_LEV) lev[clamp(e.row, 0, kRows - 1)] = e.v;
-            else mut[clamp(e.row, 0, kRows - 1)] = e.v > 0.5f;
-        }
-    }
-
     // ---- JAM ----
     int padNote(int r, int c) { return std::min(127, 12 * (jamPage - 1) + 56 + c - 8 * r); }
     void sendNote(int n, int vel) { midi::Message m; m.bytes = {0x90, (uint8_t)n, (uint8_t)clamp(vel, 0, 127)}; if (slowSend) std::this_thread::sleep_for(std::chrono::microseconds(400)); midiOut.sendMessage(m); }
@@ -288,12 +189,10 @@ struct SynTHBloKMatrixSong : Module {
         bool down = b > 0;
         if (cc == CC_MUTE) { muteHeld = down; return; }
         if (cc == CC_CLEAR) { clearHeld = down; return; }
-        if (cc == CC_SOLO) { soloHeld = down; return; }
         if (!down) return;
         switch (cc) {
             case CC_PLAY: toggle(params[RUN_PARAM]); break;
-            case CC_REC: toggle(params[REC_PARAM]); break;
-            case CC_SONG: toggle(params[PLAY_PARAM]); break;
+            case CC_REC: { Cell& c = cells[selSec][selRow]; c.loop = c.loop == songlink::L_REC ? songlink::L_NONE : songlink::L_REC; } break;
             case CC_TEMPO: jamReset = true; break;
             case CC_GRID: toggle(params[QUANT_PARAM]); break;
             case CC_PREV: launch((curSec + kSecs - 1) % kSecs); break;
@@ -331,7 +230,7 @@ struct SynTHBloKMatrixSong : Module {
                 }
                 else if (a == kKnobPushCC && b > 0) paramQuantities[BPM_PARAM]->reset();
                 else if (a >= 0 && a < 8 && b > 0) launch(a);
-                else if (a >= 8 && a < 16 && b > 0) { if (soloHeld) captureRow(a - 8); else if (rowId[a - 8] >= 0) toggleMute(a - 8); }
+                else if (a >= 8 && a < 16 && b > 0) { if (rowId[a - 8] >= 0) toggleMute(a - 8); }
                 else if (a >= 48 && a < 112) {
                     stripPage = (a - 48) / 8;
                     if (rowId[(a - 48) % 8] >= 0) setLevel((a - 48) % 8, b / 127.f);
@@ -347,13 +246,13 @@ struct SynTHBloKMatrixSong : Module {
         if (idx >= 88) {
             switch (kBtnCC[idx - 88]) {
                 case CC_PLAY: return running ? 127 : 0;
-                case CC_REC: return recState == R_ON || (recState != R_OFF && blinkOn) ? 127 : 0;
-                case CC_SONG: return playState == P_ON || (playState == P_ARM && blinkOn) ? 127 : 0;
+                case CC_REC: return cells[selSec][selRow].loop == songlink::L_REC ? 127 : 0;
+                case CC_SONG: return 0;
                 case CC_TEMPO: return resetFlash > 0.f ? 127 : 0;
                 case CC_GRID: return params[QUANT_PARAM].getValue() > 0.5f ? 127 : 0;
                 case CC_MUTE: return muteHeld ? 127 : 0;
                 case CC_CLEAR: return clearHeld ? 127 : 0;
-                case CC_SOLO: return soloHeld ? 127 : 0;
+                case CC_SOLO: return 0;
                 default: return 127;
             }
         }
@@ -423,31 +322,8 @@ struct SynTHBloKMatrixSong : Module {
         bool rst = rstTrig.process(inputs[RESET_INPUT].getVoltage()) | rstBtnTrig.process(params[RESET_PARAM].getValue()) | jamReset;
         jamReset = false;
         if (running && !wasRunning) rst = true;   // RUN starts the song from the top
-        if (!running && wasRunning) {             // stopped: a take being recorded ends here; a playing one waits
-            if (recState == R_ON || recState == R_END) endRec((recT / 16 + 1) * 16);
-            if (playState == P_ON) playState = P_ARM;
-        }
         wasRunning = running;
 
-        // REC on: arms for the next bar (and stops PLAY); off: recording ends on the next bar
-        bool recOn = params[REC_PARAM].getValue() > 0.5f;
-        if (recOn && !recPrev) recState = R_ARM;
-        if (!recOn && recPrev) { if (recState == R_ARM) recState = R_OFF; else if (recState == R_ON) recState = R_END; }
-        recPrev = recOn;
-        // PLAY on: the take from its top on the next bar (nothing to play, or recording: it stays off)
-        bool playOn = params[PLAY_PARAM].getValue() > 0.5f;
-        if (playOn && !playPrev) {
-            if (takeLen > 0 && recState == R_OFF) playState = P_ARM;
-            else { params[PLAY_PARAM].setValue(0.f); playOn = false; }
-        }
-        if (!playOn && playPrev) playState = P_OFF;
-        playPrev = playOn;
-
-        if (clearTakeReq.exchange(false)) {
-            std::lock_guard<std::mutex> lk(takeM);
-            take.clear(); takeLen = 0;
-            playState = P_OFF; params[PLAY_PARAM].setValue(0.f); playPrev = false;
-        }
         int an = applyNow.exchange(-1);
         if (an >= 0) apply(an);
 
@@ -468,7 +344,6 @@ struct SynTHBloKMatrixSong : Module {
         if (rst) {
             tick = -1; internalTimer = 0.f;
             resetPulse.trigger(1e-3f); resetFlash = 0.15f;
-            if (playState == P_ON) playState = P_ARM;   // the take starts over with the song
             if (!ext && running) edge = true;   // the internal clock starts on the downbeat at once
         }
         resetFlash = std::max(0.f, resetFlash - dt);
@@ -481,20 +356,11 @@ struct SynTHBloKMatrixSong : Module {
             bool bar = tick == 0, beat = tick % 4 == 0;
             if (bar) barPulse.trigger(1e-3f);
             if (bar && !start) barInSec++;
-            if (!start && (recState == R_ON || recState == R_END)) recT++;
-            bool takeTop = false;
-            if (!start && playState == P_ON && ++playT >= takeLen) takeTop = true;   // round again
-            if (bar && (recState == R_END || (recState == R_ON && recLenTicks() > 0 && recT >= recLenTicks()))) endRec(recT);
-            if (bar && playState == P_ARM && takeLen > 0) { playState = P_ON; takeTop = true; }
 
-            int to = start ? curSec : -1, launched = -1;
+            int to = start ? curSec : -1;
             int q = queued.load();
-            if (q >= 0 && (bar || (params[QUANT_PARAM].getValue() > 0.5f && beat))) { queued = -1; to = launched = q; }
+            if (q >= 0 && (bar || (params[QUANT_PARAM].getValue() > 0.5f && beat))) { queued = -1; to = q; }
             if (to >= 0) apply(to);
-            if (takeTop) takeStart();
-            if (playState == P_ON) takeTick();
-            if (bar && recState == R_ARM) beginRec();
-            else if (recState == R_ON || recState == R_END) recTick(launched);
         }
 
         // the strips go out to the modules (every 32 samples; at once after a launch)
@@ -542,26 +408,6 @@ struct SynTHBloKMatrixSong : Module {
         json_object_set_new(root, "in", midiIn.toJson());
         json_object_set_new(root, "out", midiOut.toJson());
         json_object_set_new(root, "jamPage", json_integer(jamPage));
-        std::lock_guard<std::mutex> lk(takeM);
-        if (takeLen > 0) {
-            json_t* tk = json_object();
-            json_object_set_new(tk, "len", json_integer(takeLen));
-            json_object_set_new(tk, "section", json_integer(takeSec));
-            json_t* tl = json_array(), *tm = json_array(), *ev = json_array();
-            for (int r = 0; r < kRows; r++) { json_array_append_new(tl, json_real(takeLev[r])); json_array_append_new(tm, json_boolean(takeMut[r])); }
-            for (const Ev& e : take) {
-                json_t* v = json_array();
-                json_array_append_new(v, json_integer(e.t));
-                json_array_append_new(v, json_integer(e.type));
-                json_array_append_new(v, json_integer(e.row));
-                json_array_append_new(v, json_real(e.v));
-                json_array_append_new(ev, v);
-            }
-            json_object_set_new(tk, "levels", tl);
-            json_object_set_new(tk, "mutes", tm);
-            json_object_set_new(tk, "events", ev);
-            json_object_set_new(root, "take", tk);
-        }
         return root;
     }
     void dataFromJson(json_t* root) override {
@@ -585,24 +431,6 @@ struct SynTHBloKMatrixSong : Module {
         if (json_t* j = json_object_get(root, "in")) midiIn.fromJson(j);
         if (json_t* j = json_object_get(root, "out")) midiOut.fromJson(j);
         if (json_t* j = json_object_get(root, "jamPage")) jamPage = clamp((int)json_integer_value(j), 1, 6);
-        std::lock_guard<std::mutex> lk(takeM);
-        take.clear(); takeLen = 0;
-        if (json_t* tk = json_object_get(root, "take")) {
-            takeLen = clamp((int)json_integer_value(json_object_get(tk, "len")), 0, 16 * 4096);
-            takeSec = clamp((int)json_integer_value(json_object_get(tk, "section")), 0, kSecs - 1);
-            for (int r = 0; r < kRows; r++) {
-                json_t* l = json_array_get(json_object_get(tk, "levels"), r);
-                takeLev[r] = l ? clamp((float)json_number_value(l), 0.f, 1.f) : 1.f;
-                takeMut[r] = json_is_true(json_array_get(json_object_get(tk, "mutes"), r));
-            }
-            json_t* ev = json_object_get(tk, "events");
-            for (size_t k = 0; k < json_array_size(ev) && (int)take.size() < kEvMax; k++) {
-                json_t* v = json_array_get(ev, k);
-                take.push_back({(int)json_integer_value(json_array_get(v, 0)), clamp((int)json_integer_value(json_array_get(v, 1)), 0, 2),
-                                clamp((int)json_integer_value(json_array_get(v, 2)), 0, kRows - 1), (float)json_number_value(json_array_get(v, 3))});
-            }
-        }
-        recState = R_OFF; playState = P_OFF;
     }
 };
 
@@ -716,9 +544,6 @@ struct SecHead : OpaqueWidget {
     }
 };
 
-// a row's REC square sits inside its label, at the right end (mm: its size and the label's inset)
-static const float kRecSq = 5.f, kRecIn = kRecSq + 0.8f;
-
 // A row's module: its name (and its pattern now) in the row's colour; click to choose the module.
 struct RowLabel : OpaqueWidget {
     MS* module = NULL;
@@ -754,7 +579,7 @@ struct RowLabel : OpaqueWidget {
         nvgText(args.vg, 3.f, box.size.y * 0.5f, name, NULL);
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
         nvgFillColor(args.vg, oled::amber());
-        nvgText(args.vg, box.size.x - mm2px(kRecIn) - 3.f, box.size.y * 0.5f, pat, NULL);   // left of its REC
+        nvgText(args.vg, box.size.x - 3.f, box.size.y * 0.5f, pat, NULL);
     }
     void onButton(const ButtonEvent& e) override {
         if (e.action != GLFW_PRESS || !module || !found) return;
@@ -898,7 +723,7 @@ struct EdDisplay : TransparentWidget {
     }
 };
 
-// The SONG screen: state | bar | tempo; now playing, what waits, and the take.
+// The SONG screen: state | bar | tempo; now playing, and what waits.
 struct SongDisplay : TransparentWidget {
     MS* module = NULL;
     void drawLayer(const DrawArgs& args, int layer) override {
@@ -953,67 +778,6 @@ struct SongDisplay : TransparentWidget {
             nvgFillColor(args.vg, oled::green());
             nvgFill(args.vg);
         }
-    }
-};
-
-// The RECORD screen: the take (recording, playing, its length) over REC | PLAY | CLEAR | LOOPER REC and
-// the LENGTH choices.
-struct RecDisplay : TransparentWidget {
-    MS* module = NULL;
-    void drawLayer(const DrawArgs& args, int layer) override {
-        if (layer != 1) return;
-        float W = box.size.x, H = box.size.y;
-        oled::box(args, W, H, nvgRGBA(255, 50, 40, 110));
-        const float R = mm2px(oled::kRow);
-        nvgBeginPath(args.vg);
-        oled::divider(args, 4.f, R, W - 4.f, R);
-        oled::dividerStroke(args);
-        std::shared_ptr<window::Font> font = songFont();
-        if (!font) return;
-        nvgFontFaceId(args.vg, font->handle);
-        const NVGcolor red = nvgRGB(0xff, 0x32, 0x28), cyan = nvgRGB(0x5c, 0xc8, 0xf2);
-        std::string tk = "TAKE 8 BARS", st = "";
-        NVGcolor tc = oled::amber(), sc = oled::dim();
-        float prog = -1.f;
-        if (module) {
-            int lenT = module->recLenTicks();
-            tk = module->takeLen > 0 ? string::f("TAKE %d BARS", module->takeLen / 16) : "NO TAKE";
-            if (module->takeLen <= 0) tc = oled::dim();
-            if (module->recState == MS::R_ARM) { st = "REC ON THE BAR"; sc = red; }
-            else if (module->recState == MS::R_ON || module->recState == MS::R_END) {
-                int b = module->recT / 16 + 1;
-                st = lenT > 0 ? string::f("REC BAR %d/%d", b, lenT / 16) : module->recState == MS::R_END ? string::f("REC ENDS BAR %d", b) : string::f("REC BAR %d", b);
-                sc = red;
-                if (lenT > 0) prog = (module->recT + 1) / (float)lenT;
-            }
-            else if (module->playState == MS::P_ARM) { st = "PLAY ON THE BAR"; sc = cyan; }
-            else if (module->playState == MS::P_ON) {
-                st = string::f("PLAY %d/%d", module->playT / 16 + 1, module->takeLen / 16); sc = cyan;
-                prog = (module->playT + 1) / (float)module->takeLen;
-            }
-        }
-        float y = R * 0.5f;
-        nvgFontSize(args.vg, 6.f);
-        nvgFillColor(args.vg, oled::dim());
-        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgText(args.vg, 4.f, y, "RECORD", NULL);
-        nvgFontSize(args.vg, 7.5f);
-        nvgFillColor(args.vg, tc);
-        nvgText(args.vg, mm2px(11.f), y, tk.c_str(), NULL);
-        nvgFillColor(args.vg, sc);
-        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-        nvgText(args.vg, W - 4.f, y, st.c_str(), NULL);
-        if (prog >= 0.f) {
-            nvgBeginPath(args.vg);
-            nvgRect(args.vg, 4.f, R - 1.2f, (W - 8.f) * clamp(prog, 0.f, 1.f), 0.8f);
-            nvgFillColor(args.vg, module && module->playState == MS::P_ON ? cyan : red);
-            nvgFill(args.vg);
-        }
-        // LENGTH, before its choices on the last row
-        nvgFontSize(args.vg, 5.5f);
-        nvgFillColor(args.vg, oled::dim());
-        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgText(args.vg, mm2px(2.f), H - mm2px(0.8f + oled::kCellH * 0.5f), "LENGTH", NULL);
     }
 };
 
@@ -1154,40 +918,6 @@ struct SongMuteSq : OpaqueWidget {
     }
 };
 
-// REC, inside each row's label (a square as the MUTEs, in the record red): what the row's module plays now
-// goes into the selected pad at once (MS::captureRow). Lit for a moment when pressed.
-struct SongRecSq : OpaqueWidget {
-    MS* module = NULL;
-    int r = 0;
-    void drawLayer(const DrawArgs& args, int layer) override {   // the lit layer, over its label
-        if (layer != 1) return;
-        bool used = !module || module->rowId[r] >= 0;
-        bool on = module && module->recFlash[r] > 0.f;
-        if (module) module->recFlash[r] = std::max(0.f, module->recFlash[r] - 1.f / 60.f);
-        NVGcolor red = nvgRGB(0xff, 0x32, 0x28), col = used ? red : nvgRGB(0x3a, 0x3a, 0x3a);
-        nvgBeginPath(args.vg);
-        nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.4f);
-        nvgFillColor(args.vg, on ? col : kIdle);
-        nvgFill(args.vg);
-        nvgStrokeColor(args.vg, col);
-        nvgStrokeWidth(args.vg, on ? 1.2f : 0.8f);
-        nvgStroke(args.vg);
-        std::shared_ptr<window::Font> font = songFont();
-        if (!font) return;
-        nvgFontFaceId(args.vg, font->handle);
-        nvgFontSize(args.vg, 4.6f);
-        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFillColor(args.vg, on ? nvgRGB(0x10, 0x10, 0x10) : col);
-        nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.5f, "REC", NULL);
-    }
-    void onButton(const ButtonEvent& e) override {
-        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
-            if (module) module->captureRow(r);
-            e.consume(this);
-        }
-    }
-};
-
 // The JAM corner (bottom left), a square as wide as the row labels: MIDI IN and OUT, each a dim title over
 // its device (click to pick the port), over the square MIDI on / off button.
 static const float kJmLine = 3.2f, kJmSq = 6.6f;
@@ -1285,9 +1015,6 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
             RowLabel* l = createWidget<RowLabel>(mm2px(Vec(LX, GY + GP * r)));
             l->box.size = mm2px(Vec(LW, GS)); l->module = module; l->found = &found; l->r = r;
             addChild(l);
-            SongRecSq* rq = createWidget<SongRecSq>(mm2px(Vec(LX + LW - kRecIn, GY + GP * r + (GS - kRecSq) * 0.5f)));
-            rq->box.size = mm2px(Vec(kRecSq, kRecSq)); rq->module = module; rq->r = r;
-            addChild(rq);
             for (int s = 0; s < kSecs; s++) {
                 SongPad* p = createWidget<SongPad>(mm2px(Vec(GX + GP * s, GY + GP * r)));
                 p->box.size = mm2px(Vec(GS, GS)); p->module = module; p->found = &found; p->r = r; p->s = s;
@@ -1346,44 +1073,17 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
         addChild(sd);
         {
             const float w = (inner - 3.f * CG) / 4.f;
-            tint(x0, ctY, w, MS::RUN_PARAM, "RUN", oled::green(), MS::RUN_INPUT);
+            tint(x0, ctY, w, MS::RUN_PARAM, "RUN", oled::green(), -1);
             oled::Cell* rs = pcell(x0 + (w + CG), ctY, w, CH, MS::RESET_PARAM, "RESET");
-            rs->jack = MS::RESET_INPUT;
             if (module) rs->flash = &module->resetFlash;
             pcell(x0 + 2.f * (w + CG), ctY, w, CH, MS::QUANT_PARAM, "BAR")->setTo = 0;
             pcell(x0 + 3.f * (w + CG), ctY, w, CH, MS::QUANT_PARAM, "BEAT")->setTo = 1;
         }
 
-        // ---------------- RECORD: the take and the looper REC ----------------
-        const float RY = SY + SH + 2.f, RH = oled::kRow + 0.5f + 2.f * CH + GAP + 0.8f;
-        RecDisplay* rd = createWidget<RecDisplay>(mm2px(Vec(SX, RY)));
-        rd->box.size = mm2px(Vec(SW, RH)); rd->module = module;
-        addChild(rd);
         auto selCell = [=]() -> MS::Cell* { return module ? &module->cells[module->selSec][module->selRow] : NULL; };
-        {
-            const float y = RY + oled::kRow + 0.5f, w = (inner - 3.f * CG) / 4.f;
-            tint(x0, y, w, MS::REC_PARAM, "REC", nvgRGB(0xff, 0x32, 0x28), -1);
-            tint(x0 + (w + CG), y, w, MS::PLAY_PARAM, "PLAY", nvgRGB(0x5c, 0xc8, 0xf2), -1);
-            SongBtn* cl = btn(x0 + 2.f * (w + CG), y, w, CH, "CLEAR");
-            cl->fontSize = 6.f;
-            cl->lit = []() { return false; };
-            cl->press = [=](int) { if (module) module->clearTakeReq = true; };
-            // the selected cell's looper records as its section launches
-            SongBtn* lr = btn(x0 + 3.f * (w + CG), y, w, CH, "LOOPER REC");
-            lr->tint = nvgRGB(0xff, 0x32, 0x28);
-            lr->lit = [=]() { MS::Cell* c = selCell(); return c && c->loop == songlink::L_REC; };
-            lr->press = [=](int) { if (MS::Cell* c = selCell()) c->loop = c->loop == songlink::L_REC ? songlink::L_NONE : songlink::L_REC; };
-            // LENGTH: FREE 1 2 4 8 16 32
-            const float lx = x0 + 9.f, lw = (x0 + inner - lx - 6.f * CG) / 7.f, ly = y + CH + GAP;
-            static const char* const ln[7] = {"FREE", "1", "2", "4", "8", "16", "32"};
-            for (int i = 0; i < 7; i++) {
-                oled::Cell* c = pcell(lx + i * (lw + CG), ly, lw, CH, MS::LEN_PARAM, ln[i]);
-                c->setTo = i; c->fontSize = i == 0 ? 5.f : 6.f;
-            }
-        }
 
         // ---------------- CELL: the selected pad (pattern, KEEP, loop action, edits) ----------------
-        const float EY = RY + RH + 2.f, PS = 6.6f, PP = 7.4f, PH = PS + 0.8f + PS;
+        const float EY = SY + SH + 2.f, PS = 6.6f, PP = 7.4f, PH = PS + 0.8f + PS;
         const float EH = oled::kRow + 0.6f + PH + GAP + CH + GAP + CH + 0.8f;
         EdDisplay* ed = createWidget<EdDisplay>(mm2px(Vec(SX, EY)));
         ed->box.size = mm2px(Vec(SW, EH)); ed->module = module; ed->found = &found;
@@ -1400,14 +1100,16 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
                 q->box.size = mm2px(Vec(PS, PS)); q->module = module; q->p = p;
                 addChild(q);
             }
-            // LOOP: NONE PLAY STOP ONCE (REC is LOOPER REC, above)
+            // the looper (ECHO / FX / LOOP) as the section launches: NONE PLAY STOP REC ONCE
             y += PH + GAP;
-            static const char* const ln[4] = {"NO LOOP", "PLAY", "STOP", "ONCE"};
-            static const int la[4] = {songlink::L_NONE, songlink::L_PLAY, songlink::L_STOP, songlink::L_ONCE};
-            const float lw = (inner - 3.f * CG) / 4.f;
-            for (int i = 0; i < 4; i++) {
+            static const char* const ln[5] = {"NO LOOP", "PLAY", "STOP", "REC", "ONCE"};
+            static const int la[5] = {songlink::L_NONE, songlink::L_PLAY, songlink::L_STOP, songlink::L_REC, songlink::L_ONCE};
+            const float lw = (inner - 4.f * CG) / 5.f;
+            for (int i = 0; i < 5; i++) {
                 SongBtn* b = btn(x0 + i * (lw + CG), y, lw, CH, ln[i]);
                 int a = la[i];
+                if (i == 0) b->fontSize = 4.6f;
+                if (a == songlink::L_REC) b->tint = nvgRGB(0xff, 0x32, 0x28);
                 if (a == songlink::L_PLAY || a == songlink::L_ONCE) b->tint = oled::green();
                 b->lit = [=]() { MS::Cell* c = selCell(); return c ? c->loop == a : a == songlink::L_NONE; };
                 b->press = [=](int) { if (MS::Cell* c = selCell()) c->loop = a; };
@@ -1430,8 +1132,8 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
                 };
             }
         }
-        // BPM: on the left of the input row, the CLOCK / RUN / RESET jacks beside it
-        const float KY = 98.f, KX = SX + 8.f;
+        // BPM on the left of the input row, CLK IN beside it
+        const float KY = 98.f, KX = SX + 14.f;
         addChild(KnobTicks::create(Vec(KX, KY)));
         ParamWidget* kn = createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(KX, KY)), module, MS::BPM_PARAM);
         if (Knob* k = dynamic_cast<Knob*>(kn)) k->snap = true;
@@ -1446,9 +1148,7 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
             } else addInput(createInputCentered<SmallJack>(mm2px(Vec(x, y)), module, id));
         };
         const float JY = 118.f;
-        jack(SX + 23.f, KY, MS::CLOCK_INPUT, false, "CLK IN");
-        jack(SX + 37.f, KY, MS::RUN_INPUT, false, "RUN");
-        jack(SX + SW - 6.f, KY, MS::RESET_INPUT, false, "RESET");
+        jack(SX + SW - 14.f, KY, MS::CLOCK_INPUT, false, "CLK IN");
         static const char* const on[5] = {"CLOCK", "RUN", "RESET", "BAR", "SECT"};
         for (int i = 0; i < 5; i++) jack(SX + 5.5f + i * (SW - 11.f) / 4.f, JY, MS::CLOCK_OUTPUT + i, true, on[i]);
     }
@@ -1474,8 +1174,8 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
             static const char* const key[] = {
                 "Pad: select the cell", "MUTE + pad: mute the cell", "CLEAR + pad: clear the cell",
                 "Scene 1-8: launch A-H", "PREV / NEXT: launch the section before / after",
-                "A-H: mute the row", "SOLO + A-H: REC the row into the selected pad", "Touch strips: row levels",
-                "PLAY: RUN", "REC: record a take", "SONG: play the take", "TEMPO: RESET", "GRID: launch on bar / beat",
+                "A-H: mute the row", "Touch strips: row levels",
+                "PLAY: RUN", "REC: the selected cell's looper REC", "TEMPO: RESET", "GRID: launch on bar / beat",
                 "Arrows: move the selected cell", "DUPLICATE: copy the section to the next", "Knob: BPM"};
             for (const char* k : key) sub->addChild(createMenuLabel(k));
         }));
