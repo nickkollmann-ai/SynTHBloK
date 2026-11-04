@@ -8,7 +8,7 @@
   "modules": [
     {
       "slug": "SynTHBloK",
-      "name": "SynTHBloK-QUAD",
+      "name": "SynTHBloK-QUAD Quad Oscillator Synth",
       "description": "Quad-oscillator synth voice with filter, envelope, glide, accent and LFO",
       "tags": [
         "Synth voice",
@@ -26,7 +26,7 @@
     },
     {
       "slug": "SynTHBloKPoly",
-      "name": "SynTHBloK Poly Expander",
+      "name": "SynTHBloK-P Poly",
       "description": "Polyphonic unison engine for SynTHBloK",
       "tags": [
         "Synth voice",
@@ -40,7 +40,7 @@
     },
     {
       "slug": "SynTHBloKStereo",
-      "name": "SynTHBloK Stereo Expander",
+      "name": "SynTHBloK-S Stereo Phaser",
       "description": "Stereo width, tilt, air, glue, punch and clip, with analyzer",
       "tags": [
         "Effect",

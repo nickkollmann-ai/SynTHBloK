@@ -1,6 +1,7 @@
 #include "plugin.hpp"
 #include "SynTHBloK.hpp"
 #include "SynTHBloKMix24.hpp"
+#include "OledUi.hpp"
 
 // ============================================================================
 // SynTHBloKPoly — Hybrid Polyphonic Engine (Rack 2.6, C++11 compliant)
@@ -15,8 +16,6 @@ struct SynTHBloKPoly : Module {
     // ------------------------------------------------------------
     int  chorusMode       = 0;
     bool chorusButtonPrev = false;
-
-    float globalPitchSlew = 0.f;
 
     // ------------------------------------------------------------
     // PARAMS / INPUTS / OUTPUTS / LIGHTS
@@ -57,15 +56,16 @@ struct SynTHBloKPoly : Module {
         VCA_POLY_OUTPUT,
         FLT_POLY_OUTPUT,
         PITCH_POLY_OUTPUT,
-        
+
         OUTPUTS_LEN
     };
 
+    // (ids kept in this order so saved patches and the light layout stay the same)
     enum LightId {
         STATUS_LIGHT,
         DETUNE_LIGHT,
         CLAMP_LIGHT,
-        SAFEMODE_LIGHT,
+        SAFEMODE_LIGHT,     // the yellow light by V/OCT: unison detune active
 
         VOCT_IN_LIGHT,
         GATE_IN_LIGHT,
@@ -106,8 +106,8 @@ struct SynTHBloKPoly : Module {
     static constexpr int NUM_STACKS   = 11;
     static constexpr int MAX_STACK_SZ = 5;
 
-static const int stackSizes[NUM_STACKS];
-static const int stackIntervals[NUM_STACKS][MAX_STACK_SZ];
+    static const int stackSizes[NUM_STACKS];
+    static const int stackIntervals[NUM_STACKS][MAX_STACK_SZ];
 
     // ------------------------------------------------------------
     // Internal bus
@@ -126,17 +126,8 @@ static const int stackIntervals[NUM_STACKS][MAX_STACK_SZ];
     float smoothUnison = 0.f;
     float smoothSpread = 0.f;
 
-    float smoothEnv[MAX_VOICES] = {};
-    float smoothVca[MAX_VOICES] = {};
-    float smoothFlt[MAX_VOICES] = {};
-
-    float drift[MAX_VOICES]      = {};
-    float driftSpeed[MAX_VOICES] = {};
-
     float slewPitch[MAX_VOICES] = {};
     float envState[MAX_VOICES]  = {};
-    float vcaState[MAX_VOICES]  = {};
-    float fltState[MAX_VOICES]  = {};
 
     bool  gatePrev[MAX_VOICES]  = {};
     float envJitter[MAX_VOICES] = {};
@@ -144,9 +135,7 @@ static const int stackIntervals[NUM_STACKS][MAX_STACK_SZ];
     float oscPhase[MAX_VOICES] = {};
 
     EnvStage envStage[MAX_VOICES] = {};
-    float    envValue[MAX_VOICES] = {};
 
-    float smoothPitchInternal[MAX_VOICES] = {};
     float vcaSmooth[MAX_VOICES]           = {};
     float lp1[MAX_VOICES]                 = {};
     float lp2[MAX_VOICES]                 = {};
@@ -162,11 +151,14 @@ static const int stackIntervals[NUM_STACKS][MAX_STACK_SZ];
     float vcaCurveBias[MAX_VOICES]  = {};
     float panBias[MAX_VOICES]       = {};
 
+    dsp::SchmittTrigger resetTrig;
+    dsp::ClockDivider lightDivider;
+
     // ------------------------------------------------------------
     // Post‑mix chorus buffers
     // ------------------------------------------------------------
     static constexpr int CHORUS_TAPS = 4;
-    static constexpr int CHORUS_BUF  = 4096;
+    static constexpr int CHORUS_BUF  = 8192;   // 30 ms at 192 kHz is 5760 samples
 
     float chorusBufL[CHORUS_BUF] = {};
     float chorusBufR[CHORUS_BUF] = {};
@@ -179,32 +171,36 @@ static const int stackIntervals[NUM_STACKS][MAX_STACK_SZ];
     // ------------------------------------------------------------
     SynTHBloKPoly() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
+        lightDivider.setDivision(32);
 
         // -----------------------------
         // PARAMS
         // -----------------------------
-        configParam(MODE_PARAM, 0.f, 3.f, 0.f, "Chorus Mode");
-        configParam(UNISON_PARAM, 0.f, float(NUM_STACKS - 1), 0.f, "Unison Stack");
+        configButton(MODE_PARAM, "Chorus mode (OFF / LITE / WIDE / ENS)");
+        configSwitch(UNISON_PARAM, 0.f, float(NUM_STACKS - 1), 0.f, "Unison stack",
+            {"Single", "5th", "Octave", "5th + octave", "Two octaves", "Minor", "Major",
+             "Octave + 5th", "Stacked 5ths", "Stacked octaves", "Full"});
 
-        configParam(ATTACK_PARAM,  0.f, 0.5f, 0.01f, "Attack",  "s");
-        configParam(DECAY_PARAM,   0.f, 1.5f, 0.15f, "Decay",   "s");
-        configParam(SUSTAIN_PARAM, 0.f, 1.0f, 0.70f, "Sustain");
-        configParam(RELEASE_PARAM, 0.f, 1.5f, 0.20f, "Release", "s");
+        configParam(ATTACK_PARAM,  0.f, 0.5f, 0.01f, "Attack",  " s");
+        configParam(DECAY_PARAM,   0.f, 1.5f, 0.15f, "Decay",   " s");
+        configParam(SUSTAIN_PARAM, 0.f, 1.0f, 0.70f, "Sustain", "%", 0.f, 100.f);
+        configParam(RELEASE_PARAM, 0.f, 1.5f, 0.20f, "Release", " s");
 
-        configParam(TONE_PARAM, -1.f, 1.f, 0.f, "Tone");
-        configParam(CHORUS_AMOUNT_PARAM, 0.f, 1.f, 0.5f, "Chorus Amount");
-        configParam(POLY_VOL_PARAM, 0.f, 1.f, 1.f, "Poly Volume Trim");
+        // cutoff of the voice filter: 450 Hz * 2^(3 x)
+        configParam(TONE_PARAM, -1.f, 1.f, 0.f, "Tone (voice filter cutoff)", " Hz", 8.f, 450.f);
+        configParam(CHORUS_AMOUNT_PARAM, 0.f, 1.f, 0.5f, "Chorus amount", "%", 0.f, 100.f);
+        configParam(POLY_VOL_PARAM, 0.f, 1.f, 1.f, "Gain", "%", 0.f, 100.f);
 
         // -----------------------------
         // INPUTS
         // -----------------------------
         configInput(POLY_VOCT_INPUT,   "Poly V/Oct");
         configInput(POLY_GATE_INPUT,   "Poly Gate");
-        configInput(RESET_INPUT,       "Reset");
+        configInput(RESET_INPUT,       "Reset (restarts every oscillator)");
         configInput(SPREAD_CV_INPUT,   "Spread CV");
-        configInput(POLY_ENV_IN_INPUT, "Poly Env In");
-        configInput(POLY_FLT_IN_INPUT, "Poly Filter In");
-        configInput(POLY_VCA_CV_INPUT, "Poly VCA CV");
+        configInput(POLY_ENV_IN_INPUT, "Poly Env In (replaces the ADSR, 0-10 V)");
+        configInput(POLY_FLT_IN_INPUT, "Poly Filter In (audio into each voice filter)");
+        configInput(POLY_VCA_CV_INPUT, "VCA CV (0-10 V)");
 
         // -----------------------------
         // OUTPUTS
@@ -219,42 +215,24 @@ static const int stackIntervals[NUM_STACKS][MAX_STACK_SZ];
         // -----------------------------
         // LIGHTS
         // -----------------------------
-        configLight(STATUS_LIGHT, "Status");
-        configLight(DETUNE_LIGHT, "Detune Activity");
-        configLight(CLAMP_LIGHT,  "Pitch Clamp");
-        
-        configLight(SAFEMODE_LIGHT, "Safe Mode");
-        configLight(MODE_LIGHT, "Mode Button LED");
-
-        configLight(VOCT_IN_LIGHT,  "V/Oct Input");
-        configLight(GATE_IN_LIGHT,  "Gate Input");
-        configLight(RESET_IN_LIGHT, "Reset Input");
-        configLight(SPREAD_IN_LIGHT,"Spread CV Input");
-
-        configLight(ENV_LIGHT,   "Env Output");
-        configLight(VCA_LIGHT,   "VCA Output");
-        configLight(FLT_LIGHT,   "Filter Output");
-        configLight(PITCH_LIGHT, "Pitch Output");
+        configLight(STATUS_LIGHT, "Gate");
+        configLight(CLAMP_LIGHT,  "Pitch clamp (V/OCT past +-3 V)");
+        configLight(SAFEMODE_LIGHT, "Unison detune");
+        configLight(MODE_LIGHT, "Chorus mode");
 
         configLight(ATTACK_LIGHT,  "Attack Stage");
         configLight(DECAY_LIGHT,   "Decay Stage");
         configLight(SUSTAIN_LIGHT, "Sustain Stage");
         configLight(RELEASE_LIGHT, "Release Stage");
 
-        configLight(KNOB_CHORUS_LIGHT, "Chorus Knob Halo");
-
         // -----------------------------
         // Per‑voice randomization
         // -----------------------------
         for (int v = 0; v < MAX_VOICES; ++v) {
-            driftSpeed[v] = 0.f;
-            drift[v]      = 0.f;
-
             envJitter[v]  = 1.f;
             oscPhase[v]   = random::uniform();
 
             envStage[v] = STAGE_IDLE;
-            envValue[v] = 0.f;
 
             voiceCardBias[v] = (random::uniform() - 0.5f) * 0.001f;
 
@@ -276,11 +254,8 @@ static const int stackIntervals[NUM_STACKS][MAX_STACK_SZ];
             chorusPhaseOffset[i] = random::uniform();
         }
     }
-    
-    
-    // ------------------------------------------------------------
-    // PROCESS
-    // ------------------------------------------------------------
+
+
     // Save / load the chorus mode with the patch (it is not a param, so it was lost on reload)
     json_t* dataToJson() override {
         json_t* rootJ = json_object();
@@ -320,8 +295,9 @@ static const int stackIntervals[NUM_STACKS][MAX_STACK_SZ];
             {false, VCA_POLY_OUTPUT, 18.f, 50.9f},
             {false, FLT_POLY_OUTPUT, 28.f, 50.9f},
             {false, PITCH_POLY_OUTPUT, 38.f, 50.9f},
-            {false, POLY_AUDIO_L_OUTPUT, 28.f, 109.9f},
-            {false, POLY_AUDIO_R_OUTPUT, 38.f, 109.9f}
+            // under the L / R jacks (above them they sat on the labels)
+            {false, POLY_AUDIO_L_OUTPUT, 28.f, 120.4f},
+            {false, POLY_AUDIO_R_OUTPUT, 38.f, 120.4f}
         };
         n = (int)(sizeof(a) / sizeof(a[0])); return a;
     }
@@ -339,34 +315,39 @@ static const int stackIntervals[NUM_STACKS][MAX_STACK_SZ];
         b = C[i][2] + (C[i + 1][2] - C[i][2]) * f;
     }
 
-    inline void setParamLED(int baseId, float x) {
-        float w = clamp(x, 0.f, 1.f);
-        float blue   = clamp(1.f - (w * 2.f), 0.f, 1.f);
-        float red    = clamp((w - 0.5f) * 2.f, 0.f, 1.f);
-        float yellow = clamp(1.f - fabsf(w - 0.5f) * 2.f, 0.f, 1.f);
-        float rr, gg, bb; ledRamp(w, rr, gg, bb);
-        lights[baseId + 0].setSmoothBrightness(rr, 1);
-        lights[baseId + 1].setSmoothBrightness(gg, 1);
-        lights[baseId + 2].setSmoothBrightness(bb, 1);
+    inline void setParamLED(int baseId, float x, float dt) {
+        float rr, gg, bb; ledRamp(clamp(x, 0.f, 1.f), rr, gg, bb);
+        lights[baseId + 0].setSmoothBrightness(rr, dt);
+        lights[baseId + 1].setSmoothBrightness(gg, dt);
+        lights[baseId + 2].setSmoothBrightness(bb, dt);
     }
-    inline void setSignalLED(int baseId, float v) {
+    inline void setSignalLED(int baseId, float v, float dt) {
         float n = clamp(v / 5.f, -1.f, 1.f);
         if (n < 0.f) {
-            lights[baseId + 2].setSmoothBrightness(-n, 1);
-            lights[baseId + 0].setSmoothBrightness(0.f, 1);
-            lights[baseId + 1].setSmoothBrightness(0.f, 1);
+            lights[baseId + 2].setSmoothBrightness(-n, dt);
+            lights[baseId + 0].setSmoothBrightness(0.f, dt);
+            lights[baseId + 1].setSmoothBrightness(0.f, dt);
         } else {
-            lights[baseId + 0].setSmoothBrightness(n, 1);
-            lights[baseId + 1].setSmoothBrightness(n * 0.6f, 1);
-            lights[baseId + 2].setSmoothBrightness(0.f, 1);
+            lights[baseId + 0].setSmoothBrightness(n, dt);
+            lights[baseId + 1].setSmoothBrightness(n * 0.6f, dt);
+            lights[baseId + 2].setSmoothBrightness(0.f, dt);
         }
     }
-    inline void updateTinyLEDs() {
+    inline void updateTinyLEDs(float dt) {
         int n; const LedK* k = kLeds(n);
-        for (int i = 0; i < n; i++) setParamLED(KNOB_LED + i * 3, paramQuantities[k[i].id]->getScaledValue());
+        for (int i = 0; i < n; i++) setParamLED(KNOB_LED + i * 3, paramQuantities[k[i].id]->getScaledValue(), dt);
         const LedJ* j = jLeds(n);
         for (int i = 0; i < n; i++)
-            setSignalLED(JACK_LED + i * 3, j[i].in ? inputs[j[i].id].getVoltage() : outputs[j[i].id].getVoltage());
+            setSignalLED(JACK_LED + i * 3, j[i].in ? inputs[j[i].id].getVoltage() : outputs[j[i].id].getVoltage(), dt);
+    }
+
+    void onReset() override {
+        chorusMode = 0;
+        for (int v = 0; v < MAX_VOICES; ++v) {
+            envState[v] = vcaSmooth[v] = lp1[v] = lp2[v] = 0.f;
+            envStage[v] = STAGE_IDLE;
+            gatePrev[v] = false;
+        }
     }
 
     void process(const ProcessArgs& args) override {
@@ -383,10 +364,12 @@ static const int stackIntervals[NUM_STACKS][MAX_STACK_SZ];
         chorusButtonPrev = pressed;
 
         // --------------------------------------------------------
-        // Clear internal bus
+        // RESET: restart every oscillator together
         // --------------------------------------------------------
-        localBusPoly.L[0] = 0.f;
-        localBusPoly.R[0] = 0.f;
+        if (resetTrig.process(inputs[RESET_INPUT].getVoltage(), 0.1f, 1.f)) {
+            for (int v = 0; v < MAX_VOICES; ++v)
+                oscPhase[v] = 0.f;
+        }
 
         // --------------------------------------------------------
         // UNISON (stepped → normalized)
@@ -399,9 +382,8 @@ static const int stackIntervals[NUM_STACKS][MAX_STACK_SZ];
             : 0.f;
 
         smoothUnison += (unisonNorm - smoothUnison) * 0.15f;
-float chorusAmt = params[CHORUS_AMOUNT_PARAM].getValue();
-smoothChorus += (chorusAmt - smoothChorus) * 0.15f;
-lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
+        float chorusAmt = params[CHORUS_AMOUNT_PARAM].getValue();
+        smoothChorus += (chorusAmt - smoothChorus) * 0.15f;
 
         // --------------------------------------------------------
         // Spread CV smoothing
@@ -412,9 +394,9 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
         smoothSpread += (rawSpread - smoothSpread) * 0.15f;
 
         // --------------------------------------------------------
-        // Voice allocation
+        // Voice allocation: as many voices as the wider of V/OCT and GATE
         // --------------------------------------------------------
-        int inVoices = inputs[POLY_VOCT_INPUT].getChannels();
+        int inVoices = std::max(inputs[POLY_VOCT_INPUT].getChannels(), inputs[POLY_GATE_INPUT].getChannels());
         if (inVoices <= 0)
             inVoices = 1;
 
@@ -430,15 +412,6 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
         outputs[POLY_AUDIO_R_OUTPUT].setChannels(1);
 
         // --------------------------------------------------------
-        // Safe mode (pitch slew protection)
-        // --------------------------------------------------------
-        bool safeMode = false;
-        if (inputs[POLY_VOCT_INPUT].isConnected() &&
-            outputs[PITCH_POLY_OUTPUT].isConnected()) {
-            safeMode = true;
-        }
-
-        // --------------------------------------------------------
         // Global VCA CV
         // --------------------------------------------------------
         float vcaGlobalMod = 1.f;
@@ -451,24 +424,22 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
         float detuneActivity = 0.f;
 
         // --------------------------------------------------------
-        // ADSR parameters
+        // ADSR: each stage takes about its knob time
         // --------------------------------------------------------
         float A = params[ATTACK_PARAM].getValue();
         float D = params[DECAY_PARAM].getValue();
         float S = params[SUSTAIN_PARAM].getValue();
-        float R = params[RELEASE_PARAM].getValue();
+        float R = std::max(params[RELEASE_PARAM].getValue(), 0.01f);
 
-        const float A_min = 0.000f;
-        const float D_min = 0.000f;
-        const float S_min = 0.000f;
-        const float R_min = 0.010f;
-
-        A = std::max(A, A_min);
-        D = std::max(D, D_min);
-        S = std::max(S, S_min);
-        R = std::max(R, R_min);
+        // attack heads for 1.2 so it reaches 1 in A seconds; decay / release fall ~95% in D / R
+        float aCoeff = (A > 0.0005f) ? 1.f - std::exp(-dt * 1.792f / A) : 1.f;
+        float dCoeff = (D > 0.0005f) ? std::exp(-dt * 3.f / D) : 0.f;
+        float rCoeff = std::exp(-dt * 3.f / R);
 
         int stackCount = stackSizes[preset];
+
+        // voice filter cutoff from TONE: 450 Hz * 2^(3 tone), 56 Hz .. 3.6 kHz
+        float toneKnob = params[TONE_PARAM].getValue();
 
         // --------------------------------------------------------
         // Stereo accumulators
@@ -476,38 +447,37 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
         float mixL = 0.f;
         float mixR = 0.f;
 
+        bool useExternalEnv = inputs[POLY_ENV_IN_INPUT].isConnected();
+
         // --------------------------------------------------------
         // PER‑VOICE LOOP
         // --------------------------------------------------------
         for (int v = 0; v < voices; ++v) {
 
-            int ch = (v < inVoices) ? v : (inVoices - 1);
+            int ch = v;
 
             // ----------------------------------------------------
             // BASE PITCH
             // ----------------------------------------------------
             float basePitch = inputs[POLY_VOCT_INPUT].getPolyVoltage(ch);
+            if (basePitch < -3.f || basePitch > 3.f) anyClamp = true;
             basePitch = clamp(basePitch, -6.f, 6.f);
 
-            float slewAmt = safeMode ? 0.05f : 0.15f;
-            globalPitchSlew += (basePitch - globalPitchSlew) * slewAmt;
-            float p = globalPitchSlew;
+            // each voice slews on its own (one shared slew dragged every voice toward the previous one)
+            slewPitch[v] += (basePitch - slewPitch[v]) * 0.15f;
+            float p = slewPitch[v];
 
             // ----------------------------------------------------
-            // UNISON DETUNE
+            // UNISON DETUNE (spread across the voices)
             // ----------------------------------------------------
-            float detuneVolts = 0.f;
-            if (!safeMode) {
-                float x = (voices > 1)
-                    ? (v - (voices - 1) * 0.5f) / ((voices - 1) * 0.5f)
-                    : 0.f;
+            float x = (voices > 1)
+                ? (v - (voices - 1) * 0.5f) / ((voices - 1) * 0.5f)
+                : 0.f;
 
-                float detuneCents = x * (smoothSpread * 14.f + smoothUnison * 10.f);
-                detuneVolts = detuneCents / 1200.f;
-                detuneActivity += std::fabs(detuneCents);
-            }
+            float detuneCents = x * (smoothSpread * 14.f + smoothUnison * 10.f);
+            detuneActivity += std::fabs(detuneCents);
 
-            p += detuneVolts;
+            p += detuneCents / 1200.f;
             p += voiceCardBias[v];
             p = clamp(p, -3.f, 3.f);
             lastPitch[v] = p;
@@ -515,8 +485,7 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
             // ----------------------------------------------------
             // GATE + ENV
             // ----------------------------------------------------
-            float gate = inputs[POLY_GATE_INPUT].getVoltage() > 1.f ? 1.f : 0.f;
-            bool gateNow  = gate > 0.f;
+            bool gateNow  = inputs[POLY_GATE_INPUT].getPolyVoltage(v) > 1.f;
             bool gateRise = gateNow && !gatePrev[v];
             gatePrev[v]   = gateNow;
 
@@ -524,77 +493,50 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
                 envJitter[v] = 1.f + (random::uniform() - 0.5f) * 0.02f;
             }
 
-            bool useExternalEnv = inputs[POLY_ENV_IN_INPUT].isConnected();
+            float& env = envState[v];
+            EnvStage& st = envStage[v];
             if (useExternalEnv) {
-                float eg = inputs[POLY_ENV_IN_INPUT].getPolyVoltage(ch);
-                eg = clamp(eg / 10.f, 0.f, 1.f);
-                envState[v] = eg;
+                env = clamp(inputs[POLY_ENV_IN_INPUT].getPolyVoltage(ch) / 10.f, 0.f, 1.f);
+                st = gateNow ? STAGE_SUSTAIN : STAGE_IDLE;
             }
             else {
-                if (gateNow) {
-                    if (envState[v] < 1.f) {
-                        float coeff = (A > 0.f) ? std::exp(-dt / A) : 0.f;
-                        envState[v] = envState[v] * coeff + (1.f - coeff);
-                    }
-                    else {
-                        float coeff = (D > 0.f) ? std::exp(-dt / D) : 0.f;
-                        envState[v] = envState[v] * coeff + S * (1.f - coeff);
-                    }
-                }
-                else {
-                    float coeff = (R > 0.f) ? std::exp(-dt / R) : 0.f;
-                    envState[v] = envState[v] * coeff;
-                }
-            }
+                if (gateRise)
+                    st = STAGE_ATTACK;
+                else if (!gateNow && st != STAGE_IDLE)
+                    st = STAGE_RELEASE;
 
-            envState[v] = clamp(envState[v], 0.f, 1.f);
-            vcaState[v] = envState[v];
-
-            // ----------------------------------------------------
-            // ADSR STAGE MACHINE
-            // ----------------------------------------------------
-            {
-                EnvStage s = envStage[v];
-                float env  = envState[v];
-
-                if (gateNow) {
-                    if (s == STAGE_IDLE || s == STAGE_RELEASE) {
-                        s = STAGE_ATTACK;
-                    }
-                    else if (s == STAGE_ATTACK && env >= 0.999f) {
-                        s = STAGE_DECAY;
-                    }
-                    else if (s == STAGE_DECAY && env <= S) {
+                switch (st) {
+                    case STAGE_ATTACK:
+                        env += (1.2f - env) * aCoeff;
+                        if (env >= 1.f) { env = 1.f; st = STAGE_DECAY; }
+                        break;
+                    case STAGE_DECAY:
+                        env = S + (env - S) * dCoeff;
+                        if (std::fabs(env - S) < 0.001f) { env = S; st = STAGE_SUSTAIN; }
+                        break;
+                    case STAGE_SUSTAIN:
                         env = S;
-                        envState[v] = S;
-                        s = STAGE_SUSTAIN;
-                    }
-                }
-                else {
-                    if (s == STAGE_ATTACK || s == STAGE_DECAY || s == STAGE_SUSTAIN) {
-                        env = envState[v];
-                        envState[v] = env;
-                        s = STAGE_RELEASE;
-                    }
-                    else if (s == STAGE_RELEASE && env <= 0.001f) {
+                        break;
+                    case STAGE_RELEASE:
+                        env *= rCoeff;
+                        if (env < 0.0005f) {
+                            env = 0.f; st = STAGE_IDLE;
+                            lp1[v] = 0.f;
+                            lp2[v] = 0.f;
+                        }
+                        break;
+                    default:
                         env = 0.f;
-                        envState[v] = 0.f;
-                        s = STAGE_IDLE;
-
-                        lp1[v] = 0.f;
-                        lp2[v] = 0.f;
-                    }
+                        break;
                 }
-
-                envStage[v] = s;
-                envValue[v] = env;
             }
+            env = clamp(env, 0.f, 1.f);
 
             // ----------------------------------------------------
-            // VCA smoothing + curve
+            // VCA smoothing (~1 ms, against clicks) + curve
             // ----------------------------------------------------
-            float vcaCoeff = 0.001f;
-            vcaSmooth[v] = vcaSmooth[v] * (1.f - vcaCoeff) + vcaState[v] * vcaCoeff;
+            float vcaCoeff = std::min(dt * 1000.f, 1.f);
+            vcaSmooth[v] += (env - vcaSmooth[v]) * vcaCoeff;
 
             float vcaCurve = 1.5f * vcaCurveBias[v];
             float vca = powf(vcaSmooth[v], vcaCurve) * envJitter[v] * vcaGlobalMod;
@@ -638,15 +580,15 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
             float voiceIn = osc;
             if (inputs[POLY_FLT_IN_INPUT].isConnected()) {
                 float ext = inputs[POLY_FLT_IN_INPUT].getPolyVoltage(ch);
-                voiceIn += ext * 0.4f;
+                voiceIn += ext * 0.08f;          // +-5 V audio -> about the oscillator's level
             }
 
             // ----------------------------------------------------
-            // SIMPLE LP FILTER
+            // VOICE LP FILTER (TONE sets the cutoff)
             // ----------------------------------------------------
-            float cutoffMod = 0.f;
-            float cutoffHz = (450.f + cutoffMod * 9000.f) * filtBias[v];
-            cutoffHz = clamp(cutoffHz, 80.f, 16000.f);
+            float tone = clamp(toneKnob + toneBiasV[v], -1.f, 1.f);
+            float cutoffHz = 450.f * std::exp2(tone * 3.f) * filtBias[v];
+            cutoffHz = clamp(cutoffHz, 40.f, std::min(16000.f, 0.45f * sampleRate));
             float c = expf(-2.f * M_PI * cutoffHz * dt);
 
             lp1[v] = lp1[v] * c + voiceIn * (1.f - c);
@@ -671,11 +613,8 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
             voiceOut = tanhf(padMix * 1.10f);
 
             // ----------------------------------------------------
-            // TONE MACRO
+            // TONE colour: warmer below centre, brighter above
             // ----------------------------------------------------
-            float tone = params[TONE_PARAM].getValue() + toneBiasV[v];
-            tone = clamp(tone, -1.f, 1.f);
-
             float warmTone   = tanhf(voiceOut * 0.8f);
             float brightTone = tanhf(voiceOut * 1.35f);
 
@@ -689,8 +628,7 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
             // ----------------------------------------------------
             // PER‑VOICE DRIVE
             // ----------------------------------------------------
-            float tilt = (1.f - 0.012f * v) * (0.82f + 0.18f * cutoffMod);
-            voiceOut *= tilt;
+            voiceOut *= (1.f - 0.012f * v) * 0.82f;
 
             float drive = 1.08f + 0.025f * v;
             float satVoice = tanhf(voiceOut * drive);
@@ -699,7 +637,7 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
             // Apply VCA
             voiceOut *= vca;
 
-            lastEnv[v] = envState[v];
+            lastEnv[v] = env;
             lastVca[v] = vca;
             lastFlt[v] = voiceOut;
 
@@ -724,14 +662,8 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
             float pan = (panNorm + panBias[v]) * 0.6f * width;
             pan = clamp(pan, -0.9f, 0.9f);
 
-            float lGain = 0.5f - pan * 0.5f;
-            float rGain = 0.5f + pan * 0.5f;
-
-            float Lvoice = voiceOut * lGain;
-            float Rvoice = voiceOut * rGain;
-
-            mixL += Lvoice;
-            mixR += Rvoice;
+            mixL += voiceOut * (0.5f - pan * 0.5f);
+            mixR += voiceOut * (0.5f + pan * 0.5f);
 
             // ----------------------------------------------------
             // POLY TAPS
@@ -743,45 +675,19 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
         }
 
         // --------------------------------------------------------
-        // MONO‑CORE RECOMBINATION
+        // MONO‑CORE: warm the mid, keep the sides (both at the same, voice-normalized level)
         // --------------------------------------------------------
-        float monoRaw = 0.5f * (mixL + mixR);
-
-        int active = activeVoices > 0 ? activeVoices : 1;
-        float norm = 1.f / std::sqrt((float)active);
-
-        float mono = monoRaw * norm;
-
-        {
-            float warm = tanhf(mono * 0.9f);
-            const float blend = 0.22f;
-            mono = mono * (1.f - blend) + warm * blend;
-        }
-
-        mono *= 1.30f;
-
+        float norm = 1.f / std::sqrt((float)std::max(voices, 1));
         mixL *= norm;
         mixR *= norm;
 
-        {
-            float warmL = tanhf(mixL * 0.9f);
-            float warmR = tanhf(mixR * 0.9f);
-            const float sBlend = 0.18f;
-            mixL = mixL * (1.f - sBlend) + warmL * sBlend;
-            mixR = mixR * (1.f - sBlend) + warmR * sBlend;
-        }
+        float mid = 0.5f * (mixL + mixR);
+        float side = 0.5f * (mixL - mixR);
+        mid = mid * 0.78f + tanhf(mid * 0.9f) * 0.22f;
 
-        // --------------------------------------------------------
-        // MONO‑CORE TONE + SIDE REBUILD
-        // --------------------------------------------------------
-        float sideL = mixL - monoRaw;
-        float sideR = mixR - monoRaw;
-
-        float coreL = mono;
-        float coreR = mono;
-
-        mixL = coreL + sideL;
-        mixR = coreR + sideR;
+        // L/R were each half the voice level (pan gains sum to 1): bring them back up
+        mixL = (mid + side) * 2.f;
+        mixR = (mid - side) * 2.f;
 
         // --------------------------------------------------------
         // POST‑MIX CHORUS (B1/C1)
@@ -806,13 +712,8 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
                     tapsUsed   = 4;
                     depthScale = 0.6f;
                 }
-                else {
-                    tapsUsed   = 4;
-                    depthScale = 1.0f;
-                }
 
-                float depthMsBase = 3.0f;
-                float depthMs     = depthMsBase * depthScale;
+                float depthMs = 3.0f * depthScale;
 
                 chorusBufL[chorusWrite] = mixL;
                 chorusBufR[chorusWrite] = mixR;
@@ -823,8 +724,8 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
                 for (int i = 0; i < tapsUsed; ++i) {
 
                     chorusPhase[i] += rates[i] * dt;
-                    chorusPhase[i] = fmod(chorusPhase[i], 1.f);
-                                        float ph = chorusPhase[i] + chorusPhaseOffset[i];
+                    chorusPhase[i] -= std::floor(chorusPhase[i]);
+                    float ph = chorusPhase[i] + chorusPhaseOffset[i];
                     ph -= std::floor(ph);
 
                     float mod = sinf(2.f * M_PI * ph);
@@ -842,22 +743,12 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
                     int i1 = (i0 + 1) % CHORUS_BUF;
                     float frac = readPos - (float)i0;
 
-                    float l0 = chorusBufL[i0];
-                    float l1 = chorusBufL[i1];
-                    float r0 = chorusBufR[i0];
-                    float r1 = chorusBufR[i1];
-
-                    float lTap = l0 + (l1 - l0) * frac;
-                    float rTap = r0 + (r1 - r0) * frac;
-
-                    wetL += lTap;
-                    wetR += rTap;
+                    wetL += chorusBufL[i0] + (chorusBufL[i1] - chorusBufL[i0]) * frac;
+                    wetR += chorusBufR[i0] + (chorusBufR[i1] - chorusBufR[i0]) * frac;
                 }
 
-                if (tapsUsed > 0) {
-                    wetL /= (float)tapsUsed;
-                    wetR /= (float)tapsUsed;
-                }
+                wetL /= (float)tapsUsed;
+                wetR /= (float)tapsUsed;
 
                 float mixDepth = amount * 0.6f;
 
@@ -871,91 +762,11 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
         }
 
         // --------------------------------------------------------
-        updateTinyLEDs();
-        // STATUS LIGHTS
+        // OUTPUT STAGE: soft limit to +-5 V (a second tanh used to squash it to +-1 V)
         // --------------------------------------------------------
-        bool gateHigh = inputs[POLY_GATE_INPUT].getVoltage() > 1.f;
-        lights[STATUS_LIGHT].setBrightness(gateHigh ? 1.f : 0.f);
-
-        float detuneLevel = (voices > 0) ? detuneActivity / (voices * 6.f) : 0.f;
-        lights[DETUNE_LIGHT].setBrightness(detuneLevel);
-
-        lights[CLAMP_LIGHT].setBrightness(anyClamp ? 1.f : 0.f);
-        lights[SAFEMODE_LIGHT].setBrightness(safeMode ? 1.f : 0.f);
-
-        // Input activity lights
-        auto dim = [](float x) { return clamp(x * 0.6f, 0.f, 0.6f); };
-
-        lights[VOCT_IN_LIGHT].setBrightness(dim(fabsf(inputs[POLY_VOCT_INPUT].getVoltage()) / 5.f));
-        lights[GATE_IN_LIGHT].setBrightness(dim(inputs[POLY_GATE_INPUT].getVoltage() > 1.f ? 1.f : 0.f));
-        lights[RESET_IN_LIGHT].setBrightness(dim(inputs[RESET_INPUT].getVoltage() > 1.f ? 1.f : 0.f));
-        lights[SPREAD_IN_LIGHT].setBrightness(dim(fabsf(inputs[SPREAD_CV_INPUT].getVoltage()) / 5.f));
-
-        // Poly tap RGB lights
-        auto setRGB = [&](int base, float v) {
-            float n = clamp(v / 5.f, -1.f, 1.f);
-
-            float r = 0.f, g = 0.f, b = 0.f;
-
-            if (n < -0.02f) {
-                r = -n;
-            }
-            else if (n > 0.02f) {
-                g = n;
-            }
-            else {
-                r = 0.25f;
-                g = 0.25f;
-            }
-
-            lights[base + 0].setBrightness(r);
-            lights[base + 1].setBrightness(g);
-            lights[base + 2].setBrightness(b);
-        };
-
-        if (activeVoices > 0) {
-            setRGB(ENV_LIGHT,   outputs[ENV_POLY_OUTPUT].getVoltage(0));
-            setRGB(VCA_LIGHT,   outputs[VCA_POLY_OUTPUT].getVoltage(0));
-            setRGB(FLT_LIGHT,   outputs[FLT_POLY_OUTPUT].getVoltage(0));
-            setRGB(PITCH_LIGHT, outputs[PITCH_POLY_OUTPUT].getVoltage(0));
-        }
-
-        // --------------------------------------------------------
-        // ADSR STAGE LIGHTS
-        // --------------------------------------------------------
-        int   activeVoice = 0;
-        float maxEnv      = 0.f;
-        for (int v = 0; v < voices; ++v) {
-            if (envValue[v] > maxEnv) {
-                maxEnv      = envValue[v];
-                activeVoice = v;
-            }
-        }
-
-        lights[ATTACK_LIGHT].setSmoothBrightness(
-            envStage[activeVoice] == STAGE_ATTACK ? 1.f : 0.f, args.sampleTime);
-
-        lights[DECAY_LIGHT].setSmoothBrightness(
-            envStage[activeVoice] == STAGE_DECAY ? 1.f : 0.f, args.sampleTime);
-
-        lights[SUSTAIN_LIGHT].setSmoothBrightness(
-            envStage[activeVoice] == STAGE_SUSTAIN ? 1.f : 0.f, args.sampleTime);
-
-        lights[RELEASE_LIGHT].setSmoothBrightness(
-            envStage[activeVoice] == STAGE_RELEASE ? 1.f : 0.f, args.sampleTime);
-
-        // --------------------------------------------------------
-        // OUTPUT STAGE
-        // --------------------------------------------------------
-        float outL = tanhf(mixL * 4.f) * 5.f;
-        float outR = tanhf(mixR * 4.f) * 5.f;
-
-        outL = tanhf(outL);
-        outR = tanhf(outR);
-
         float volTrim = params[POLY_VOL_PARAM].getValue();
-        outL *= volTrim;
-        outR *= volTrim;
+        float outL = 5.f * tanhf(mixL * 1.2f) * volTrim;
+        float outR = 5.f * tanhf(mixR * 1.2f) * volTrim;
 
         outputs[POLY_AUDIO_L_OUTPUT].setVoltage(outL);
         outputs[POLY_AUDIO_R_OUTPUT].setVoltage(outR);
@@ -966,11 +777,42 @@ lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
         localBusPoly.L[0] = outL;
         localBusPoly.R[0] = outR;
 
-        bool modePressed = params[MODE_PARAM].getValue() > 0.5f;
-        lights[MODE_LIGHT].setBrightness(modePressed ? 1.f : 0.f);
+        // --------------------------------------------------------
+        // LIGHTS (every 32 samples)
+        // --------------------------------------------------------
+        float detuneLevel = clamp(detuneActivity / (std::max(voices, 1) * 6.f), 0.f, 1.f);
+        if (!lightDivider.process())
+            return;
+        float ldt = dt * lightDivider.getDivision();
 
+        updateTinyLEDs(ldt);
+        lights[KNOB_CHORUS_LIGHT].setBrightness(smoothChorus);
+
+        bool gateHigh = false;
+        for (int v = 0; v < voices; ++v)
+            gateHigh = gateHigh || gatePrev[v];
+        lights[STATUS_LIGHT].setBrightness(gateHigh ? 1.f : 0.f);
+
+        lights[CLAMP_LIGHT].setBrightness(anyClamp ? 1.f : 0.f);
+        lights[SAFEMODE_LIGHT].setBrightness(detuneLevel);
+        lights[MODE_LIGHT].setBrightness(chorusMode == 0 ? 0.f : 0.35f + 0.65f * chorusMode / 3.f);
+
+        // ADSR stage lights follow the loudest voice
+        int   activeVoice = 0;
+        float maxEnv      = -1.f;
+        for (int v = 0; v < voices; ++v) {
+            if (envState[v] > maxEnv) {
+                maxEnv      = envState[v];
+                activeVoice = v;
+            }
+        }
+        EnvStage st = envStage[activeVoice];
+        lights[ATTACK_LIGHT].setSmoothBrightness(st == STAGE_ATTACK ? 1.f : 0.f, ldt);
+        lights[DECAY_LIGHT].setSmoothBrightness(st == STAGE_DECAY ? 1.f : 0.f, ldt);
+        lights[SUSTAIN_LIGHT].setSmoothBrightness(st == STAGE_SUSTAIN ? 1.f : 0.f, ldt);
+        lights[RELEASE_LIGHT].setSmoothBrightness(st == STAGE_RELEASE ? 1.f : 0.f, ldt);
     }
-}; 
+};
 
 // ============================================================================
 // C++11 constexpr DEFINITIONS (REQUIRED)
@@ -994,194 +836,59 @@ const int SynTHBloKPoly::stackIntervals[SynTHBloKPoly::NUM_STACKS][SynTHBloKPoly
     { 0,  3,  7, 12, 24}
 };
 
-
-
-// end of struct SynTHBloKPoly
 // ============================================================================
-// UNISON DISPLAY
+// INFO OLED: unison stack | chorus mode | chorus amount | voices (OledUi standard)
 // ============================================================================
-struct UnisonDisplay : TransparentWidget {
-    SynTHBloKPoly* module;
+struct PolyOled : TransparentWidget {
+    SynTHBloKPoly* module = NULL;
 
-    // C++11: declaration only
-    static const char* labels[SynTHBloKPoly::NUM_STACKS];
-
-    UnisonDisplay(SynTHBloKPoly* m) {
-        module = m;
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer == 1) drawOled(args);
+        Widget::drawLayer(args, layer);
     }
 
-    void draw(const DrawArgs& args) override {
-        if (!module) return;
+    void drawOled(const DrawArgs& args) {
+        static const char* stacks[SynTHBloKPoly::NUM_STACKS] = {
+            "SING", "5TH", "OCT", "5+8", "OCT2", "MIN", "MAJ", "O+5", "STK5", "STK8", "FULL"};
+        static const char* modes[4] = {"OFF", "LITE", "WIDE", "ENS"};
 
-        NVGcontext* vg = args.vg;
+        // the module browser preview shows the defaults
+        int preset = 0, mode = 0, voices = 1;
+        float amt = 0.5f;
+        if (module) {
+            preset = clamp((int)std::round(module->params[SynTHBloKPoly::UNISON_PARAM].getValue()), 0, SynTHBloKPoly::NUM_STACKS - 1);
+            mode = module->chorusMode;
+            amt = module->params[SynTHBloKPoly::CHORUS_AMOUNT_PARAM].getValue();
+            voices = module->activeVoices;
+        }
+        char amtS[8], vS[8];
+        snprintf(amtS, sizeof amtS, "%d%%", (int)std::round(amt * 100.f));
+        snprintf(vS, sizeof vS, "%d", voices);
+        const char* names[4] = {"STK", "CHO", "AMT", "V"};
+        const char* vals[4] = {stacks[preset], modes[clamp(mode, 0, 3)], amtS, vS};
+        const float cols[5] = {0.f, 0.30f, 0.58f, 0.82f, 1.f};    // fractions of the width
 
-        int preset = clamp(
-            (int)std::round(module->params[SynTHBloKPoly::UNISON_PARAM].getValue()),
-            0,
-            SynTHBloKPoly::NUM_STACKS - 1
-        );
+        float W = box.size.x, H = box.size.y;
+        oled::box(args, W, H);
+        nvgBeginPath(args.vg);
+        for (int i = 1; i < 4; i++)
+            oled::divider(args, W * cols[i], 2.f, W * cols[i], H - 2.f);
+        oled::dividerStroke(args);
 
-        const char* label = labels[preset];
-
-        NVGcolor bgTop    = nvgRGBA(10, 10, 10, 255);
-        NVGcolor bgBottom = nvgRGBA(0, 0, 0, 255);
-        NVGpaint bg = nvgLinearGradient(vg, 0, 0, 0, box.size.y, bgTop, bgBottom);
-
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgFillPaint(vg, bg);
-        nvgFill(vg);
-
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgStrokeColor(vg, nvgRGBA(255, 180, 90, 80));
-        nvgStrokeWidth(vg, 1.0f);
-        nvgStroke(vg);
-
-        nvgFontSize(vg, 8.f);
-        nvgFontFaceId(vg, 0);
-        nvgFillColor(vg, nvgRGBA(255, 240, 180, 255));
-        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-
-        nvgText(vg, box.size.x * 0.5f, box.size.y * 0.5f, label, NULL);
-    }
-};
-
-// OUT‑OF‑CLASS DEFINITION (C++11 requires this)
-const char* UnisonDisplay::labels[SynTHBloKPoly::NUM_STACKS] = {
-    "SING", "5TH", "OCT", "5+8", "OCT2",
-    "MIN", "MAJ", "O+5", "STK5", "STK8", "FULL"
-};
-
-// ============================================================================
-// CHORUS MODE DISPLAY
-// ============================================================================
-struct ModeDisplay : TransparentWidget {
-    SynTHBloKPoly* module;
-
-    ModeDisplay(SynTHBloKPoly* m) {
-        module = m;
-    }
-
-    void draw(const DrawArgs& args) override {
-        if (!module) return;
-
-        NVGcontext* vg = args.vg;
-
-        int mode = module->chorusMode;
-        const char* label = "OFF";
-        if (mode == 1) label = "LITE";
-        else if (mode == 2) label = "WIDE";
-        else if (mode == 3) label = "ENS";
-
-        NVGcolor bgTop    = nvgRGBA(10, 10, 10, 255);
-        NVGcolor bgBottom = nvgRGBA(0, 0, 0, 255);
-        NVGpaint bg = nvgLinearGradient(vg, 0, 0, 0, box.size.y, bgTop, bgBottom);
-
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgFillPaint(vg, bg);
-        nvgFill(vg);
-
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgStrokeColor(vg, nvgRGBA(255, 180, 90, 80));
-        nvgStrokeWidth(vg, 1.0f);
-        nvgStroke(vg);
-
-        nvgFontSize(vg, 8.f);
-        nvgFontFaceId(vg, 0);
-        nvgFillColor(vg, nvgRGBA(255, 240, 180, 255));
-        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-
-        nvgText(vg, box.size.x * 0.5f, box.size.y * 0.5f, label, NULL);
-    }
-};
-
-// ============================================================================
-// CHORUS AMOUNT DISPLAY
-// ============================================================================
-struct ChorusAmountDisplay : TransparentWidget {
-    SynTHBloKPoly* module;
-
-    ChorusAmountDisplay(SynTHBloKPoly* m) {
-        module = m;
-    }
-
-    void draw(const DrawArgs& args) override {
-        if (!module) return;
-
-        NVGcontext* vg = args.vg;
-
-        float amt = module->params[SynTHBloKPoly::CHORUS_AMOUNT_PARAM].getValue();
-
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%.2f", amt);
-
-        NVGcolor bgTop    = nvgRGBA(10, 10, 10, 255);
-        NVGcolor bgBottom = nvgRGBA(0, 0, 0, 255);
-        NVGpaint bg = nvgLinearGradient(vg, 0, 0, 0, box.size.y, bgTop, bgBottom);
-
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgFillPaint(vg, bg);
-        nvgFill(vg);
-
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgStrokeColor(vg, nvgRGBA(255, 180, 90, 80));
-        nvgStrokeWidth(vg, 1.0f);
-        nvgStroke(vg);
-
-        nvgFontSize(vg, 8.f);
-        nvgFontFaceId(vg, 0);
-        nvgFillColor(vg, nvgRGBA(255, 240, 180, 255));
-        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-
-        nvgText(vg, box.size.x * 0.5f, box.size.y * 0.5f, buf, NULL);
-    }
-};
-
-// ============================================================================
-// POLY VOICE COUNT DISPLAY
-// ============================================================================
-struct PolyVoiceCountDisplay : TransparentWidget {
-    SynTHBloKPoly* module;
-
-    PolyVoiceCountDisplay(SynTHBloKPoly* m) {
-        module = m;
-    }
-
-    void draw(const DrawArgs& args) override {
-        if (!module) return;
-
-        NVGcontext* vg = args.vg;
-        int voices = module->activeVoices;
-
-        NVGcolor bgTop    = nvgRGBA(10, 10, 10, 255);
-        NVGcolor bgBottom = nvgRGBA(0, 0, 0, 255);
-        NVGpaint bg = nvgLinearGradient(vg, 0, 0, 0, box.size.y, bgTop, bgBottom);
-
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgFillPaint(vg, bg);
-        nvgFill(vg);
-
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, 0, 0, box.size.x, box.size.y, 3.f);
-        nvgStrokeColor(vg, nvgRGBA(255, 180, 90, 80));
-        nvgStrokeWidth(vg, 1.0f);
-        nvgStroke(vg);
-
-        nvgFontSize(vg, 8.f);
-        nvgFontFaceId(vg, 0);
-        nvgFillColor(vg, nvgRGBA(255, 240, 180, 255));
-        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%dV", voices);
-
-        nvgText(vg, box.size.x * 0.5f, box.size.y * 0.5f, buf, NULL);
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        for (int i = 0; i < 4; i++) {
+            float x = W * cols[i] + 3.f;
+            nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+            nvgFontSize(args.vg, 6.f);
+            nvgFillColor(args.vg, oled::dim());
+            nvgText(args.vg, x, H * 0.5f, names[i], NULL);
+            float nameW = nvgTextBounds(args.vg, 0.f, 0.f, names[i], NULL, NULL);
+            nvgFontSize(args.vg, 7.5f);
+            nvgFillColor(args.vg, oled::amber());
+            nvgText(args.vg, x + nameW + 2.f, H * 0.5f, vals[i], NULL);
+        }
     }
 };
 
@@ -1203,8 +910,6 @@ struct SynTHBloKPolyWidget : ModuleWidget {
         addChild(createWidgetCentered<ScrewSilver>(mm(3.5f, 125.0f)));
         addChild(createWidgetCentered<ScrewSilver>(mm(42.22f, 125.0f)));
 
-        // Inputs
-
         {   // tiny RGB LEDs
             int nn; const SynTHBloKPoly::LedK* kk = SynTHBloKPoly::kLeds(nn);
             for (int i = 0; i < nn; i++)
@@ -1213,18 +918,17 @@ struct SynTHBloKPolyWidget : ModuleWidget {
             for (int i = 0; i < nn; i++)
                 addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(jj[i].x, jj[i].y)), module, SynTHBloKPoly::JACK_LED + i * 3));
         }
+
+        // Inputs
         addInput(createInputCentered<BlackJack>(mm(8.f, 21.4f), module, SynTHBloKPoly::POLY_VOCT_INPUT));
         addChild(createLightCentered<TinyLight<RedLight>>(mm(4.6f, 16.3f),   module, SynTHBloKPoly::CLAMP_LIGHT));
         addChild(createLightCentered<TinyLight<YellowLight>>(mm(11.4f, 16.3f), module, SynTHBloKPoly::SAFEMODE_LIGHT));
         addInput(createInputCentered<BlackJack>(mm(18.f, 21.4f), module, SynTHBloKPoly::POLY_GATE_INPUT));
-
         addInput(createInputCentered<BlackJack>(mm(28.f, 21.4f), module, SynTHBloKPoly::SPREAD_CV_INPUT));
-
         addInput(createInputCentered<BlackJack>(mm(38.f, 21.4f), module, SynTHBloKPoly::RESET_INPUT));
 
         // Chorus mode button
         addChild(createLightCentered<SmallLight<GreenLight>>(mm(28.f, 95.f), module, SynTHBloKPoly::MODE_LIGHT));
-        
         addParam(createParamCentered<TL1105>(mm(28.f, 95.f), module, SynTHBloKPoly::MODE_PARAM));
 
         // Unison + Tone
@@ -1234,26 +938,12 @@ struct SynTHBloKPolyWidget : ModuleWidget {
         // Chorus amount
         addParam(createParamCentered<RoundBlackKnob>(mm(38.f, 95.f), module, SynTHBloKPoly::CHORUS_AMOUNT_PARAM));
 
-        // Displays
-        auto* ud = new UnisonDisplay(module);
-        ud->box.pos  = mm2px(Vec(4.f, 103.f));
-        ud->box.size = Vec(22.f, 10.f);
-        addChild(ud);
-
-        auto* md = new ModeDisplay(module);
-        md->box.pos  = mm2px(Vec(25.f, 103.f));
-        md->box.size = Vec(21.f, 10.f);
-        addChild(md);
-
-        auto* cad = new ChorusAmountDisplay(module);
-        cad->box.pos  = mm2px(Vec(35.f, 103.f));
-        cad->box.size = Vec(25.f, 10.f);
-        addChild(cad);
-
-        auto* vcd = new PolyVoiceCountDisplay(module);
-        vcd->box.pos  = mm2px(Vec(34.f, 112.f));
-        vcd->box.size = Vec(20.f, 10.f);
-        addChild(vcd);
+        // Info OLED between the knob row and GAIN / L / R
+        PolyOled* od = new PolyOled;
+        od->module = module;
+        od->box.pos  = mm(2.5f, 101.8f);
+        od->box.size = mm(40.72f, oled::kRow);
+        addChild(od);
 
         // ADSR
         addParam(createParamCentered<Trimpot>(mm(8.f, 78.f),  module, SynTHBloKPoly::ATTACK_PARAM));
@@ -1261,22 +951,19 @@ struct SynTHBloKPolyWidget : ModuleWidget {
         addParam(createParamCentered<Trimpot>(mm(28.f, 78.f), module, SynTHBloKPoly::SUSTAIN_PARAM));
         addParam(createParamCentered<Trimpot>(mm(38.f, 78.f), module, SynTHBloKPoly::RELEASE_PARAM));
 
-
         // Poly taps
         addOutput(createOutputCentered<BlackJack>(mm(8.f, 56.f), module, SynTHBloKPoly::ENV_POLY_OUTPUT));
         addOutput(createOutputCentered<BlackJack>(mm(18.f, 56.f), module, SynTHBloKPoly::VCA_POLY_OUTPUT));
         addOutput(createOutputCentered<BlackJack>(mm(28.f, 56.f), module, SynTHBloKPoly::FLT_POLY_OUTPUT));
         addOutput(createOutputCentered<BlackJack>(mm(38.f, 56.f), module, SynTHBloKPoly::PITCH_POLY_OUTPUT));
 
-
         // ENV / VCA / FILTER inputs
         addInput(createInputCentered<BlackJack>(mm(8.f, 37.f), module, SynTHBloKPoly::POLY_ENV_IN_INPUT));
         addInput(createInputCentered<BlackJack>(mm(18.f, 37.f), module, SynTHBloKPoly::POLY_VCA_CV_INPUT));
         addInput(createInputCentered<BlackJack>(mm(28.f, 37.f), module, SynTHBloKPoly::POLY_FLT_IN_INPUT));
 
-        // Status lights
+        // Gate light
         addChild(createLightCentered<SmallLight<GreenLight>>(mm(28.f, 88.f), module, SynTHBloKPoly::STATUS_LIGHT));
-        
 
         // Volume + audio outs
         addParam(createParamCentered<RoundSmallBlackKnob>(mm(8.f, 115.f), module, SynTHBloKPoly::POLY_VOL_PARAM));
