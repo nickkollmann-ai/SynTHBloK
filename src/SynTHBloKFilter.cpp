@@ -75,7 +75,12 @@ struct SynTHBloKFILTERModule : Module {
     int bodyType = 0;
 
     bool strikeLast = false;
+    dsp::SchmittTrigger strikeGateTrig;
     float exciteEnv = 0.f;
+
+    // Coefficients are recomputed only when their inputs move
+    float cBase = -1.f, cRes = -1.f, cDecay = -1.f, cSr = -1.f;
+    int cBody = -1;
     float exciteLED = 0.f;
 
     // LED smoothing
@@ -175,7 +180,8 @@ struct SynTHBloKFILTERModule : Module {
         configParam(MIX_PARAM,    0.f, 1.f, 0.5f, "Dry/wet");
         configButton(STRIKE_PARAM, "Strike");
 configInput(CUTOFF_KNOB_CV_INPUT, "Cutoff knob CV");
-
+configInput(RES_KNOB_CV_INPUT,    "Resonance knob CV");
+configInput(DRIVE_KNOB_CV_INPUT,  "Exciter knob CV");
 configInput(MIX_KNOB_CV_INPUT,    "Mix knob CV");
         configInput(IN_L_INPUT, "In L");
         configInput(IN_R_INPUT, "In R");
@@ -201,6 +207,7 @@ configInput(MIX_KNOB_CV_INPUT,    "Mix knob CV");
         float a2[NUM_MODES];
         float g[NUM_MODES];
     };
+    ModalCoeffs coeffs{};
 
     ModalCoeffs computeModalCoeffs(float baseFreq, float resAmount, float decayParam, float sr) {
         ModalCoeffs c{};
@@ -326,7 +333,6 @@ configInput(MIX_KNOB_CV_INPUT,    "Mix knob CV");
         if (inputs[RES_CV_INPUT].isConnected())    res    += inputs[RES_CV_INPUT].getVoltage() * 0.1f;
         if (inputs[DRIVE_CV_INPUT].isConnected())  drive  += inputs[DRIVE_CV_INPUT].getVoltage() * 0.1f;
         if (inputs[DECAY_CV_INPUT].isConnected())  decay  += inputs[DECAY_CV_INPUT].getVoltage() * 0.1f;
-        if (inputs[VOCT_INPUT].isConnected())      cutoff += inputs[VOCT_INPUT].getVoltage() * 0.08333f;
 // New dedicated knob CV row (placed after main CVs, before clamping)
 if (inputs[CUTOFF_KNOB_CV_INPUT].isConnected())
     cutoff += inputs[CUTOFF_KNOB_CV_INPUT].getVoltage() * 0.1f;
@@ -351,7 +357,8 @@ if (inputs[MIX_KNOB_CV_INPUT].isConnected())
         modeButtonPrev = pressed;
 
         bool strikeButton = params[STRIKE_PARAM].getValue() > 0.5f;
-        bool strikeGate   = inputs[STRIKE_CV_INPUT].getVoltage() > 1.f;
+        // Rising edge only, so a held gate strikes once
+        bool strikeGate   = strikeGateTrig.process(inputs[STRIKE_CV_INPUT].getVoltage(), 0.1f, 1.f);
         bool strike = (strikeButton && !strikeLast) || strikeGate;
         strikeLast = strikeButton;
 
@@ -359,8 +366,14 @@ if (inputs[MIX_KNOB_CV_INPUT].isConnected())
         float inR = inputs[IN_R_INPUT].isConnected() ? inputs[IN_R_INPUT].getVoltage() : inL;
 
         float baseFreq = 20.f * powf(400.f, cutoff);
+        // V/Oct: 1 V doubles the body pitch
+        if (inputs[VOCT_INPUT].isConnected())
+            baseFreq *= dsp::exp2_taylor5(clamp(inputs[VOCT_INPUT].getVoltage(), -5.f, 5.f));
 
-        ModalCoeffs coeffs = computeModalCoeffs(baseFreq, res, decay, sr);
+        if (baseFreq != cBase || res != cRes || decay != cDecay || sr != cSr || bodyType != cBody) {
+            coeffs = computeModalCoeffs(baseFreq, res, decay, sr);
+            cBase = baseFreq; cRes = res; cDecay = decay; cSr = sr; cBody = bodyType;
+        }
 
         float excL = makeExciter(inL, strike, drive, sr);
         float excR = makeExciter(inR, strike, drive, sr);
@@ -453,7 +466,7 @@ if (inputs[MIX_KNOB_CV_INPUT].isConnected())
         exciteLED = 0.2f * exciteLED + 0.8f * clamp(exciteEnv, 0.f, 1.f);
         setMonoLED(DRIVE_MODE_LIGHT_R, exciteLED);
 
-        // BODY_MODE_LIGHT: color per mode, only while pressed
+        // BODY_MODE_LIGHT: color per mode
         float r = 0.f, g = 0.f, b = 0.f;
         switch (bodyType) {
             case 0: // METAL → Blue
@@ -470,7 +483,8 @@ if (inputs[MIX_KNOB_CV_INPUT].isConnected())
                 break;
         }
 
-        float on = pressed ? 1.f : 0.f;
+        // Always shows the body colour; full while MODE is held
+        float on = pressed ? 1.f : 0.35f;
 
         lights[BODY_MODE_LIGHT_R].setSmoothBrightness(r * on, 1.f);
         lights[BODY_MODE_LIGHT_G].setSmoothBrightness(g * on, 1.f);
@@ -491,7 +505,6 @@ struct FilterModeOLED : TransparentWidget {
     }
 
     void draw(const DrawArgs& args) override {
-        if (!module) return;
         NVGcontext* vg = args.vg;
 
         NVGpaint bg = nvgLinearGradient(
@@ -518,7 +531,8 @@ struct FilterModeOLED : TransparentWidget {
             "TUBE"
         };
 
-        int bt = clamp(module->bodyType, 0, 3);
+        // Module browser preview has no module: show the default body
+        int bt = module ? clamp(module->bodyType, 0, 3) : 0;
         const char* text = bodyNames[bt];
 
         nvgFontSize(vg, 9.f);
@@ -585,6 +599,8 @@ struct SynTHBloKFILTERWidget : ModuleWidget {
 
 // NEW ROW — KNOB CV INPUTS (2 mm below DECAY row)
 addInput(createInputCentered<BlackJack>(mm2px(Vec(x0, 48)), module, SynTHBloKFILTERModule::CUTOFF_KNOB_CV_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x1, 48)), module, SynTHBloKFILTERModule::RES_KNOB_CV_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x2, 48)), module, SynTHBloKFILTERModule::DRIVE_KNOB_CV_INPUT));
 
 addInput(createInputCentered<BlackJack>(mm2px(Vec(x3, 48)), module, SynTHBloKFILTERModule::MIX_KNOB_CV_INPUT));
 
