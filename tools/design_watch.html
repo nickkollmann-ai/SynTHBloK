@@ -81,14 +81,25 @@ main{display:grid;grid-template-columns:minmax(260px,.7fr) minmax(0,1fr) minmax(
 @keyframes feedin{from{margin-top:-18px;opacity:0}to{margin-top:0;opacity:1}}
 #feed b,#gitfeed b{color:var(--cy);font-weight:500}
 #gitfeed i{font-style:normal;color:var(--or)}
-footer{display:flex;gap:8px;overflow-x:auto;padding:8px 12px;border-top:1px solid var(--line);background:#070b10}
-footer button{flex:none;width:86px;background:var(--card);border:1px solid var(--line);color:var(--mut);padding:4px;cursor:pointer;font:inherit;font-size:10px;text-align:center}
-footer button img{display:block;width:100%;height:70px;object-fit:contain;margin-bottom:3px}
-footer button.on{border-color:var(--mg);color:var(--tx)}
-footer button.new{border-color:var(--cy)}
-footer button i{display:block;font-style:normal;color:var(--mut);font-size:9px;letter-spacing:.08em}
-footer button i.miss{color:var(--bad)}
-footer button em{display:block;font-style:normal;background:var(--cy);color:#070b10;font-size:9px;letter-spacing:.12em;margin-bottom:3px}
+/* the thumbnail strip works like the site's Synth Builds tab row: ‹ › step to the previous / next tile (wrapping),
+   a click picks a tile, and the picked tile slides to the middle of the strip */
+footer{display:flex;gap:8px;align-items:stretch;min-width:0;overflow:hidden;padding:8px 12px;border-top:1px solid var(--line);background:#070b10}
+#strip{flex:1;min-width:0;display:flex;gap:8px;overflow-x:auto;scroll-behavior:smooth;scrollbar-width:none}
+#strip::-webkit-scrollbar{display:none}
+footer .nav{flex:none;width:34px;background:var(--card);border:1px solid var(--line);color:var(--cy);font:inherit;font-size:22px;line-height:1;cursor:pointer}
+footer .nav:hover{border-color:var(--cy)}
+#s-count{flex:none;align-self:center;min-width:46px;text-align:center;color:var(--mut);font-size:11px;letter-spacing:.12em}
+#strip button{flex:none;width:172px;height:172px;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);color:var(--mut);padding:6px;cursor:pointer;font:inherit;font-size:11px;text-align:center}
+#strip button img{display:block;width:100%;flex:1;min-height:0;object-fit:contain;margin-bottom:4px}
+/* each tile's title, top left above its preview */
+#strip button s{display:block;text-decoration:none;text-align:left;color:var(--tx);font-size:11px;letter-spacing:.08em;margin:0 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#strip button.on s{color:var(--mg)}
+#strip button.on{border-color:var(--mg);color:var(--tx)}
+#strip button.new{border-color:var(--cy)}
+#strip button i{display:block;font-style:normal;color:var(--mut);font-size:10px;letter-spacing:.08em}
+#strip button i.miss,#strip button i .miss{color:var(--bad)}
+#strip button i.up{color:var(--cy);opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#strip button em{display:block;font-style:normal;background:var(--cy);color:#070b10;font-size:10px;letter-spacing:.12em;margin-bottom:3px}
 .modes{display:flex;gap:0;margin-left:18px}
 .modes button{background:transparent;border:1px solid var(--line);color:var(--mut);font:inherit;font-size:11px;letter-spacing:.12em;padding:2px 10px;cursor:pointer}
 .modes button.on{background:var(--mg);border-color:var(--mg);color:#070b10}
@@ -128,7 +139,7 @@ footer button em{display:block;font-style:normal;background:var(--cy);color:#070
     <div id="draw">Save an SVG in res/ and it is drawn here, piece by piece.</div>
   </section>
 </main>
-<footer id="strip"></footer>
+<footer><button type="button" class="nav" id="s-prev" title="Previous (←)">&lsaquo;</button><div id="strip"></div><button type="button" class="nav" id="s-next" title="Next (→)">&rsaquo;</button><span id="s-count"></span></footer>
 <div id="zoom"><img alt=""><span id="zoom-cap">click the image for actual size · click outside or press Esc to close</span></div>
 <script>
 const ROOTS = ['/res/', '/web-images/'], IMG = /\.(svg|png|webp|jpe?g)$/i, POLL = 1500;
@@ -138,10 +149,25 @@ let shown = null, pinned = false, logStamp = '';
 let mods = [], modText = '', strip = 'mod';
 const KNOWN = 'wb-known-modules';
 const known = new Set((() => { try { return JSON.parse(localStorage.getItem(KNOWN)) || []; } catch (e) { return []; } })());
-const panelOf = slug => [...files.keys()].find(p => p.toLowerCase() === ('/res/' + slug + '.svg').toLowerCase());
+// modules whose panel SVG is not named after their slug
+const PANEL_FILE = {SynTHBloKResonator: 'SynTHBloKFilter'};
+const panelOf = slug => [...files.keys()].find(p => p.toLowerCase() === ('/res/' + (PANEL_FILE[slug] || slug) + '.svg').toLowerCase());
 const shotOf = slug => [...files.keys()].find(p => p.toLowerCase() === ('/web-images/screenshots/' + slug + '.png').toLowerCase());
 const modOf = p => mods.find(m => p === panelOf(m.slug) || p === shotOf(m.slug));
-const modTime = m => Math.max(files.get(panelOf(m.slug)) || 0, files.get(shotOf(m.slug)) || 0);
+// A module's source file is the src/ file that registers its slug with createModel.
+const srcFile = new Map();
+const srcOf = slug => {
+  if (srcFile.has(slug)) return srcFile.get(slug);
+  const re = new RegExp('createModel<[^>]*>\\(\\s*"' + slug + '"');
+  const p = [...texts].find(([, t]) => t && re.test(t))?.[0];
+  if (p) srcFile.set(slug, p);
+  return p;
+};
+// "Updated" is the newest save of the module's panel SVG or its source. Screenshots are left out:
+// every build rewrites all of them.
+const modTime = m => Math.max(files.get(panelOf(m.slug)) || 0, codeStamps.get(srcOf(m.slug)) || 0);
+const shortName = m => m.name.replace(/^SynTHBloK[- ]?/, '');
+const when = t => t ? new Date(t).toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}) : '-';
 
 async function list(dir, depth, want = IMG) {
   const r = await fetch(dir, {cache: 'no-store'});
@@ -171,9 +197,10 @@ function show(key, why) {
   stage.classList.toggle('module', !!m);
   if (m) {
     const panel = panelOf(m.slug), shot = shotOf(m.slug);
+    // the Rack screenshot on top, the panel SVG under it
     document.getElementById('mod').innerHTML =
-      (panel ? `<figure><img src="${src(panel)}" alt=""><figcaption>PANEL SVG · ${short(panel)}</figcaption></figure>` : `<div class="none">No res/${m.slug}.svg<br>(panel may be drawn in code)</div>`) +
-      (shot ? `<figure><img src="${src(shot)}" alt=""><figcaption>RACK SCREENSHOT · ${time(files.get(shot))}</figcaption></figure>` : `<div class="none">No Rack screenshot yet<br>web-images/screenshots/${m.slug}.png</div>`);
+      (shot ? `<figure><img src="${src(shot)}" alt=""><figcaption>RACK SCREENSHOT · ${time(files.get(shot))}</figcaption></figure>` : `<div class="none">No Rack screenshot yet<br>web-images/screenshots/${m.slug}.png</div>`) +
+      (panel ? `<figure><img src="${src(panel)}" alt=""><figcaption>PANEL SVG · ${short(panel)}</figcaption></figure>` : `<div class="none">No res/${m.slug}.svg<br>(panel may be drawn in code)</div>`);
     document.getElementById('name').textContent = m.name + '  (' + m.slug + ')';
   } else {
     document.getElementById('view').src = src(key);
@@ -188,21 +215,56 @@ function tile(key, cls, title, inner) {
   b.className = (key === shown ? 'on ' : '') + cls;
   b.title = title;
   b.innerHTML = inner;
+  b.dataset.key = key;
   b.onclick = () => { pinned = !(pinned && key === shown); show(pinned ? key : latest()); };
   document.getElementById('strip').appendChild(b);
 }
+// Tab-row controls, as on the site: step / click picks a tile and the picked tile slides to the middle.
+const stripEl = () => document.getElementById('strip');
+let centred = null;
+function centre() {
+  const s = stripEl(), t = [...s.children].find(b => b.dataset.key === shown);
+  if (!t) return;
+  const tr = t.getBoundingClientRect(), sr = s.getBoundingClientRect();
+  s.scrollLeft += tr.left - sr.left - (sr.width - tr.width) / 2;
+}
+function go(n) {
+  const tiles = [...stripEl().children];
+  if (!tiles.length) return;
+  n = (n + tiles.length) % tiles.length;
+  pinned = true; show(tiles[n].dataset.key);
+}
+const at = () => [...stripEl().children].findIndex(b => b.dataset.key === shown);
+document.getElementById('s-prev').onclick = () => go(at() - 1);
+document.getElementById('s-next').onclick = () => go(at() + 1);
+addEventListener('keydown', e => {
+  if (document.getElementById('zoom').classList.contains('on')) return;
+  if (e.key === 'ArrowRight') { go(at() + 1); e.preventDefault(); }
+  if (e.key === 'ArrowLeft') { go(at() - 1); e.preventDefault(); }
+});
 function drawStrip(fresh = new Set()) {
-  document.getElementById('strip').innerHTML = '';
+  // rebuilding keeps the strip where it was; a newly picked tile slides to the middle
+  const s = stripEl(), x = s.scrollLeft;
+  s.innerHTML = '';
+  drawTiles(fresh);
+  s.style.scrollBehavior = 'auto'; s.scrollLeft = x; s.style.scrollBehavior = '';
+  if (shown !== centred) { centred = shown; centre(); }
+  const k = at(), n = s.children.length;
+  document.getElementById('s-count').textContent = n ? String(k + 1).padStart(2, '0') + '/' + n : '';
+}
+function drawTiles(fresh) {
   if (strip === 'mod') {
-    [...mods].sort((a, b) => (b.isNew - a.isNew) || (modTime(b) - modTime(a))).forEach(m => {
-      const panel = panelOf(m.slug), shot = shotOf(m.slug), thumb = shot || panel, hot = [panel, shot].some(p => fresh.has(p));
-      tile('mod:' + m.slug, m.isNew || hot ? 'new' : '', m.name + ' · ' + (m.tags || []).join(', '),
-        (m.isNew ? '<em>NEW</em>' : '') + (thumb ? `<img loading="lazy" src="${src(thumb)}" alt="">` : '<img alt="">') + m.name.replace(/^SynTHBloK[- ]?/, '') +
-        `<i class="${panel ? '' : 'miss'}">${panel ? 'SVG ✓' : 'NO SVG'}</i><i class="${shot ? '' : 'miss'}">${shot ? 'SHOT ✓' : 'NO SHOT'}</i>`);
+    // alphabetical and fixed: a save never moves a tile
+    [...mods].sort((a, b) => shortName(a).localeCompare(shortName(b), undefined, {sensitivity: 'base', numeric: true})).forEach(m => {
+      const panel = panelOf(m.slug), shot = shotOf(m.slug), thumb = shot || panel, hot = [panel, shot].some(p => fresh.has(p)), up = modTime(m);
+      tile('mod:' + m.slug, m.isNew || hot ? 'new' : '', m.name + ' · ' + (m.tags || []).join(', ') + ' · updated ' + (up ? new Date(up).toLocaleString() : '-'),
+        `<s>${shortName(m)}</s>` + (m.isNew ? '<em>NEW</em>' : '') + (thumb ? `<img loading="lazy" src="${src(thumb)}" alt="">` : '<img alt="">') +
+        `<i><span class="${panel ? '' : 'miss'}">${panel ? 'SVG ✓' : 'NO SVG'}</span> · <span class="${shot ? '' : 'miss'}">${shot ? 'SHOT ✓' : 'NO SHOT'}</span></i>` +
+        `<i class="up">UPDATED ${when(up)}</i>`);
     });
   } else {
     [...files].sort((a, b) => b[1] - a[1]).forEach(([p, t]) => tile(p, fresh.has(p) ? 'new' : '', short(p) + ' · ' + time(t),
-      `<img loading="lazy" src="${src(p)}" alt="">${short(p).replace(/^.*\//, '').replace(IMG, '')}`));
+      `<s>${short(p).replace(/^.*\//, '').replace(IMG, '')}</s><img loading="lazy" src="${src(p)}" alt="">`));
   }
 }
 const latestFile = () => [...files].sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -310,7 +372,16 @@ async function scanArt(first) {
   if (first) return;
   fresh.forEach(p => { if (isAsm(p)) asmChange(p); });
   const keys = [...fresh].sort((a, b) => files.get(b) - files.get(a)).map(keyFor);
-  if (keys.length) { if (!pinned) show(keys[0], 'change'); else if (keys.includes(shown)) show(shown, 'change'); else drawStrip(fresh); }
+  if (!keys.length) return;
+  if (strip === 'mod') {
+    // A saved panel SVG takes over the preview (pinned, so the build's screenshot burst cannot move it);
+    // when its new screenshot lands, the shown module refreshes at once.
+    const svg = [...fresh].filter(p => p.startsWith('/res/') && /\.svg$/i.test(p)).sort((a, b) => files.get(b) - files.get(a)).map(modOf).find(Boolean);
+    if (svg) { pinned = true; show('mod:' + svg.slug, 'change'); }
+    else if (keys.includes(shown)) show(shown, 'change');
+    else drawStrip(fresh);
+  }
+  else if (!pinned) show(keys[0], 'change'); else if (keys.includes(shown)) show(shown, 'change'); else drawStrip(fresh);
 }
 
 async function scanLog() {
@@ -357,11 +428,13 @@ async function cacheAll() {
 }
 async function scanCode(first) {
   const ps = await list('/src/', 0, CODE);
+  let changed = false;
   await Promise.all(ps.map(async p => {
     const t = await stamp(p), old = codeStamps.get(p);
     codeStamps.set(p, t);
-    if (!first && old !== t) { feed(`<b>${p.slice(1)}</b> ${old ? 'changed' : 'added'}`); asmChange(p); }
+    if (!first && old !== t) { feed(`<b>${p.slice(1)}</b> ${old ? 'changed' : 'added'}`); asmChange(p); changed = true; }
   }));
+  if (changed) drawStrip();   // a source save moves its module's UPDATED date
 }
 async function asmChange(p) {
   const now = await getText(p);
