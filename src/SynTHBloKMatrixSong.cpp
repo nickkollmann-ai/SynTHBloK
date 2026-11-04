@@ -492,6 +492,13 @@ struct SongPad : OpaqueWidget {
             e.consume(this);
         }
     }
+    // Delete / Backspace over a pad clears it (keeps its pattern, no mute, no loop action)
+    void onHoverKey(const HoverKeyEvent& e) override {
+        if (!module || e.action != GLFW_PRESS || (e.key != GLFW_KEY_DELETE && e.key != GLFW_KEY_BACKSPACE)) return;
+        module->cells[s][r] = MS::Cell();
+        module->selSec = s; module->selRow = r;
+        e.consume(this);
+    }
     void onHoverScroll(const HoverScrollEvent& e) override {
         if (!module || e.scrollDelta.y == 0.f) return;
         int n = patterns();
@@ -658,6 +665,15 @@ struct ChainCell : SongBtn {
             module->chain[k].bars = clamp(module->chain[k].bars + d, 1, 64);
         };
     }
+    // Delete / Backspace over a step takes it out of the chain (the steps after it move up)
+    void onHoverKey(const HoverKeyEvent& e) override {
+        if (!module || k >= module->chainN || e.action != GLFW_PRESS || (e.key != GLFW_KEY_DELETE && e.key != GLFW_KEY_BACKSPACE)) return;
+        MS* m = module;
+        for (int j = k; j < m->chainN - 1; j++) m->chain[j] = m->chain[j + 1];
+        m->chainN--;
+        if (m->chainPos >= m->chainN) m->chainPos = 0;
+        e.consume(this);
+    }
     void step() override {
         dimOff = !module || k >= module->chainN;
         SongBtn::step();
@@ -755,9 +771,9 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
             }
             // the selected section: COPY to the next, CLEAR it; the selected row across every section: FILL, CLEAR
             y += CH + GAP;
-            const float tw = (inner - 3.f * CG) / 4.f;
-            static const char* const tn[4] = {"COPY SECTION >", "CLEAR SECTION", "ROW: CELL TO ALL", "CLEAR ROW"};
-            for (int i = 0; i < 4; i++) {
+            const float tw = (inner - 4.f * CG) / 5.f;
+            static const char* const tn[5] = {"CLEAR CELL", "COPY SECTION >", "CLEAR SECTION", "CELL TO ROW", "CLEAR ROW"};
+            for (int i = 0; i < 5; i++) {
                 SongBtn* b = btn(x0 + i * (tw + CG), y, tw, CH, tn[i]);
                 b->fontSize = 5.5f;
                 b->lit = []() { return false; };
@@ -765,10 +781,11 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
                     if (!module) return;
                     MS* m = module;
                     int s = m->selSec, r = m->selRow;
-                    if (i == 0) { int to = (s + 1) % kSecs; for (int k = 0; k < kRows; k++) m->cells[to][k] = m->cells[s][k]; m->selSec = to; }
-                    if (i == 1) for (int k = 0; k < kRows; k++) m->cells[s][k] = MS::Cell();
-                    if (i == 2) for (int k = 0; k < kSecs; k++) m->cells[k][r] = m->cells[s][r];
-                    if (i == 3) for (int k = 0; k < kSecs; k++) m->cells[k][r] = MS::Cell();
+                    if (i == 0) m->cells[s][r] = MS::Cell();
+                    if (i == 1) { int to = (s + 1) % kSecs; for (int k = 0; k < kRows; k++) m->cells[to][k] = m->cells[s][k]; m->selSec = to; }
+                    if (i == 2) for (int k = 0; k < kRows; k++) m->cells[s][k] = MS::Cell();
+                    if (i == 3) for (int k = 0; k < kSecs; k++) m->cells[k][r] = m->cells[s][r];
+                    if (i == 4) for (int k = 0; k < kSecs; k++) m->cells[k][r] = MS::Cell();
                 };
             }
         }
