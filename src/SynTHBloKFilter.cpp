@@ -581,48 +581,48 @@ struct SynTHBloKFILTERWidget : ModuleWidget {
         addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x3, 22)), module, SynTHBloKFILTERModule::MIX_PARAM));
 
         // ROW 2 — DECAY / MODE / STRIKE (y = 37)
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x0, 37)), module, SynTHBloKFILTERModule::DECAY_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(x0, 39)), module, SynTHBloKFILTERModule::DECAY_PARAM));
         
         // MODE BUTTON LEDs + BUTTON
         addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(
-            mm2px(Vec(x2, 37)), module, SynTHBloKFILTERModule::BODY_MODE_LIGHT_R));
-        addParam(createParamCentered<TL1105>(mm2px(Vec(x2, 37)), module, SynTHBloKFILTERModule::MODE_PARAM));
+            mm2px(Vec(x2, 39)), module, SynTHBloKFILTERModule::BODY_MODE_LIGHT_R));
+        addParam(createParamCentered<TL1105>(mm2px(Vec(x2, 39)), module, SynTHBloKFILTERModule::MODE_PARAM));
 
         addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(
-            mm2px(Vec(x3, 37)), module, SynTHBloKFILTERModule::DRIVE_MODE_LIGHT_R));
-        addParam(createParamCentered<TL1105>(mm2px(Vec(x3, 37)), module, SynTHBloKFILTERModule::STRIKE_PARAM));
+            mm2px(Vec(x3, 39)), module, SynTHBloKFILTERModule::DRIVE_MODE_LIGHT_R));
+        addParam(createParamCentered<TL1105>(mm2px(Vec(x3, 39)), module, SynTHBloKFILTERModule::STRIKE_PARAM));
 
         // OLED
         auto* modeOLED = new FilterModeOLED(module);
-        modeOLED->box.pos = mm2px(Vec(23.8, 33.3));
+        modeOLED->box.pos = mm2px(Vec(23.8, 35.3));
         addChild(modeOLED);
 
 // NEW ROW — KNOB CV INPUTS (2 mm below DECAY row)
-addInput(createInputCentered<BlackJack>(mm2px(Vec(x0, 48)), module, SynTHBloKFILTERModule::CUTOFF_KNOB_CV_INPUT));
-addInput(createInputCentered<BlackJack>(mm2px(Vec(x1, 48)), module, SynTHBloKFILTERModule::RES_KNOB_CV_INPUT));
-addInput(createInputCentered<BlackJack>(mm2px(Vec(x2, 48)), module, SynTHBloKFILTERModule::DRIVE_KNOB_CV_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x0, 52.5)), module, SynTHBloKFILTERModule::CUTOFF_KNOB_CV_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x1, 52.5)), module, SynTHBloKFILTERModule::RES_KNOB_CV_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x2, 52.5)), module, SynTHBloKFILTERModule::DRIVE_KNOB_CV_INPUT));
 
-addInput(createInputCentered<BlackJack>(mm2px(Vec(x3, 48)), module, SynTHBloKFILTERModule::MIX_KNOB_CV_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x3, 52.5)), module, SynTHBloKFILTERModule::MIX_KNOB_CV_INPUT));
 
         // ROW 3 — INPUTS (y = 66)
-addInput(createInputCentered<BlackJack>(mm2px(Vec(x0, 63)), module, SynTHBloKFILTERModule::IN_L_INPUT));
-addInput(createInputCentered<BlackJack>(mm2px(Vec(x1, 63)), module, SynTHBloKFILTERModule::IN_R_INPUT));
-addInput(createInputCentered<BlackJack>(mm2px(Vec(x2, 63)), module, SynTHBloKFILTERModule::CUTOFF_CV_INPUT));
-addInput(createInputCentered<BlackJack>(mm2px(Vec(x3, 63)), module, SynTHBloKFILTERModule::RES_CV_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x0, 70.5)), module, SynTHBloKFILTERModule::IN_L_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x1, 70.5)), module, SynTHBloKFILTERModule::IN_R_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x2, 70.5)), module, SynTHBloKFILTERModule::CUTOFF_CV_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x3, 70.5)), module, SynTHBloKFILTERModule::RES_CV_INPUT));
 
         // ROW 4 — MORE INPUTS (y = 81)
-addInput(createInputCentered<BlackJack>(mm2px(Vec(x0, 78)), module, SynTHBloKFILTERModule::VOCT_INPUT));
-addInput(createInputCentered<BlackJack>(mm2px(Vec(x1, 78)), module, SynTHBloKFILTERModule::DRIVE_CV_INPUT));
-addInput(createInputCentered<BlackJack>(mm2px(Vec(x2, 78)), module, SynTHBloKFILTERModule::DECAY_CV_INPUT));
-addInput(createInputCentered<BlackJack>(mm2px(Vec(x3, 78)), module, SynTHBloKFILTERModule::STRIKE_CV_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x0, 89)), module, SynTHBloKFILTERModule::VOCT_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x1, 89)), module, SynTHBloKFILTERModule::DRIVE_CV_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x2, 89)), module, SynTHBloKFILTERModule::DECAY_CV_INPUT));
+addInput(createInputCentered<BlackJack>(mm2px(Vec(x3, 89)), module, SynTHBloKFILTERModule::STRIKE_CV_INPUT));
 
         // ROW 5 — OUTPUTS (y = 108)
-addOutput(createOutputCentered<BlackJack>(mm2px(Vec(x0,    105)), module, SynTHBloKFILTERModule::OUT_L_OUTPUT));
-addOutput(createOutputCentered<BlackJack>(mm2px(Vec(x1, 105)), module, SynTHBloKFILTERModule::OUT_R_OUTPUT));
-addOutput(createOutputCentered<BlackJack>(mm2px(Vec(x2,  105)), module, SynTHBloKFILTERModule::ENV_OUTPUT));
+addOutput(createOutputCentered<BlackJack>(mm2px(Vec(x0, 113)), module, SynTHBloKFILTERModule::OUT_L_OUTPUT));
+addOutput(createOutputCentered<BlackJack>(mm2px(Vec(x1, 113)), module, SynTHBloKFILTERModule::OUT_R_OUTPUT));
+addOutput(createOutputCentered<BlackJack>(mm2px(Vec(x2, 113)), module, SynTHBloKFILTERModule::ENV_OUTPUT));
 
         // HP OUT (y = 118)
-        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(x3, 105)), module, SynTHBloKFILTERModule::HP_OUTPUT));
+        addOutput(createOutputCentered<BlackJack>(mm2px(Vec(x3, 113)), module, SynTHBloKFILTERModule::HP_OUTPUT));
 
         // ------------------------------------------------------------
         // KNOB LEDs (tiny RGB) — above knobs
@@ -635,26 +635,26 @@ addOutput(createOutputCentered<BlackJack>(mm2px(Vec(x2,  105)), module, SynTHBlo
         // ------------------------------------------------------------
         // JACK LEDs — ROW 3 (y = 69)
         // ------------------------------------------------------------
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x0, 69)), module, SynTHBloKFILTERModule::IN_L_LED_R));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x1, 69)), module, SynTHBloKFILTERModule::IN_R_LED_R));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x2, 69)), module, SynTHBloKFILTERModule::CUTOFF_CV_LED_R));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x3, 69)), module, SynTHBloKFILTERModule::RES_CV_LED_R));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x0, 76.5)), module, SynTHBloKFILTERModule::IN_L_LED_R));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x1, 76.5)), module, SynTHBloKFILTERModule::IN_R_LED_R));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x2, 76.5)), module, SynTHBloKFILTERModule::CUTOFF_CV_LED_R));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x3, 76.5)), module, SynTHBloKFILTERModule::RES_CV_LED_R));
 
         // ------------------------------------------------------------
         // JACK LEDs — ROW 4 (y = 83)
         // ------------------------------------------------------------
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x0, 83)), module, SynTHBloKFILTERModule::VOCT_LED_R));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x1, 83)), module, SynTHBloKFILTERModule::DRIVE_CV_LED_R));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x2, 83)), module, SynTHBloKFILTERModule::DECAY_CV_LED_R));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x3, 83)), module, SynTHBloKFILTERModule::STRIKE_CV_LED_R));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x0, 95)), module, SynTHBloKFILTERModule::VOCT_LED_R));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x1, 95)), module, SynTHBloKFILTERModule::DRIVE_CV_LED_R));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x2, 95)), module, SynTHBloKFILTERModule::DECAY_CV_LED_R));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x3, 95)), module, SynTHBloKFILTERModule::STRIKE_CV_LED_R));
 
         // ------------------------------------------------------------
         // JACK LEDs — ROW 5 (y = 110)
         // ------------------------------------------------------------
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x0,    110)), module, SynTHBloKFILTERModule::OUT_L_LED_R));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x1, 110)), module, SynTHBloKFILTERModule::OUT_R_LED_R));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x2,  110)), module, SynTHBloKFILTERModule::ENV_LED_R));
-        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x3, 110)), module, SynTHBloKFILTERModule::HP_OUT_LED_R));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x0, 118)), module, SynTHBloKFILTERModule::OUT_L_LED_R));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x1, 118)), module, SynTHBloKFILTERModule::OUT_R_LED_R));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x2, 118)), module, SynTHBloKFILTERModule::ENV_LED_R));
+        addChild(createLightCentered<TinyLight<RedGreenBlueLight>>(mm2px(Vec(x3, 118)), module, SynTHBloKFILTERModule::HP_OUT_LED_R));
     }
 };
 
