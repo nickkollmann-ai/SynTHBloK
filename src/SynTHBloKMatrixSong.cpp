@@ -114,6 +114,7 @@ struct SynTHBloKMatrixSong : Module {
     void onReset() override {
         defaults();
         for (int r = 0; r < kRows; r++) { rowId[r] = -1; mut[r] = false; }
+        dropped.clear();
         tick = -1;
     }
 
@@ -177,6 +178,17 @@ struct SynTHBloKMatrixSong : Module {
         return ok;
     }
     bool autoFill = true;   // place modules that are free on empty rows (right-click menu)
+    // modules disconnected with a row's × button: free, and left off the rows until chosen again (UI thread)
+    std::vector<int64_t> dropped;
+    bool isDropped(int64_t mid) { return std::find(dropped.begin(), dropped.end(), mid) != dropped.end(); }
+    void undrop(int64_t mid) { dropped.erase(std::remove(dropped.begin(), dropped.end(), mid), dropped.end()); }
+    void disconnect(int r) {
+        if (rowId[r] < 0) return;
+        release(r);
+        if (!isDropped(rowId[r])) dropped.push_back(rowId[r]);
+        rowId[r] = -1;
+        mut[r] = false;
+    }
     // a row let go (emptied, or the Composer removed): its module back to full level, unmuted, and free
     void release(int r) {
         if (rowId[r] < 0) return;
@@ -478,6 +490,9 @@ struct SynTHBloKMatrixSong : Module {
         for (int r = 0; r < kRows; r++) json_array_append_new(mu, json_boolean(mut[r]));
         json_object_set_new(root, "mutes", mu);
         json_object_set_new(root, "autoFill", json_boolean(autoFill));
+        json_t* dr = json_array();
+        for (int64_t d : dropped) json_array_append_new(dr, json_integer(d));
+        json_object_set_new(root, "dropped", dr);
         json_object_set_new(root, "in", midiIn.toJson());
         json_object_set_new(root, "out", midiOut.toJson());
         json_object_set_new(root, "jamPage", json_integer(jamPage));
@@ -502,6 +517,9 @@ struct SynTHBloKMatrixSong : Module {
         if (json_t* j = json_object_get(root, "section")) curSec = clamp((int)json_integer_value(j), 0, kSecs - 1);
         loadLive(curSec);
         if (json_t* af = json_object_get(root, "autoFill")) autoFill = json_boolean_value(af);
+        dropped.clear();
+        if (json_t* dr = json_object_get(root, "dropped"))
+            for (size_t k = 0; k < json_array_size(dr); k++) dropped.push_back(json_integer_value(json_array_get(dr, k)));
         if (json_t* mu = json_object_get(root, "mutes"))
             for (int r = 0; r < kRows; r++) mut[r] = json_is_true(json_array_get(mu, r));
         if (json_t* j = json_object_get(root, "in")) midiIn.fromJson(j);
@@ -673,7 +691,7 @@ struct RowLabel : OpaqueWidget {
         const char* name = "-";
         char pat[8] = "";
         bool gone = false;
-        static const char* const demo[kRows] = {"DRUM", "DUO", "MTX-8", "FORGE", "FX", "ECHO", "LOOP", "-"};
+        static const char* const demo[kRows] = {"DRUM", "DUO", "MTX-8", "FORGE", "FX", "ECHO", "LOOP", "QUAD"};
         if (!module) name = demo[r];
         else if (module->rowId[r] >= 0) {
             const songlink::Info* i = found ? found->get(module->rowId[r]) : NULL;
@@ -714,15 +732,48 @@ struct RowLabel : OpaqueWidget {
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
         nvgFillColor(args.vg, col);
         nvgText(args.vg, 3.f, box.size.y * 0.5f, name, NULL);
+        bool linked = !module || module->rowId[r] >= 0;
+        float px = box.size.x - 3.f - (linked ? xW() : 0.f);
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
         nvgFillColor(args.vg, oled::amber());
-        nvgText(args.vg, box.size.x - 3.f, box.size.y * 0.5f, pat, NULL);
+        nvgText(args.vg, px, box.size.y * 0.5f, pat, NULL);
+        if (linked) {   // the × that disconnects the module (brighter under the mouse)
+            float s = xW(), x0 = box.size.x - s, c = s * 0.5f, h = s * 0.2f;
+            bool hot = xHover && module;
+            nvgBeginPath(args.vg);
+            nvgRoundedRect(args.vg, x0 + 1.f, 1.f, s - 2.f, box.size.y - 2.f, 1.f);
+            nvgFillColor(args.vg, nvgTransRGBA(col, hot ? 70 : 18));
+            nvgFill(args.vg);
+            nvgBeginPath(args.vg);
+            nvgMoveTo(args.vg, x0 + c - h, box.size.y * 0.5f - h);
+            nvgLineTo(args.vg, x0 + c + h, box.size.y * 0.5f + h);
+            nvgMoveTo(args.vg, x0 + c + h, box.size.y * 0.5f - h);
+            nvgLineTo(args.vg, x0 + c - h, box.size.y * 0.5f + h);
+            nvgStrokeColor(args.vg, hot ? oled::ink() : nvgTransRGBA(col, 200));
+            nvgStrokeWidth(args.vg, 0.9f);
+            nvgLineCap(args.vg, NVG_ROUND);
+            nvgStroke(args.vg);
+        }
     }
+    // the × zone at the right end of the name
+    bool xHover = false, xPressed = false;
+    void onDragEnd(const DragEndEvent& e) override { xPressed = false; OpaqueWidget::onDragEnd(e); }
+    float xW() { return box.size.y; }
+    bool inX(Vec p) { return module && module->rowId[r] >= 0 && p.x >= box.size.x - xW(); }
+    void onHover(const HoverEvent& e) override { xHover = inX(e.pos); OpaqueWidget::onHover(e); }
+    void onLeave(const LeaveEvent& e) override { xHover = false; OpaqueWidget::onLeave(e); }
     // a left press starts a drag: let go on another row name to trade the two rows, or on this one (a click) for
     // the menu; a right-click opens the menu at once. The left release is taken too: Rack sends the drop only to
     // the widget that takes it.
     void onButton(const ButtonEvent& e) override {
         if (!module || !found) return;
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS && inX(e.pos)) {   // ×: disconnect, no drag
+            module->disconnect(r);
+            xHover = false;
+            xPressed = true;   // its release is no click for the menu
+            e.consume(this);
+            return;
+        }
         if (e.button == GLFW_MOUSE_BUTTON_LEFT) { if (e.action == GLFW_PRESS) module->selRow = r; e.consume(this); return; }
         if (e.action != GLFW_PRESS) return;
         if (e.button != GLFW_MOUSE_BUTTON_RIGHT) return;
@@ -732,6 +783,7 @@ struct RowLabel : OpaqueWidget {
     void onDragDrop(const DragDropEvent& e) override {
         dropOver = false;
         if (e.button != GLFW_MOUSE_BUTTON_LEFT || !module) return;
+        if (xPressed) { xPressed = false; return; }
         if (e.origin == this) { openMenu(); return; }
         if (RowLabel* from = dynamic_cast<RowLabel*>(e.origin)) module->swapRows(from->r, r);
     }
@@ -751,10 +803,13 @@ struct RowLabel : OpaqueWidget {
             bool taken = i.owner >= 0 && i.owner != m->id;   // another Composer conducts it: shown, not choosable
             ui::MenuItem* it = createCheckMenuItem(string::f("%s  (module %lld)", i.name, (long long)id), taken ? "in another Composer" : "",
                 [=]() { return m->rowId[row] == id; },
-                [=]() { for (int k = 0; k < kRows; k++) if (m->rowId[k] == id) m->rowId[k] = -1; m->release(row); m->rowId[row] = id; });
+                [=]() { for (int k = 0; k < kRows; k++) if (m->rowId[k] == id) m->rowId[k] = -1; m->release(row); m->undrop(id); m->rowId[row] = id; });
             it->disabled = taken;
+            if (!taken && m->isDropped(id)) it->rightText = "disconnected";
             menu->addChild(it);
         }
+        if (m->rowId[row] >= 0)
+            menu->addChild(createMenuItem("Disconnect (× on the name)", "stays off until chosen", [=]() { m->disconnect(row); }));
         menu->addChild(createMenuItem("Empty this row", "", [=]() { m->release(row); m->rowId[row] = -1; }));
     }
 };
@@ -1224,7 +1279,7 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
             // a free module that is not on a row yet takes the first empty row (unless placing is off; one another
             // Composer conducts is left alone)
             for (const songlink::Info& i : found.list) {
-                if (!m->autoFill || (i.owner >= 0 && i.owner != m->id)) continue;
+                if (!m->autoFill || (i.owner >= 0 && i.owner != m->id) || m->isDropped(i.id)) continue;
                 bool placed = false;
                 for (int r = 0; r < kRows; r++) if (m->rowId[r] == i.id) placed = true;
                 if (placed) continue;
@@ -1421,6 +1476,9 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
         menu->addChild(new MenuSeparator);
         menu->addChild(createBoolPtrMenuItem("Place free modules on empty rows", "", &m->autoFill));
         menu->addChild(createMenuItem("Empty every row", m->autoFill ? "free modules are placed again" : "", [=]() { for (int r = 0; r < kRows; r++) { m->release(r); m->rowId[r] = -1; } }));
+        menu->addChild(createMenuItem("Disconnect every module", "stays off until chosen", [=]() { for (int r = 0; r < kRows; r++) m->disconnect(r); }));
+        if (!m->dropped.empty())
+            menu->addChild(createMenuItem(string::f("Reconnect disconnected modules (%d)", (int)m->dropped.size()), "", [=]() { m->dropped.clear(); }));
         menu->addChild(createMenuItem("Clear every section", "", [=]() {
             for (int s = 0; s < kSecs; s++) for (int r = 0; r < kRows; r++) m->cells[s][r] = MS::Cell();
             m->edited(m->curSec);

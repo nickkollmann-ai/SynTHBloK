@@ -18,6 +18,7 @@
 #include "plugin.hpp"
 #include "QuadCore.hpp"
 #include "Matrix8_ui.hpp"
+#include "SongLink.hpp"
 
 namespace {
 
@@ -36,7 +37,7 @@ static bool mqBipolar(int b) { return b == B_CUT || b == B_OCT || b == B_RES; }
 
 } // namespace
 
-struct SynTHBloKMtxQuad : SynTHBloK {
+struct SynTHBloKMtxQuad : SynTHBloK, songlink::Member {   // MATRIX-SONG picks its pattern and mutes it
     enum MqParamId { PAT_PARAM = PARAMS_LEN, LEN_PARAM, BANK_PARAM, KEY_PARAM, SCALE_PARAM, OCT_PARAM,
                      RUN_PARAM, RAND_PARAM, TOSYNTH_PARAM, MQ_PARAMS_END };
     enum MqInputId { RUN_INPUT = INPUTS_LEN, MQ_INPUTS_END };
@@ -84,9 +85,13 @@ struct SynTHBloKMtxQuad : SynTHBloK {
         static const int8_t defNote[8] = {0, -1, 2, 4, -1, 7, 4, 2};
         for (int c = 0; c < 8; c++) note[0][c] = defNote[c] < 0 ? 0 : 1 << defNote[c];
         val[0][B_ACC][0] = 1.f;
+        songlink::join(this, this, "QUAD", 8, false);
     }
+    ~SynTHBloKMtxQuad() { songlink::leave(this); }
 
     int curPat() { return clamp((int)params[PAT_PARAM].getValue(), 1, 8) - 1; }
+    int songPatternNow() override { return curPat(); }
+    void songSetPattern(int p) override { params[PAT_PARAM].setValue((float)(clamp(p, 0, 7) + 1)); }
     int bank() { return clamp((int)params[BANK_PARAM].getValue(), 0, 7); }
     int len() { return clamp((int)params[LEN_PARAM].getValue(), 1, 8); }
 
@@ -222,6 +227,7 @@ struct SynTHBloKMtxQuad : SynTHBloK {
 
     void process(const ProcessArgs& args) override {
         float dt = args.sampleTime;
+        const float songG = songPoll(dt);   // MATRIX-SONG: its pattern requests, and its mute on OUT L / R and the grid gates
         if (randTrig.process(params[RAND_PARAM].getValue())) randomizeAll();
         int p = curPat();
         // RUN IN takes a trigger or a gate. A rising edge starts; a short pulse (< 50 ms) that arrives while
@@ -294,6 +300,10 @@ struct SynTHBloKMtxQuad : SynTHBloK {
         if (!playing) seq.acc = 0.f;
 
         SynTHBloK::process(args);
+        for (int o : {STEREO_L_OUTPUT, STEREO_R_OUTPUT})
+            outputs[o].setVoltage(outputs[o].getVoltage() * songG);
+        songMeter(outputs[STEREO_L_OUTPUT].getVoltage(), outputs[STEREO_R_OUTPUT].getVoltage());
+        if (songMuted.load()) gate = false;
 
         outputs[CV_OUTPUT].setChannels(ch);
         outputs[GATE_OUTPUT].setChannels(ch);
