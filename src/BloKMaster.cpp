@@ -14,6 +14,7 @@
 #include "plugin.hpp"
 #include "BloKMaster_layout.hpp"
 #include "OledUi.hpp"
+#include "ModulePictures.hpp"
 #include <cmath>
 #include <algorithm>
 #include <atomic>
@@ -1327,6 +1328,7 @@ struct BlokMasterWidget : ModuleWidget {
             s->box.size.x = 220.f;
             menu->addChild(s);
         }
+        ModulePictures::appendMenu(menu);
     }
 };
 

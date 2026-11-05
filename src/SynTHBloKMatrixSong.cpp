@@ -23,6 +23,7 @@
 #include "JackLed.hpp"
 #include "KnobTicks.hpp"
 #include "JamOwner.hpp"
+#include "ModulePictures.hpp"
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -1473,6 +1474,7 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
     void appendContextMenu(Menu* menu) override {
         MS* m = getModule<MS>();
         if (!m) return;
+        ModulePictures::appendMenu(menu);
         menu->addChild(new MenuSeparator);
         menu->addChild(createBoolPtrMenuItem("Place free modules on empty rows", "", &m->autoFill));
         menu->addChild(createMenuItem("Empty every row", m->autoFill ? "free modules are placed again" : "", [=]() { for (int r = 0; r < kRows; r++) { m->release(r); m->rowId[r] = -1; } }));

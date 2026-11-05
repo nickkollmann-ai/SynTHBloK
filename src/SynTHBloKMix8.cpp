@@ -8,6 +8,7 @@
 #include "OledUi.hpp"
 #include "JackLed.hpp"
 #include "KnobTicks.hpp"
+#include "ModulePictures.hpp"
 
 using namespace rack;
 
@@ -842,6 +843,7 @@ struct SynTHBloKMix8Widget : ModuleWidget {
     void appendContextMenu(Menu* menu) override {
         M8* m = getModule<M8>();
         if (!m) return;
+        ModulePictures::appendMenu(menu);
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("PAN / WIDTH knob"));
         menu->addChild(createMenuItem("All channels: pan", "", [=]() { for (int c = 0; c < M8_CH; c++) m->setWidthMode(c, false); }));
