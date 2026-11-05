@@ -2,6 +2,8 @@
 // (tools/patch_feed.py runs it once per plugin and caches the result in tools/port_names.json).
 //   portnames.exe <plugin slug>     ("Core" for Rack's own modules)
 //   -> {"<model slug>": {"in": ["Clock", ...], "out": [...]}, ...}
+//   portnames.exe <plugin slug> --pos <model slug>
+//   -> the same for that model plus "inPos" / "outPos" ([x, y] mm per jack, null if not on the panel) and "wmm"
 // A module whose constructor fails is left out; the map then shows its jacks by number.
 #include <rack.hpp>
 #include <cstdio>
@@ -22,6 +24,11 @@ static json_t* names(const std::vector<engine::PortInfo*>& infos) {
 int main(int argc, char** argv) {
     if (argc < 2) { fprintf(stderr, "usage: portnames <plugin slug>\n"); return 1; }
     std::string slug = argv[1];
+    // portnames <plugin> --pos <model>: also the jack positions of that one model (builds its panel, so it runs
+    // one model per call: a panel that needs more of Rack than this gives it only takes its own call down)
+    bool pos = argc >= 4 && std::string(argv[2]) == "--pos";
+    std::string only = pos ? argv[3] : "";
+    asset::systemDir = "C:\\Program Files\\VCV\\Rack2Pro";
     random::init();
     contextSet(new Context);
     APP->engine = (engine::Engine*)calloc(1, sizeof(engine::Engine));
@@ -41,11 +48,28 @@ int main(int argc, char** argv) {
     }
     json_t* out = json_object();
     for (plugin::Model* m : p->models) {
+        if (pos && m->slug != only) continue;
         try {
             engine::Module* mod = m->createModule();
             json_t* e = json_object();
             json_object_set_new(e, "in", names(mod->inputInfos));
             json_object_set_new(e, "out", names(mod->outputInfos));
+            if (pos) {
+                // build the panel the way Rack does and read where each jack sits, in mm from the panel's top left
+                app::ModuleWidget* mw = m->createModuleWidget(mod);
+                json_t* ip = json_array(); json_t* op = json_array();
+                for (int i = 0; i < (int)mod->inputs.size(); i++) json_array_append_new(ip, json_null());
+                for (int i = 0; i < (int)mod->outputs.size(); i++) json_array_append_new(op, json_null());
+                auto put = [&](app::PortWidget* pw, json_t* arr) {
+                    math::Vec c = pw->box.getCenter();
+                    json_array_set_new(arr, pw->portId, json_pack("[f,f]", c.x * 5.08 / 15.0, c.y * 5.08 / 15.0));
+                };
+                for (app::PortWidget* pw : mw->getInputs()) put(pw, ip);
+                for (app::PortWidget* pw : mw->getOutputs()) put(pw, op);
+                json_object_set_new(e, "inPos", ip);
+                json_object_set_new(e, "outPos", op);
+                json_object_set_new(e, "wmm", json_real(mw->box.size.x * 5.08 / 15.0));
+            }
             json_object_set_new(out, m->slug.c_str(), e);
         } catch (...) {}
     }
