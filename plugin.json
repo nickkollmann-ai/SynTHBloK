@@ -2,7 +2,7 @@
   "slug": "SynTHBloK",
   "name": "SynTHBloK",
   "version": "2.0.0",
-  "license": "proprietary",
+  "license": "GPL-3.0-or-later",
   "brand": "NoiZee ToyZ",
   "author": "Nicholas Kollmann",
   "modules": [
@@ -331,6 +331,8 @@
   "authorEmail": "support@liquidnick.com",
   "authorUrl": "https://www.liquidnick.com",
   "pluginUrl": "https://www.liquidnick.com/#modular",
-  "manualUrl": "",
+  "manualUrl": "https://github.com/nickkollmann-ai/SynTHBloK#readme",
+  "sourceUrl": "https://github.com/nickkollmann-ai/SynTHBloK",
+  "changelogUrl": "https://github.com/nickkollmann-ai/SynTHBloK/releases",
   "donateUrl": ""
 }

@@ -208,7 +208,7 @@ static const FxDef kFx[T_COUNT] = {
 
     {"DUB FILTER", "DUBF", TAB_FILTER, "state variable 12 dB, LP BP HP notch", {"CUTOFF", "RES", "MODE", "LFO"},
      {F_CUT, F_PCT, F_MODE, F_PCT}, {0.55f, 0.4f, 0.f, 0.2f}, {0.35f, 0.2f, 0.f, 0.f}, {0.75f, 0.6f, 0.34f, 0.4f}},
-    {"MOOG LADDER", "MOOG", TAB_FILTER, "4-pole ladder, the acid filter", {"CUTOFF", "RES", "DRIVE", "ENV"},
+    {"LADDER LP", "LADDR", TAB_FILTER, "4-pole ladder, the acid filter", {"CUTOFF", "RES", "DRIVE", "ENV"},
      {F_CUT, F_PCT, F_PCT, F_PCT}, {0.5f, 0.55f, 0.3f, 0.3f}, {0.35f, 0.3f, 0.1f, 0.1f}, {0.7f, 0.7f, 0.5f, 0.5f}},
     {"FORMANT", "VOWEL", TAB_FILTER, "3 formants, vowel wub", {"VOWEL", "MOVE", "Q", "SHIFT"},
      {F_VOWEL, F_PCT, F_PCT, F_PCT}, {0.75f, 0.3f, 0.5f, 0.5f}, {0.f, 0.1f, 0.3f, 0.35f}, {1.f, 0.5f, 0.7f, 0.65f}},
@@ -279,7 +279,7 @@ static const FxDef kFx[T_COUNT] = {
     {"SUB OCTAVER", "SUB", TAB_DRIVE, "an octave down, sub stays mono", {"SUB", "DRY", "LP", ""},
      {F_PCT, F_PCT, F_SUBLP, F_NONE}, {0.4f, 1.f, 0.4f, 0.f}, {0.25f, 0.8f, 0.25f, 0.f}, {0.5f, 1.f, 0.6f, 0.f}},
 
-    {"STEINER", "STNR", TAB_FILTER, "multimode, more vocal than the Moog", {"CUTOFF", "RES", "MODE", "DRIVE"},
+    {"STEINER", "STNR", TAB_FILTER, "multimode, more vocal than the ladder", {"CUTOFF", "RES", "MODE", "DRIVE"},
      {F_CUT, F_PCT, F_MORPH3, F_PCT}, {0.55f, 0.6f, 0.f, 0.3f}, {0.35f, 0.3f, 0.f, 0.1f}, {0.75f, 0.7f, 0.5f, 0.5f}},
     {"AUTO WAH", "WAH", TAB_FILTER, "envelope filter, talks with the input", {"SENS", "RANGE", "RES", "RELEASE"},
      {F_PCT, F_PCT, F_PCT, F_PCT}, {0.5f, 0.6f, 0.5f, 0.3f}, {0.3f, 0.4f, 0.3f, 0.2f}, {0.7f, 0.8f, 0.7f, 0.5f}},
@@ -1610,7 +1610,7 @@ static const ChainDef kChain[kChainCount] = {
      {T_THROW, T_CORR},
      {{8 / 12.f, 1.f, 0.49f, 0.3f}, {0.85f, 0.34f, 0.5f, 0.6f}},
      {0.7f, 0.6f}, 0.f},
-    {"ACID STANDARD", "tube .55 > moog > chorus > ping pong > room", 5,
+    {"ACID STANDARD", "tube .55 > ladder > chorus > ping pong > room", 5,
      {T_TUBE, T_MOOG, T_CHORUS, T_PING, T_ROOM},
      {{0.55f, 0.4f, 0.3f, 0.3f}, {0.45f, 0.6f, 0.3f, 0.4f}, {0.36f, 0.6f, 0.45f, 0.f}, {6 / 12.f, 8 / 12.f, 0.375f, 1.f}, {0.33f, 0.4f, 0.4f, 0.04f}},
      {0.8f, 0.8f, 0.8f, 0.4f, 0.18f}, 0.f},
