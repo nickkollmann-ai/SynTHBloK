@@ -21,6 +21,13 @@ CXXFLAGS +=
 # Linker flags
 LDFLAGS +=
 
+# Windows: put winpthread inside plugin.dll. Newer MSYS2 compilers make the plugin need
+# nanosleep64, which the older libwinpthread-1.dll bundled with Rack 2.6.x doesn't have,
+# so Rack fails to load the plugin with "code 127".
+ifeq ($(OS),Windows_NT)
+LDFLAGS += -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic
+endif
+
 # Add .cpp files to the build
 SOURCES += $(wildcard src/*.cpp)
 
