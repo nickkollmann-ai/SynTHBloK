@@ -3,7 +3,8 @@
 //   portnames.exe <plugin slug>     ("Core" for Rack's own modules)
 //   -> {"<model slug>": {"in": ["Clock", ...], "out": [...]}, ...}
 //   portnames.exe <plugin slug> --pos <model slug>
-//   -> the same for that model plus "inPos" / "outPos" ([x, y] mm per jack, null if not on the panel) and "wmm"
+//   -> the same for that model plus "inPos" / "outPos" ([x, y] mm per jack, null if not on the panel), "wmm" and
+//      "params" ([label, min, max, default] per param id)
 // A module whose constructor fails is left out; the map then shows its jacks by number.
 #include <rack.hpp>
 #include <cstdio>
@@ -55,6 +56,11 @@ int main(int argc, char** argv) {
             json_object_set_new(e, "in", names(mod->inputInfos));
             json_object_set_new(e, "out", names(mod->outputInfos));
             if (pos) {
+                // the knobs too, for tools/make_patches.py: [name, min, max, default] per param id
+                json_t* pa = json_array();
+                for (engine::ParamQuantity* pq : mod->paramQuantities)
+                    json_array_append_new(pa, pq ? json_pack("[s,f,f,f]", pq->getLabel().c_str(), pq->getMinValue(), pq->getMaxValue(), pq->getDefaultValue()) : json_null());
+                json_object_set_new(e, "params", pa);
                 // build the panel the way Rack does and read where each jack sits, in mm from the panel's top left
                 app::ModuleWidget* mw = m->createModuleWidget(mod);
                 json_t* ip = json_array(); json_t* op = json_array();

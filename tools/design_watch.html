@@ -140,13 +140,60 @@ main{display:grid;grid-template-columns:minmax(260px,.7fr) minmax(0,1fr) minmax(
 #patch-map.sel .c.on{opacity:1;stroke-width:2.4}#patch-map.sel .j.on,#patch-map.sel .jc.on{opacity:1}
 #patch-map .m.on .hi{stroke:var(--mg)}
 body.popup #patch-close{display:none}
+/* opened from the top bar: a pop-up over the workbench, the way liquidnick.com opens ToyBoX (dimmed, blurred page
+   behind; a rounded box with a magenta edge that pops in; closes with ×, Esc or a click outside) */
+html.pm-open{overflow:hidden}
+#patch-bg{position:fixed;inset:0;z-index:8;display:none;background:#05070bcc;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+#patch-bg.on{display:block}
+body:not(.popup) #patch{inset:1.2vh 1.2vw;border-radius:24px;overflow:hidden;border:1px solid #ff00aa77;background:#0d0d14;
+  box-shadow:0 0 0 1px #000,0 0 60px #ff00aa33,0 30px 80px #000c}
+body:not(.popup) #patch.on{animation:synpop .22s ease-out}
+@keyframes synpop{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){body:not(.popup) #patch.on,#ro.on .box{animation:none}}
+#patch .pbrand{display:inline-flex;flex-direction:column;line-height:1;margin-right:14px;vertical-align:middle}
+#patch .pbrand s{text-decoration:none;color:var(--tx);font-size:15px;letter-spacing:.02em}
+#patch .pbrand i{font-style:normal;font-weight:700;font-size:9px;letter-spacing:.32em;color:var(--or);margin-top:3px}
+#patch .pt{display:none}
+body:not(.popup) #patch>.head{min-height:44px;padding:0 10px 0 18px;align-items:center;background:linear-gradient(90deg,#ff00aa18,transparent 70%);border-bottom:1px solid #ff00aa44}
+#patch .acts a,#patch .acts button{font:inherit;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--cy);background:#0d1d27;
+  border:1px solid #0e4a5a;border-radius:10px;padding:6px 12px;cursor:pointer;text-decoration:none;min-height:30px;display:inline-flex;align-items:center}
+#patch .acts a:hover,#patch .acts button:hover{border-color:var(--cy)}
+#patch #patch-close{border-color:#ff00aa88;color:var(--mg);font-size:16px;line-height:1;padding:4px 14px}
+#patch #rack-open{background:var(--mg);border-color:var(--mg);color:#070b10;font-weight:600}
+#patch #rack-open[hidden]{display:none}
+#patch-pick b.new{margin-left:6px;padding:0 4px;font-size:9px;font-weight:600;letter-spacing:.1em;color:#070b10;background:var(--or)}
+/* the pop-up window: the patches page in a framed case, like a module panel (screws in the corners, the
+   SynTHBloK header), with a lit inner edge */
+#patch .scr{display:none}
+body.popup{background:#030507}
+body.popup #patch{inset:0;padding:16px;background:linear-gradient(160deg,#141c22,#0a0f13 40%,#0d1419);border-radius:12px;
+  box-shadow:inset 0 1px 0 #3a4a54,inset 0 -1px 0 #000,inset 0 0 0 1px #1d2a32}
+body.popup #patch::after{content:"";position:absolute;inset:14px;border:1px solid #1d4b58;border-radius:6px;pointer-events:none;
+  box-shadow:0 0 0 1px #000,0 0 18px #00e5ff26,inset 0 0 14px #00e5ff14}
+body.popup #patch::before{content:"";position:absolute;left:40px;right:40px;top:14px;height:2px;z-index:1;pointer-events:none;
+  background:linear-gradient(90deg,transparent,var(--cy),var(--mg),transparent)}
+body.popup #patch>.head,body.popup #patch-body{border-radius:5px;overflow:hidden}
+body.popup #patch>.head{position:relative;padding:6px 14px;background:linear-gradient(180deg,#0f1a22,#091016);border-bottom:1px solid #1d4b58;border-radius:5px 5px 0 0;align-items:center}
+body.popup #patch-body{border-radius:0 0 5px 5px}
+body.popup #patch .pt{display:none}
+body.popup #patch .pbrand{display:inline-flex;flex-direction:column;line-height:1;margin-right:14px;vertical-align:middle}
+body.popup #patch .pbrand s{text-decoration:none;color:var(--tx);font-size:15px;letter-spacing:.02em}
+body.popup #patch .pbrand i{font-style:normal;font-weight:700;font-size:9px;letter-spacing:.32em;color:var(--or);margin-top:3px}
+body.popup #patch .scr{display:block;position:absolute;width:9px;height:9px;border-radius:50%;z-index:2;
+  background:radial-gradient(circle at 35% 35%,#d7dde2,#7d8890 55%,#3c444a);box-shadow:0 1px 1px #000}
+body.popup #patch .scr::after{content:"";position:absolute;left:1px;right:1px;top:4px;height:1px;background:#2a3036;transform:rotate(-35deg)}
+body.popup #patch .scr:nth-child(1){left:3px;top:3px}body.popup #patch .scr:nth-child(2){right:3px;top:3px}
+body.popup #patch .scr:nth-child(3){left:3px;bottom:3px}body.popup #patch .scr:nth-child(4){right:3px;bottom:3px}
 /* OPEN IN RACK: the button over a saved patch and its pop-up (tools/rack_open_server.py does the opening) */
 #patch .head .acts{display:flex;gap:8px;align-items:center}
 #rack-open{background:var(--mg);border:1px solid var(--mg);color:#070b10;font:inherit;font-size:10px;font-weight:600;letter-spacing:.14em;padding:2px 12px;cursor:pointer;box-shadow:0 0 12px #ff00aa66}
 #rack-open:hover{box-shadow:0 0 20px #ff00aaaa}#rack-open[hidden]{display:none}
-#ro{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:#02050899;backdrop-filter:blur(3px)}
+#ro{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:#05070bcc;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 #ro.on{display:flex}
-#ro .box{width:min(560px,92vw);background:linear-gradient(180deg,#0c141b,#070b10);border:1px solid #1d4b58;box-shadow:0 0 0 1px #00e5ff22,0 0 40px #00e5ff22,0 30px 80px #000;position:relative;overflow:hidden}
+#ro.on .box{animation:synpop .22s ease-out}
+#ro .box{width:min(560px,92vw);background:#0d0d14;border:1px solid #ff00aa77;border-radius:20px;box-shadow:0 0 0 1px #000,0 0 60px #ff00aa33,0 30px 80px #000c;position:relative;overflow:hidden}
+#ro .top{background:linear-gradient(90deg,#ff00aa18,transparent 70%);border-bottom-color:#ff00aa44!important}
+#ro .bot button{border-radius:10px}#ro .x{color:var(--mg)!important}
 #ro .box::before{content:"";position:absolute;inset:0 0 auto;height:2px;background:linear-gradient(90deg,transparent,var(--cy),var(--mg),transparent)}
 #ro .top{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);font-size:10px;letter-spacing:.18em;color:var(--mut)}
 #ro .top b{color:var(--cy);font-weight:500}
@@ -239,7 +286,8 @@ footer .nav:hover{border-color:var(--cy)}
   </section>
 </main>
 <footer><button type="button" class="nav" id="s-prev" title="Previous (←)">&lsaquo;</button><div id="strip"></div><button type="button" class="nav" id="s-next" title="Next (→)">&rsaquo;</button><span id="s-count"></span></footer>
-<div id="patch"><div class="head"><span>PATCHES <b id="patch-at">waiting for tools/patch_feed.json</b></span><span class="acts"><button type="button" id="rack-open" hidden title="Open this patch in VCV Rack">OPEN IN RACK</button><button type="button" id="patch-close">CLOSE · Esc</button></span></div>
+<div id="patch-bg"></div>
+<div id="patch" role="dialog" aria-modal="true" aria-label="SynTHBloK patches"><i class="scr"></i><i class="scr"></i><i class="scr"></i><i class="scr"></i><div class="head"><span><span class="pbrand"><s>SynTHBloK</s><i>PATCHES</i></span><span class="pt">PATCHES</span> <b id="patch-at">waiting for tools/patch_feed.json</b></span><span class="acts"><button type="button" id="rack-open" hidden title="Open this patch in VCV Rack">OPEN IN RACK</button><button type="button" id="patch-close" aria-label="Close">&times;</button></span></div>
   <div id="patch-body"><div id="patch-pick"></div><div id="patch-map"><div id="patch-zoom"><button type="button" data-z="1.25" title="Zoom in">+</button><button type="button" data-z="0.8" title="Zoom out">&minus;</button><button type="button" data-z="0" title="Fit">&#9634;</button></div></div><div id="patch-list"></div></div></div>
 <div id="ro"><div class="box"><div class="top"><span>OPEN IN <b>VCV RACK</b></span><button type="button" class="x" title="Close">&times;</button></div>
   <div class="mid"><h3 id="ro-name"></h3><div class="sub" id="ro-sub"></div><div class="pv" id="ro-pv"></div><div class="mods" id="ro-mods"></div>
@@ -763,14 +811,17 @@ async function scanLib() {
   if (!pShown.live) drawPatch(new Set(), false);
 }
 function current() { return pShown.live ? patchData : libData.find(p => p.file === pShown.file && p.lib === pShown.lib); }
+// newest first; the newest of our own patches is marked NEW and is the one PATCHES opens on
+const libSorted = lib => libData.filter(p => p.lib === lib).sort((a, b) => b.t - a.t || a.name.localeCompare(b.name));
+const newest = () => libSorted('SynTHBloK')[0] || libSorted('Rack')[0];
 function drawPick() {
-  const item = (on, k, name, sub) => `<div data-p="${esc(k)}"${on ? ' class="on"' : ''}>${esc(name)}<em>${esc(sub)}</em></div>`;
+  const item = (on, k, name, sub, isNew) => `<div data-p="${esc(k)}"${on ? ' class="on"' : ''}>${esc(name)}${isNew ? '<b class="new">NEW</b>' : ''}<em>${esc(sub)}</em></div>`;
   let h = '<h4>RACK NOW</h4>' + item(pShown.live, 'live', 'Live patch', patchData ? `${patchData.modules.length} modules · ${patchData.cables.length} cables` : 'waiting');
   for (const [lib, title] of [['SynTHBloK', 'SYNTHBLOK PATCHES'], ['Rack', "RACK'S PATCHES FOLDER"]]) {
-    const ps = libData.filter(p => p.lib === lib);
+    const ps = libSorted(lib);
     if (!ps.length) continue;
     h += `<h4>${title}</h4>` + ps.map(p => item(!pShown.live && pShown.file === p.file && pShown.lib === lib, lib + '/' + p.file, p.name,
-      `${p.modules.length} modules · ${p.cables.length} cables · ${time(p.t)}`)).join('');
+      `${p.modules.length} modules · ${p.cables.length} cables · ${time(p.t)}`, p === newest())).join('');
   }
   document.getElementById('patch-pick').innerHTML = h;
 }
@@ -936,33 +987,43 @@ document.querySelector('#ro .go').onclick = async () => {
 };
 document.querySelectorAll('#ro .cancel, #ro .x').forEach(b => b.onclick = () => roShow(false));
 document.getElementById('ro').onclick = e => { if (e.target.id === 'ro') roShow(false); };
+// PATCH MAP and PATCHES open the patches page as a pop-up over the workbench (like ToyBoX on liquidnick.com):
+// the page behind dims and stops scrolling, focus goes back to the button on close. (?patches=live|lib still shows
+// the patches page on its own.)
+let patchFrom = null;
 function openPatches(what) {
-  const p = document.getElementById('patch'); p.classList.add('on');
+  const p = document.getElementById('patch');
+  if (!p.classList.contains('on') && popupMode === null) {
+    patchFrom = document.activeElement;
+    document.getElementById('patch-bg').classList.add('on'); document.documentElement.classList.add('pm-open');
+  }
+  p.classList.add('on');
   if (what === 'live') { pShown = { live: true }; document.getElementById('patch-btn').classList.remove('hot'); }
-  else if (what === 'lib' && pShown.live && libData.length) { const f = libData.find(q => q.lib === 'SynTHBloK') || libData[0]; pShown = { lib: f.lib, file: f.file }; }
+  else if (what === 'lib' && libData.length) { const f = newest(); pShown = { lib: f.lib, file: f.file }; }
   patchSel = null; drawPick(); drawPatch(new Set(), true); syncOpenBtn();
+  if (popupMode === null) document.getElementById('patch-close').focus();
 }
+function closePatches() {
+  const p = document.getElementById('patch');
+  if (!p.classList.contains('on') || popupMode !== null) return;
+  p.classList.remove('on'); document.getElementById('patch-bg').classList.remove('on'); document.documentElement.classList.remove('pm-open');
+  if (patchFrom && patchFrom.focus) patchFrom.focus();
+}
+const popupMode = new URLSearchParams(location.search).get('patches');
 document.getElementById('patch-btn').onclick = () => openPatches('live');
-// PATCHES opens in its own pop-up window (this page with ?patches, showing only the patches page); a second press
-// brings that window back to the front
-const popupMode = new URLSearchParams(location.search).has('patches');
-let libWin = null;
-document.getElementById('lib-btn').onclick = () => {
-  if (libWin && !libWin.closed) { libWin.focus(); return; }
-  libWin = window.open('design_watch.html?desktop=1&patches', 'synthblok-patches', 'popup,width=1500,height=900');
-  if (!libWin) openPatches('lib');   // pop-ups blocked: the page here instead
-};
-if (popupMode) {
+document.getElementById('lib-btn').onclick = () => openPatches('lib');
+document.getElementById('patch-bg').onmousedown = closePatches;
+if (popupMode !== null) {
   document.body.classList.add('popup');
   document.title = 'SynTHBloK Patches';
-  const go = () => libData.length || libSeen ? openPatches('lib') : setTimeout(go, 300);
-  go();
+  if (popupMode === 'live') openPatches('live');
+  else { const go = () => libData.length || libSeen ? openPatches('lib') : setTimeout(go, 300); go(); }
 }
-document.getElementById('patch-close').onclick = () => document.getElementById('patch').classList.remove('on');
+document.getElementById('patch-close').onclick = closePatches;
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (document.getElementById('ro').classList.contains('on')) roShow(false);
-  else if (!popupMode) document.getElementById('patch').classList.remove('on');
+  else closePatches();
 });
 document.getElementById('patch-list').onclick = e => {
   const r = e.target.closest('[data-k]'); if (!r) return;

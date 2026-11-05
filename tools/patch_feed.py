@@ -62,6 +62,11 @@ def plugin_info(slug):
     write(CACHE, cache)
     return hit
 
+# and their widths (HP), so one doesn't stretch to fill the gap beside it
+# (from the panels in Rack's res/Core)
+CORE_HP = {'AudioInterface2': 5, 'AudioInterface': 10, 'AudioInterface16': 19, 'MIDIToCVInterface': 8, 'CV-MIDI': 8,
+           'MIDICCToCVInterface': 10, 'MIDITriggerToCVInterface': 10, 'CV-CC': 10, 'CV-Gate': 10, 'MIDI-Map': 10, 'Notes': 16}
+
 def portnames(args):
     env = dict(os.environ, PATH=';'.join(DLLPATH + [os.environ.get('PATH', '')]))
     try:
@@ -130,6 +135,7 @@ def build(p):
         jp = jack_pos(slug, model, info)
         if jp.get('inPos') is not None: e['inPos'], e['outPos'] = jp['inPos'], jp.get('outPos', [])
         if jp.get('wmm'): e['hp'] = round(jp['wmm'] / 5.08)
+        elif slug == 'Core' and model in CORE_HP: e['hp'] = CORE_HP[model]
         mods[m['id']] = e; out.append(e)
     # width from the gap to the next module in the same row (the patch file doesn't store it)
     rows = {}
