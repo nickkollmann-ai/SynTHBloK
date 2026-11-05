@@ -1,7 +1,7 @@
 """Builds PATCH GEN's parts database (liquidnick.com/patchgen/parts/) from the plugins installed here.
 For each plugin: one portnames --pos run per module (jack names, which jacks are on the panel, width, knobs), plus the
 module's name and tags from its plugin.json. Only open-source plugins (a free licence in plugin.json) and SynTHBloK go
-in, since the database is published; others are listed in skipped.json.
+in, since the database is published; the others are only printed.
     python3 tools/build_parts_db.py [out dir] [plugin ...]
 Out dir defaults to the site repo's patchgen/parts. Re-running only re-reads plugins whose version changed."""
 import json, os, re, subprocess, sys, tempfile
@@ -64,4 +64,4 @@ if __name__ == '__main__':
         index['plugins'][slug] = {'version': d['version'], 'models': len(d['models'])}
         print(slug, d['version'], len(d['models']), 'models', flush=True)
     json.dump(index, open(idx_path, 'w', encoding='utf-8'), separators=(',', ':'), sort_keys=True)
-    json.dump(skipped, open(os.path.join(OUT, '..', 'skipped.json'), 'w', encoding='utf-8'), indent=1, sort_keys=True)
+    print(len(skipped), 'skipped (not published):', ', '.join(sorted(skipped)))
