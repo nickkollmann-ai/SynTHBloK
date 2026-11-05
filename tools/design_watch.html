@@ -161,6 +161,10 @@ body:not(.popup) #patch>.head{min-height:44px;padding:0 10px 0 18px;align-items:
 #patch #patch-close{border-color:#ff00aa88;color:var(--mg);font-size:16px;line-height:1;padding:4px 14px}
 #patch #rack-open{background:var(--mg);border-color:var(--mg);color:#070b10;font-weight:600}
 #patch #rack-open[hidden]{display:none}
+#gen-btn{background:transparent;border:1px solid var(--mg);color:var(--mg);font:inherit;font-size:10px;font-weight:600;letter-spacing:.14em;padding:2px 12px;cursor:pointer}
+#patch .acts button,#gen-style{white-space:nowrap;flex:none}
+#gen-btn:hover{box-shadow:0 0 14px #ff00aa77}#gen-btn:disabled{opacity:.5;cursor:wait}
+#gen-style{background:#070b10;border:1px solid var(--line);color:var(--tx);font:inherit;font-size:10px;letter-spacing:.08em;padding:1px 4px;max-width:120px}
 #patch-pick b.new{margin-left:6px;padding:0 4px;font-size:9px;font-weight:600;letter-spacing:.1em;color:#070b10;background:var(--or)}
 /* the pop-up window: the patches page in a framed case, like a module panel (screws in the corners, the
    SynTHBloK header), with a lit inner edge */
@@ -213,7 +217,10 @@ body.popup #patch .scr:nth-child(3){left:3px;bottom:3px}body.popup #patch .scr:n
 #ro .cancel{background:transparent;border:1px solid var(--line);color:var(--cy)}
 #ro .go{background:var(--mg);border:1px solid var(--mg);color:#070b10;font-weight:600;box-shadow:0 0 14px #ff00aa66}
 #ro .go:disabled{opacity:.4;cursor:default;box-shadow:none}
-#patch-zoom{position:absolute;right:10px;bottom:10px;display:flex;gap:4px}
+#patch-zoom{position:absolute;right:10px;bottom:46px;display:flex;gap:4px}
+#patch-gen{position:absolute;right:10px;bottom:10px;display:flex;gap:6px;align-items:stretch;cursor:default}
+#patch-gen #gen-btn{font-size:11px;padding:5px 16px;background:#070b10cc;box-shadow:0 0 12px #ff00aa44}
+#patch-gen #gen-style{font-size:11px;padding:3px 6px;max-width:none}
 #patch-zoom button{background:#070b10cc;border:1px solid var(--line);color:var(--cy);font:inherit;font-size:12px;width:26px;height:24px;cursor:pointer}
 #patch-list{overflow:hidden auto;scrollbar-width:thin;border-left:1px solid var(--line);background:#070b10;font-size:11px;line-height:16px}
 @media(max-width:900px){#patch-list{border-left:0;border-top:1px solid var(--line)}}
@@ -288,7 +295,7 @@ footer .nav:hover{border-color:var(--cy)}
 <footer><button type="button" class="nav" id="s-prev" title="Previous (←)">&lsaquo;</button><div id="strip"></div><button type="button" class="nav" id="s-next" title="Next (→)">&rsaquo;</button><span id="s-count"></span></footer>
 <div id="patch-bg"></div>
 <div id="patch" role="dialog" aria-modal="true" aria-label="SynTHBloK patches"><i class="scr"></i><i class="scr"></i><i class="scr"></i><i class="scr"></i><div class="head"><span><span class="pbrand"><s>SynTHBloK</s><i>PATCHES</i></span><span class="pt">PATCHES</span> <b id="patch-at">waiting for tools/patch_feed.json</b></span><span class="acts"><button type="button" id="rack-open" hidden title="Open this patch in VCV Rack">OPEN IN RACK</button><button type="button" id="patch-close" aria-label="Close">&times;</button></span></div>
-  <div id="patch-body"><div id="patch-pick"></div><div id="patch-map"><div id="patch-zoom"><button type="button" data-z="1.25" title="Zoom in">+</button><button type="button" data-z="0.8" title="Zoom out">&minus;</button><button type="button" data-z="0" title="Fit">&#9634;</button></div></div><div id="patch-list"></div></div></div>
+  <div id="patch-body"><div id="patch-pick"></div><div id="patch-map"><div id="patch-zoom"><button type="button" data-z="1.25" title="Zoom in">+</button><button type="button" data-z="0.8" title="Zoom out">&minus;</button><button type="button" data-z="0" title="Fit">&#9634;</button></div><div id="patch-gen"><select id="gen-style" title="Style of the next generated patch"><option value="">ANY STYLE</option><option>House</option><option>Deep House</option><option>Techno</option><option>Acid</option><option>Trance</option><option>Electro</option><option>Hip-Hop</option><option>Trap</option><option>Lo-Fi</option><option>Synthwave</option><option>Drum &amp; Bass</option><option>Dub</option><option>Ambient</option><option>Funk</option><option>Afrobeat</option><option>Trip-Hop</option></select><button type="button" id="gen-btn" title="Generate a new patch and show it here (Rack is left alone)">GENERATE</button></div></div><div id="patch-list"></div></div></div>
 <div id="ro"><div class="box"><div class="top"><span>OPEN IN <b>VCV RACK</b></span><button type="button" class="x" title="Close">&times;</button></div>
   <div class="mid"><h3 id="ro-name"></h3><div class="sub" id="ro-sub"></div><div class="pv" id="ro-pv"></div><div class="mods" id="ro-mods"></div>
   <div class="note">Rack closes the patch that is open now and opens this one. Rack saves what was open first, and a copy goes to <b>Rack2/autosave-before-open</b>.</div>
@@ -782,6 +789,7 @@ async function scanChat() {
 // Tap a module or a cable to pick out its wires; the list on the right names each end's jack.
 let patchSeen = '', patchData = null, patchKeys = null, patchSel = null;
 let libSeen = '', libData = [], pShown = { live: true }, pView = null;
+let genWant = null, genTimer = null;   // GEN: the file waited for, and its time-out
 const pShort = n => String(n).replace(/^SynTHBloK\s+/, '');
 const pJack = n => String(n).split(/:| \(/)[0].trim();
 const pKey = c => `${c.from}.${c.fo}>${c.to}.${c.ti}`;
@@ -807,6 +815,9 @@ async function scanLib() {
   let d; try { d = JSON.parse(txt); } catch (e) { return; }
   libSeen = txt; libData = d.patches || [];
   document.getElementById('lib-n').textContent = libData.length;
+  // a GEN patch has landed in the feed: show it
+  const got = genWant && libData.find(p => p.file === genWant);
+  if (got) { genWant = null; genDone(); pShown = { lib: got.lib, file: got.file }; patchSel = null; drawPick(); drawPatch(new Set(), true); syncOpenBtn(); return; }
   drawPick();
   if (!pShown.live) drawPatch(new Set(), false);
 }
@@ -919,7 +930,7 @@ function zoomAt(f, cx, cy) {
   let drag = null, moved = false;
   map.addEventListener('wheel', e => { e.preventDefault(); zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY); }, { passive: false });
   map.addEventListener('pointerdown', e => {
-    if (e.target.closest('#patch-zoom')) return;
+    if (e.target.closest('#patch-zoom, #patch-gen')) return;
     drag = { x: e.clientX, y: e.clientY, vx: pView && pView.x, vy: pView && pView.y }; moved = false;
   });
   window.addEventListener('pointermove', e => {
@@ -933,6 +944,7 @@ function zoomAt(f, cx, cy) {
   window.addEventListener('pointerup', () => { drag = null; map.classList.remove('drag'); });
   map.addEventListener('click', e => {
     if (moved) { moved = false; return; }
+    if (e.target.closest('#patch-gen')) return;
     const z = e.target.closest('#patch-zoom button');
     if (z) { const f = +z.dataset.z, r = map.getBoundingClientRect(); f ? zoomAt(f, r.left + r.width / 2, r.top + r.height / 2) : pView && fitView(pView.W, pView.H); return; }
     const c = e.target.closest('[data-k]'), m = e.target.closest('.m');
@@ -983,6 +995,28 @@ document.querySelector('#ro .go').onclick = async () => {
   } catch (e) {
     st.classList.add('bad'); go.disabled = false;
     st.textContent = 'Could not reach the Rack opener (tools/rack_open_server.py on port 8767): ' + e.message;
+  }
+};
+// GEN: tools/rack_open_server.py builds one new patch in the chosen style (tools/make_series_patches.py --gen) into
+// Rack's patches folder; when tools/patch_feed.py lists it, the pop-up shows it. OPEN IN RACK then opens it if wanted.
+function genDone(msg) {
+  clearTimeout(genTimer); const b = document.getElementById('gen-btn');
+  b.disabled = false; b.textContent = 'GENERATE';
+  if (msg) document.getElementById('patch-at').textContent = msg;
+}
+document.getElementById('gen-btn').onclick = async () => {
+  const b = document.getElementById('gen-btn');
+  b.disabled = true; b.textContent = 'GENERATING...';
+  document.getElementById('patch-at').textContent = 'generating a new patch...';
+  try {
+    const r = await fetch(RACK_OPEN + '/gen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ style: document.getElementById('gen-style').value }) });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'failed');
+    genWant = j.file;
+    genTimer = setTimeout(() => { genWant = null; genDone('made ' + j.file + ', but the PATCHES list has not picked it up (is tools/patch_feed.py running?)'); }, 20000);
+    scanLib();
+  } catch (e) {
+    genDone('Could not reach the patch generator (tools/rack_open_server.py on port 8767): ' + e.message);
   }
 };
 document.querySelectorAll('#ro .cancel, #ro .x').forEach(b => b.onclick = () => roShow(false));

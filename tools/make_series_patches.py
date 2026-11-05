@@ -5,10 +5,16 @@ The SynTHBloK series is the heart of every patch:
   - a SynTHBloK mixer (MIX-12, MIX-8 or MIX-6) to Rack's Audio, sometimes through BloKMaster
   - a SynTHBloK drum part: MTX-DRUM, EUCLID playing KICK + SNARE/HAT, MTX-8 or MTX FORGE (random beats)
   - a SynTHBloK main voice: MTX QUAD or MTX-DUO (random lead and bass lines)
-Around them: layers playing the main voice's notes (SynTHBloK POLY, VCV Fundamental, Plaits, Rings, Elements),
-effect chains (mostly SynTHBloK: DUAL FILTER, MORPH FILTER, GRAIN-FORGE, CHARACTER DELAY, STEREO, MTX-ECHO;
-sometimes Clouds, Plateau, Surge XT), a send/return reverb or echo, and modulation (Fundamental LFO / Random,
-the series' own CV outs) into the effects' CV jacks.
+Around them, from the installed plugins (the series parts stay the most likely pick at each step):
+  - layers playing the main voice's notes: SynTHBloK POLY, VCV Fundamental, Plaits, Rings, Elements, an oscillator
+    (Bogaudio, Befaco EvenVCO, Braids, Vult Vraids) through Bogaudio's LPG, or oscillator -> filter (kocmoc LADR / SVF-1,
+    Bogaudio VCF, Vult Stabile, Hora Juicy) -> VCA with a Bogaudio / Befaco / Fundamental envelope
+  - effect chains: at least one SynTHBloK (DUAL FILTER, MORPH FILTER, GRAIN-FORGE, CHARACTER DELAY, STEREO), often
+    one of Clouds, Plateau, Surge XT, VCV Pro chorus / flanger / phaser, ChowTape, ChowChorus, 4ms width / comp,
+    AS delay, GP chorus, Fundamental Delay
+  - 0-2 extra drums (VCV Drums, 4ms XOX, Befaco, Autodafe) on the drum part's trigger for their role
+  - a send/return: MTX-ECHO, Plateau, Surge, Spring, VCV Pro Reverb, AS Reverb, ChowFDN, Fundamental Delay
+  - modulation (Fundamental LFO / Random, Bogaudio LFO / Walk, the series' own CV outs) into the effects' CV jacks.
 MTX-DRUM, MTX QUAD, MTX-ECHO and MTX COMPOSER start from their state in tools/patches_base.json (your patterns).
 Every cable is checked against the jacks on the module's panel (Rack drops a cable to a jack that isn't there).
 Each patch is in one style (tools/patch_genres.py: tempo, key, scale, chord progression, grooves, tones and
@@ -111,20 +117,28 @@ def clock(P, song, m):
 SERIES_FX = [('SynTHBloKDualFilter', 'DualFilter'), ('NoizeeFlagshipFilter', 'Morph'), ('SynTHBloKGrainForge', 'GrainForge'),
              ('SynTHBloKFX', 'CharDelay'), ('SynTHBloKStereo', 'Stereo')]
 OTHER_FX = [('AudibleInstruments', 'Clouds', 'Clouds'), ('Valley', 'Plateau', 'Plateau'), ('SurgeXTRack', 'SurgeXTFXChorus', 'SurgeChorus'),
-            ('SurgeXTRack', 'SurgeXTFXPhaser', 'SurgePhaser'), ('SurgeXTRack', 'SurgeXTDelay', 'SurgeDelay')]
-SENDS = [('SynTHBloK', 'SynTHBloKEcho', 'Echo'), ('Valley', 'Plateau', 'Plateau'), ('SurgeXTRack', 'SurgeXTFXReverb2', 'SurgeReverb'),
-         ('Befaco', 'SpringReverb', 'Spring')]
+            ('SurgeXTRack', 'SurgeXTFXPhaser', 'SurgePhaser'), ('SurgeXTRack', 'SurgeXTDelay', 'SurgeDelay'),
+            ('VCV-Pro', 'Chorus', 'ProChorus'), ('VCV-Pro', 'Flanger', 'ProFlanger'), ('VCV-Pro', 'Phaser', 'ProPhaser'),
+            ('ChowDSP', 'ChowTape', 'Tape'), ('ChowDSP', 'ChowChorus', 'ChowChorus'), ('4ms-ProducerPack', 'StereoWidth', 'Width'),
+            ('4ms-ProducerPack', 'SeventiesComp', 'Comp70s'), ('AS', 'DelayPlusStereoFx', 'ASDelay'), ('GP', 'StereoChorus', 'GPChorus'),
+            ('Fundamental', 'Delay', 'FDelay')]
+SENDS = [('SynTHBloK', 'SynTHBloKEcho', 'Echo'), ('SynTHBloK', 'SynTHBloKEcho', 'Echo'), ('Valley', 'Plateau', 'Plateau'),
+         ('SurgeXTRack', 'SurgeXTFXReverb2', 'SurgeReverb'), ('Befaco', 'SpringReverb', 'Spring'), ('VCV-Pro', 'Reverb', 'ProReverb'),
+         ('AS', 'ReverbStereoFx', 'ASReverb'), ('ChowDSP', 'ChowFDN', 'FDN'), ('Fundamental', 'Delay', 'FDelay')]
+# effects whose clock jack sets their time: not on the COMPOSER clock
+NO_CLOCK = {'Delay'}
 # CV jacks worth moving on each effect (by name), for the modulation
 MOD_TARGETS = {'SynTHBloKDualFilter': ['filter a cutoff', 'filter b cutoff'], 'NoizeeFlagshipFilter': ['morph cv', 'cutoff cv', 'width cv'],
                'SynTHBloKStereo': ['width', 'tilt', 'air'], 'SynTHBloKFX': ['time cv', 'fbk', 'tone'],
-               'Clouds': ['position', 'size', 'texture'], 'Plateau': ['size', 'decay'], 'BlokMaster': ['saturation', 'stereo width']}
+               'Clouds': ['position', 'size', 'texture'], 'Plateau': ['size', 'decay'], 'BlokMaster': ['saturation', 'stereo width'],
+               'Chorus': ['depth'], 'Phaser': ['frequency'], 'StereoWidth': ['width cv'], 'StereoChorus': ['cv depth']}
 
 def io(P, m):
     """a module's main audio in (L, R) and out (L, R) jack ids, by name"""
     il = P.find(m, 'in', 'left', 'in l', 'main', 'audio', 'input 1')
-    ir = P.find(m, 'in', 'right', 'in r', 'side')
-    ol = P.find(m, 'out', 'left', 'out l', 'main', 'mix', 'audio left', 'chopp')
-    orr = P.find(m, 'out', 'right', 'out r', 'auxiliary')
+    ir = P.find(m, 'in', 'right', 'in r', 'side', 'audio right')
+    ol = P.find(m, 'out', 'left', 'out l', 'main', 'mix', 'audio left', 'chopp', 'audio')
+    orr = P.find(m, 'out', 'right', 'out r', 'auxiliary', 'audio right')
     return il, ir, ol, orr
 
 def chain(P, song, src, fxs, mods):
@@ -137,8 +151,8 @@ def chain(P, song, src, fxs, mods):
         if model == 'NoizeeFlagshipFilter': il, ir = 16, 17
         if il is None or ol is None: continue
         P.w(src[0], (m, il), '#ff9300')
-        if len(src) > 1 and ir is not None: P.w(src[1], (m, ir), '#ff9300')
-        clock(P, song, m)
+        if ir is not None: P.w(src[1] if len(src) > 1 else src[0], (m, ir), '#ff9300')   # a mono source into both sides
+        if model not in NO_CLOCK: clock(P, song, m)
         src = [(m, ol)] + ([(m, orr)] if orr is not None else [])
         P.names.append(dict(SERIES_FX + [(o[1], o[2]) for o in OTHER_FX]).get(model, model))
         mods.append(m)
@@ -170,6 +184,29 @@ def fx_knobs(rng, model, g):
     if model == 'Plateau':   # as an insert: the dry signal stays
         return {0: 1.0, 1: 0.15 + 0.3 * rev, 2: 0.02, 5: 0.3 + 0.5 * rev, 7: 0.5 + 0.4 * rev, 8: 6.0 + 3 * br, 9: 2.0,
                 10: 0.1, 12: 0.5}
+    beat = 60.0 / g['bpm']
+    if model == 'Chorus':    # VCV Pro: gentle, slow
+        return {0: 0.02, 1: (br - 0.5) * 0.4, 2: rng.uniform(0.25, 0.5), 3: rng.uniform(-2.0, -0.8), 6: 0.3}
+    if model == 'Flanger':
+        return {1: rng.uniform(0.1, 0.35), 2: rng.uniform(0.3, 0.5), 3: rng.uniform(-2.5, -1.5)}
+    if model == 'Phaser':
+        return {1: rng.uniform(0.1, 0.35), 2: rng.uniform(0.3, 0.6), 3: rng.uniform(-2.5, -1.0), 4: 0.3}
+    if model == 'ChowTape':   # its defaults: warm, not crushed
+        return {}
+    if model == 'ChowChorus':
+        return {0: rng.uniform(0.2, 0.4), 1: rng.uniform(0.3, 0.5), 2: 0.0, 3: rng.uniform(0.25, 0.4)}
+    if model == 'StereoWidth':
+        return {0: rng.uniform(0.6, 0.8), 1: 0.0}
+    if model == 'SeventiesComp':
+        return {0: rng.uniform(0.25, 0.45), 1: 0.0, 2: 0.25, 4: 1.0}
+    if model == 'DelayPlusStereoFx':   # dotted / straight eighths on the style's tempo
+        return {0: beat * 0.75, 3: beat * 0.5, 1: 0.2 + 0.3 * dly, 4: 0.2 + 0.3 * dly, 2: 0.4 + 0.2 * br, 5: 0.4 + 0.2 * br,
+                8: 0.15 + 0.2 * dly}
+    if model == 'StereoChorus':
+        return {0: rng.uniform(0.15, 0.35), 1: rng.uniform(20, 40), 3: 3, 4: rng.uniform(25, 40), 6: 30}
+    if model == 'Delay':   # Fundamental: time knob = log10000(seconds / 1 ms)
+        t = math.log(beat * rng.choice([0.5, 0.75, 1.0]) / 0.001) / math.log(10000)
+        return {0: t, 1: 0.2 + 0.3 * dly, 2: 0.4 + 0.2 * br, 3: 0.15 + 0.2 * dly}
     return {}
 
 def send_knobs(rng, model, g):
@@ -182,6 +219,15 @@ def send_knobs(rng, model, g):
     if model == 'SynTHBloKEcho':   # wet repeats: kill dry, feedback by the style
         return {0: rng.choice([0, 0, 1]), 2: rng.choice([3, 4, 4, 5]), 3: 0.25 + 0.4 * dly, 4: 0.8, 5: 0.35 + 0.3 * br,
                 6: rng.choice([0.0, 0.1]), 7: 0.3 * rev, 11: 1.0, 31: 1.0, 40: g['bpm']}
+    if model == 'Reverb':   # VCV Pro: time in log2 seconds, filters in log2 Hz
+        return {0: 0.3 + 1.5 * rev, 1: 0.5, 2: 7.0, 3: 12.0 + 1.5 * br, 4: -6.0, 5: 1.0, 6: 1.0}
+    if model == 'ReverbStereoFx':
+        return {0: 0.35 + 0.45 * rev, 1: 0.6 - 0.3 * br, 2: 1.0}
+    if model == 'ChowFDN':
+        return {0: 0.5, 1: 0.35 + 0.45 * rev, 5: 1.0}
+    if model == 'Delay':
+        t = math.log(60.0 / g['bpm'] * rng.choice([0.5, 0.75]) / 0.001) / math.log(10000)
+        return {0: t, 1: 0.25 + 0.3 * dly, 2: 0.35 + 0.25 * br, 3: 1.0}
     return {}
 
 MIX_SEND = {'SynTHBloKMix12': 96, 'SynTHBloKMix8': 64, 'SynTHBloKMix24': 58}
@@ -279,6 +325,39 @@ def layer(P, kind, pitch, gate):
                                                      16: 0.3 + 0.8 * rev})
         P.w(pitch, (m, 0), '#ffb437'); P.w(gate, (m, 2), '#ffe14a'); P.names.append('Elements')
         return [(m, 0), (m, 1)]
+    if kind == 'lpg':   # an oscillator (Bogaudio, Befaco, Braids, Vraids) through Bogaudio's low-pass gate: plucks
+        osc = rng.choice(['bog', 'even', 'braids', 'vraids'])
+        if osc == 'bog': o, pin, out, name = P.add('Bogaudio', 'Bogaudio-VCO', {0: up}), 0, rng.choice([1, 2, 3]), 'BogVCO'
+        elif osc == 'even': o, pin, out, name = P.add('Befaco', 'EvenVCO', {0: up}), 0, rng.choice([0, 3, 4]), 'EvenVCO'
+        elif osc == 'braids':
+            o, pin, out, name = P.add('AudibleInstruments', 'Braids', {1: -1 + up, 3: rng.uniform(0.3, 0.5), 5: 0.3 + 0.3 * br}), 1, 0, 'Braids'
+            P.w(gate, (o, 0), '#ffe14a')
+        else:
+            o, pin, out, name = P.add('VultCompacts', 'Vraids', {3: rng.uniform(-0.3, 0.3), 7: rng.uniform(-0.3, 0.3)}), 3, 0, 'Vraids'
+            P.w(gate, (o, 0), '#ffe14a')
+        lpg = P.add('Bogaudio', 'Bogaudio-LPG', {0: 0.55 if slow else 0.35, 1: 0, 4: 0.6 + 0.3 * br, 5: 0.15 + 0.2 * br, 6: 1.0, 7: 0.0})
+        P.w(pitch, (o, pin), '#ffb437'); P.w((o, out), (lpg, 4)); P.w(gate, (lpg, 3), '#ffe14a')
+        P.names += [name, 'LPG']
+        return [(lpg, 0)]
+    if kind == 'sub':   # oscillator -> filter -> VCA, an envelope on both, from the installed brands
+        oscs = [('Bogaudio', 'Bogaudio-VCO', {0: up}, 0, [0, 1], 'BogVCO'), ('Befaco', 'EvenVCO', {0: up}, 0, [3, 4], 'EvenVCO'),
+                ('Fundamental', 'VCO', {2: 12 * up}, 0, [1, 2, 3], 'VCO')]
+        filts = [('kocmoc', 'LADR', {0: 0.3 + 0.3 * br, 1: rng.uniform(0.1, 0.35), 2: 0.5, 3: 0, 4: 0.3, 5: 0.3}, 2, 1, 'LADR'),
+                 ('kocmoc', 'SVF-1', {0: 0.3 + 0.3 * br, 1: rng.uniform(0.1, 0.35), 2: 0.5, 3: 0, 4: 0.3, 5: 0.3}, 2, 1, 'SVF1'),
+                 ('Bogaudio', 'Bogaudio-VCF', {0: 0.25 + 0.2 * br, 1: 0.4, 3: rng.uniform(0.1, 0.3), 4: 0}, 3, 0, 'BogVCF'),
+                 ('VultModulesFree', 'Stabile', {0: 0.35 + 0.25 * br, 1: rng.uniform(0.3, 1.0), 2: 0.4, 4: 0.5}, 0, 1, 'Stabile'),
+                 ('Hora-VCO_VCF_VCA_Free', 'Juicy-VCF', {0: 0.35 + 0.25 * br, 1: rng.uniform(0.05, 0.3), 2: 0.5, 3: 0.4}, 2, 0, 'JuicyVCF')]
+        envs = [('Bogaudio', 'Bogaudio-ADSR', {0: 0.4 if slow else 0.1, 1: 0.45, 2: 0.5, 3: 0.45}, 0),
+                ('Befaco', 'ADSR', {0: 0, 3: 0.4 if slow else 0.1, 4: 0.4, 5: 0.5, 6: 0.4}, 0),
+                ('Fundamental', 'ADSR', {0: 0.2 if slow else 0.02, 1: 0.4, 2: 0.5, 3: 0.4}, 4)]
+        op, om, ok_, opin, oouts, oname = rng.choice(oscs)
+        fp, fm, fk, fin, fcv, fname = rng.choice(filts)
+        ep, em, ek, ein = rng.choice(envs)
+        o, f, e, vca = P.add(op, om, ok_), P.add(fp, fm, fk), P.add(ep, em, ek), P.add('Fundamental', 'VCA-1')
+        P.w(pitch, (o, opin), '#ffb437'); P.w((o, rng.choice(oouts)), (f, fin)); P.w(gate, (e, ein), '#ffe14a')
+        P.w((e, 0), (f, fcv), '#9437ff'); P.w((f, 0), (vca, 1)); P.w((e, 0), (vca, 0), '#9437ff')
+        P.names += [oname, fname]
+        return [(vca, 0)]
     # VCV Fundamental: VCO -> VCF -> VCA with an ADSR, summed to mono
     vco = P.add('Fundamental', 'VCO', {2: 12 * up})
     vcf = P.add('Fundamental', 'VCF', {0: 0.35 + 0.3 * br, 2: rng.uniform(0.05, 0.3), 3: 0.35})
@@ -289,18 +368,38 @@ def layer(P, kind, pitch, gate):
     P.names.append('VCO')
     return [(sm, 0)]
 
-def extra_drum(P, trigs):
-    """another VCV drum on one of the drum part's triggers"""
+def extra_drums(P):
+    """the installed drum modules: (plugin, model, name, role, knobs), tuned to the style"""
+    g = P.g; drv, rev = g['drive'], g['rev']
+    return [('VCV-Drums', 'Clap', 'Clap', 'snare', {3: 0.4}), ('VCV-Drums', 'ClosedHat', 'Hat', 'hat', {0: 0.5, 3: 0.35}),
+            ('VCV-Drums', 'Tom', 'Tom', 'perc', {0: 0.4, 3: 0.45}), ('VCV-Drums', 'Rim', 'Rim', 'perc', {0: 0.5, 3: 0.3}),
+            ('VCV-Drums', 'OpenHat', 'OHat', 'open', {0: 0.5, 1: 0.4, 3: 0.4}), ('VCV-Drums', 'Ride', 'Ride', 'hat', {0: 0.5, 1: 0.4, 3: 0.5}),
+            ('VCV-Drums', 'Snare', 'Snare', 'snare', {0: 0.5, 1: 0.5, 2: 0.5, 3: 0.4}),
+            ('Befaco', 'Percall', 'Percall', 'perc', {0: 0.8, 4: 0.3, 5: 0.3, 6: 0.3, 7: 0.3}),
+            ('Befaco', 'Kickall', 'Kickall', 'kick', {0: PG.hz(g, 42, 62), 3: 0.4, 4: 0.2, 5: 0.3}),
+            ('4ms-XOXDrums', 'Snare', 'XOXSnare', 'snare', {0: PG.hz(g, 160, 320), 8: 20 + 30 * drv}),
+            ('4ms-XOXDrums', 'HiHat', 'XOXHat', 'hat', {1: 120, 3: 10}),
+            ('4ms-XOXDrums', 'Clap', 'XOXClap', 'snare', {4: 15 + 30 * rev, 5: 20 + 20 * drv}),
+            ('4ms-XOXDrums', 'Rimshot', 'XOXRim', 'perc', {}), ('4ms-XOXDrums', 'Cowbell', 'Cowbell', 'perc', {0: PG.hz(g, 240, 480)}),
+            ('4ms-XOXDrums', 'Tom', 'XOXTom', 'perc', {1: 50}), ('4ms-XOXDrums', 'Clave', 'Clave', 'perc', {}),
+            ('4ms-XOXDrums', 'Maraca', 'Maraca', 'hat', {0: 6}),
+            ('Autodafe-DrumKit', 'DrumsClaps', 'ADClap', 'snare', {}), ('Autodafe-DrumKit', 'DrumsHiHatClosed', 'ADHat', 'hat', {}),
+            ('Autodafe-DrumKit', 'DrumsRimClaves', 'ADRim', 'perc', {})]
+
+# the drum part's trigger for each role: MTX-DRUM rows KICK SNARE CLAP CHH OHH TOM METAL FM, EUCLID KICK SNARE CHH OHH
+ROLE_TRIG = {'drum': {'kick': [0], 'snare': [1, 2], 'hat': [3], 'open': [4], 'perc': [5, 6, 7]},
+             'euclid': {'kick': [0], 'snare': [1], 'hat': [2], 'open': [3], 'perc': [1, 2]}}
+
+def extra_drum(P, trigs, pick):
+    """another installed drum on the drum part's trigger for its role"""
     rng = P.rng
-    plugin, model, name = rng.choice([('VCV-Drums', 'Clap', 'Clap'), ('VCV-Drums', 'ClosedHat', 'Hat'), ('VCV-Drums', 'Tom', 'Tom'),
-                                      ('Befaco', 'Percall', 'Percall'), ('Befaco', 'Kickall', 'Kickall')])
-    knobs = {'Clap': {3: 0.4}, 'ClosedHat': {0: 0.5, 3: 0.35}, 'Tom': {0: 0.4, 3: 0.45},
-             'Percall': {0: 0.8, 4: 0.3, 5: 0.3, 6: 0.3, 7: 0.3}, 'Kickall': {0: PG.hz(P.g, 42, 62), 3: 0.4, 4: 0.2, 5: 0.3}}[model]
+    plugin, model, name, role, knobs = pick
     m = P.add(plugin, model, knobs)
     if not m: return None
-    i = P.find(m, 'in', 'trig', 'gate', 'ch 1 trig', 'channel 1 trig')
+    i = P.find(m, 'in', 'trig', 'gate', 'closed hihat trigger', 'ch 1 trig', 'channel 1 trig', '#1')
     if i is None: return None
-    P.w(rng.choice(trigs[1:4] or trigs), (m, i), '#ff2b2b')
+    rows = ROLE_TRIG.get(P.drum_kind, {}).get(role) or list(range(1, len(trigs)))
+    P.w(trigs[rng.choice([r for r in rows if r < len(trigs)] or [0])], (m, i), '#ff2b2b')
     o = P.find(m, 'out', 'out', 'audio', 'ch 1', 'channel 1', 'left', 'main')
     if o is None: o = 0
     P.names.append(name)
@@ -318,10 +417,14 @@ def modulate(P, song, targets, cvs):
     rng.shuffle(cands)
     for m, i in cands[:rng.choice([1, 2])]:
         pick = rng.random()
-        if pick < 0.5:   # a slow sine / triangle, one cycle every 2, 4 or 8 bars of the style's tempo, around the knob
-            bars = rng.choice([2, 4, 8])
+        bars = rng.choice([2, 4, 8])
+        if pick < 0.3:   # a slow sine / triangle, one cycle every 2, 4 or 8 bars of the style's tempo, around the knob
             l = P.add('Fundamental', 'LFO', {0: 0, 2: math.log2(P.g['bpm'] / 60.0 / (4 * bars))}); src = (l, rng.choice([0, 1])); P.names.append('LFO')
-        elif pick < 0.75:   # stepped (or smooth) random on each bar, a modest spread
+        elif pick < 0.45:   # Bogaudio's LFO, the same slow sine at a smaller depth
+            l = P.add('Bogaudio', 'Bogaudio-LFO', {0: math.log2(P.g['bpm'] / 60.0 / (4 * bars)), 5: 0.6}); src = (l, 4); P.names.append('LFO')
+        elif pick < 0.6:   # Bogaudio's random walk: a slow drift
+            l = P.add('Bogaudio', 'Bogaudio-Walk', {0: rng.uniform(0.05, 0.2), 2: 0.4}); src = (l, 0); P.names.append('LFO')
+        elif pick < 0.8:   # stepped (or smooth) random on each bar, a modest spread
             r = P.add('Fundamental', 'Random', {1: rng.choice([0, 0.5, 1]), 2: 0, 5: 0.35}); P.w((song, 3), (r, 2), '#9437ff')
             src = (r, rng.choice([0, 2])); P.names.append('RND')
         elif cvs:
@@ -330,11 +433,11 @@ def modulate(P, song, targets, cvs):
             src = (song, 4)
         P.w(src, (m, i), '#9437ff')
 
-def build(n):
-    rng = random.Random('SB%02d' % n)
+def build(n, seed=None, style=None, prefix='SB_%03d'):
+    rng = random.Random(seed if seed is not None else 'SB%02d' % n)
     P = Patch(rng)
-    drum_kind = rng.choice(['drum', 'drum', 'euclid', 'mtx8', 'forge'])
-    g = P.g = PG.pick(rng, n, drum_kind in ('mtx8', 'forge'))
+    drum_kind = P.drum_kind = rng.choice(['drum', 'drum', 'euclid', 'mtx8', 'forge'])
+    g = P.g = PG.pick(rng, n, drum_kind in ('mtx8', 'forge'), style)
     # MTX COMPOSER: the style's tempo; sections A-D play patterns 1-4 (the progression), 2 bars each, cycling
     song = P.add('SynTHBloK', 'SynTHBloKMatrixSong', {0: 0, 5: g['bpm'], 8: 3, 9: 1, 10: 0})
     song['data']['cells'] = [[[s % 4, False, 0, 1.0] for r in range(8)] for s in range(8)]
@@ -346,26 +449,26 @@ def build(n):
     if drum_kind == 'drum': cvs += [(P.modules[1], 18 + i) for i in range(8)]   # MTX-DRUM's strip CVs
     mods, sources = [], []   # sources: (audio, level, pan, send)
     rev = g['rev']
-    # the drum part, sometimes through a series effect
+    # the drum part, often through a series effect
     for k, src in enumerate(drums):
-        if k == 0 and rng.random() < 0.45:
+        if k == 0 and rng.random() < 0.55:
             src = chain(P, song, src, [rng.choice([('SynTHBloK', 'SynTHBloKDualFilter'), ('SynTHBloK', 'SynTHBloKGrainForge'), ('SynTHBloK', 'SynTHBloKStereo')])], mods)
         sources.append((src, 0.95 if k == 0 else 0.75, 0.0, 0.1 * rev))
-    if rng.random() < 0.4:
-        x = extra_drum(P, trigs)
-        if x: sources.append((x, 0.6, rng.choice([-0.3, 0.3]), 0.2 * rev))
-    # the main voice through 0-2 series effects, now and then one of the others last
-    fx = [('SynTHBloK' if f[0] != 'NoizeeFlagshipFilter' else 'SynTHBloK', f[0]) for f in rng.sample(SERIES_FX, rng.choice([0, 1, 1, 2]))]
-    if rng.random() < 0.3: o = rng.choice(OTHER_FX); fx.append((o[0], o[1]))
+    # 0-2 of the installed drum modules on the drum part's triggers
+    for pick in rng.sample(extra_drums(P), rng.choice([0, 1, 1, 2])):
+        x = extra_drum(P, trigs, pick)
+        if x: sources.append((x, 0.55, rng.choice([-0.3, 0.3]), 0.2 * rev))
+    # the main voice through 1-2 series effects, often one of the others last
+    fx = [('SynTHBloK', f[0]) for f in rng.sample(SERIES_FX, rng.choice([1, 1, 2]))]
+    if rng.random() < 0.55: o = rng.choice(OTHER_FX); fx.append((o[0], o[1]))
     sources.append((chain(P, song, vaudio, fx, mods), 0.85, 0.0, 0.1 + 0.3 * rev))
-    # 1-2 layers on its notes, each maybe through an effect, under the main voice and to the sides
+    # 1-2 layers on its notes (SynTHBloK POLY most often), each maybe through an effect (a series one twice as often),
+    # under the main voice and to the sides
     pans = [-0.35, 0.35]; rng.shuffle(pans)
-    for kind in rng.sample(['poly', 'vco', 'plaits', 'rings', 'elements', 'poly', 'vco'], rng.choice([1, 1, 2])):
+    layer_fx = [('SynTHBloK', f[0]) for f in SERIES_FX] * 2 + [(o[0], o[1]) for o in OTHER_FX]
+    for kind in rng.sample(['poly', 'poly', 'vco', 'plaits', 'rings', 'elements', 'lpg', 'sub', 'sub'], rng.choice([1, 2, 2])):
         src = layer(P, kind, pitch, gate)
-        if rng.random() < 0.5:
-            f = rng.choice(SERIES_FX + [(o[1], o[2]) for o in OTHER_FX[:2]])
-            plugin = next((o[0] for o in OTHER_FX if o[1] == f[0]), 'SynTHBloK')
-            src = chain(P, song, src, [(plugin, f[0])], mods)
+        if rng.random() < 0.65: src = chain(P, song, src, [rng.choice(layer_fx)], mods)
         sources.append((src, 0.55, pans.pop() if pans else 0.0, 0.15 + 0.45 * rev))
     # the mixer, the send/return, the master
     mix_model = rng.choice(['SynTHBloKMix12', 'SynTHBloKMix12', 'SynTHBloKMix8', 'SynTHBloKMix24'])
@@ -376,18 +479,18 @@ def build(n):
     chans = [(i, i + 1) for i, nm in enumerate(names) if nm.startswith('CH ') and nm.endswith(' L')]
     for src, lv, pan, snd in sources: to_mixer(P, mixer, chans, src, lv, pan, snd)
     ret_l = P.find(mixer, 'in', 'fx return left')
-    if rng.random() < 0.7 and ret_l is not None:
+    if rng.random() < 0.85 and ret_l is not None:
         plugin, model, name = rng.choice(SENDS)
         s = P.add(plugin, model, send_knobs(rng, model, g))
         if s:
             il, ir, ol, orr = io(P, s)
             P.w((mixer, 2), (s, il)); P.w((mixer, 3), (s, ir)) if ir is not None else None
-            clock(P, song, s)
+            if model not in NO_CLOCK: clock(P, song, s)
             P.w((s, ol), (mixer, ret_l), '#00b56e')
-            if orr is not None: P.w((s, orr), (mixer, ret_l + 1), '#3695ef')
+            P.w((s, orr if orr is not None else ol), (mixer, ret_l + 1), '#3695ef')   # a mono return to both sides
             P.names.append(name + 'Send'); mods.append(s)
     last = [(mixer, 0), (mixer, 1)]
-    if rng.random() < 0.45:
+    if rng.random() < 0.55:
         bm = P.add('SynTHBloK', 'BlokMaster', {1: 0.0, 8: 0.5, 16: -1.0, 20: 2.0 + 4.0 * g['drive'], 21: 0.5})
         P.w(last[0], (bm, 0)); P.w(last[1], (bm, 1)); last = [(bm, 0), (bm, 1)]
         P.names.append('BloKMaster'); mods.append(bm)
@@ -404,10 +507,23 @@ def build(n):
     for nm in P.names:
         if nm not in seen and nm not in ('LFO', 'RND'): seen.add(nm); label.append(nm)
     style = g['name'].replace(' & ', 'n').replace(' ', '').replace('-', '')
-    return 'SB_%02d_%s_%s' % (n, style, '_'.join(label[:4])), P.json(audio)
+    return '%s_%s_%s' % (prefix % n if '%' in prefix else prefix, style, '_'.join(label[:4])), P.json(audio)
+
+def gen_one(style=None):
+    """the workbench's GEN button: one new patch from a fresh seed (in this style, or any), saved only into Rack's
+    patches folder as GEN_<time>_..., so the PATCHES pop-up shows it; returns its file name"""
+    import time
+    seed = time.time_ns()
+    n = random.Random(seed).randrange(1, len(PG.NAMES) + 1)
+    name, p = build(n, seed, style if style in PG.G else None, 'GEN_' + time.strftime('%m%d_%H%M%S'))
+    save_vcv(p, os.path.join(RACK_PATCHES, name + '.vcv'))
+    return name + '.vcv'
 
 if __name__ == '__main__':
-    count = int(sys.argv[1]) if len(sys.argv) > 1 else 50
+    if len(sys.argv) > 1 and sys.argv[1] == '--gen':   # --gen [style]: one new patch; prints {"file": ...}
+        print(json.dumps({'file': gen_one(sys.argv[2] if len(sys.argv) > 2 else None)}))
+        sys.exit(0)
+    count = int(sys.argv[1]) if len(sys.argv) > 1 else 100
     os.makedirs(OUT, exist_ok=True)
     # this set replaces itself on every run
     for d in (OUT, RACK_PATCHES):

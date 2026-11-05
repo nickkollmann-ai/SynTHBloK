@@ -88,9 +88,10 @@ genre('Trip-Hop', bpm=(80, 88), scales=[5, 0], keys=[0, 2, 7], prog=[[0, 5, 3, 4
       rev=0.5, dly=0.35, drive=0.3, bright=0.35, glitch=True)
 NAMES = list(G)
 
-def pick(rng, n, pent_safe):
-    """the genre for patch n (they take turns, so all 16 show up) and its key, scale, tempo and progression"""
-    g = dict(G[NAMES[(n - 1) % len(NAMES)]])
+def pick(rng, n, pent_safe, style=None):
+    """the genre for patch n (they take turns, so all 16 show up; or the one named) and its key, scale, tempo
+    and progression"""
+    g = dict(G[style if style in G else NAMES[(n - 1) % len(NAMES)]])
     sc = rng.choice(g['scales'])
     key = rng.choice(g['keys'])
     if pent_safe:
