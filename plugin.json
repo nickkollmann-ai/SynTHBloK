@@ -38,14 +38,17 @@
     {
       "slug": "SynTHBloKDualFilter",
       "name": "SynTHBloK DUAL FILTER",
-      "description": "Two stereo multimode filters (LP / BP / notch / HP sweep) with drive, run in series, parallel or stereo, linked cutoffs, an LFO and an envelope follower",
+      "description": "Two stereo multimode filters (LP / BP / notch / HP sweep, 12 / 24 / 48 dB) with drive, run in series, parallel or stereo, linked cutoffs, a four-shape LFO, an ADSR or envelope follower, a stereo phaser and a three-band EQ",
       "tags": [
         "Filter",
         "Dual",
         "Stereo",
         "Distortion",
         "Low-frequency oscillator",
-        "Envelope follower"
+        "Envelope generator",
+        "Envelope follower",
+        "Phaser",
+        "Equalizer"
       ]
     },
     {
