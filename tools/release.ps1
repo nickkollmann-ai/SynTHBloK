@@ -10,7 +10,10 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $git = 'C:\msys64\usr\bin\git.exe'
 $gh = 'C:\Program Files\GitHub CLI\gh.exe'
-function G { & $git -C $repo @args; if ($LASTEXITCODE) { throw "git $args failed" } }
+$env:PATH = "C:\msys64\usr\bin;$env:PATH"   # MSYS2 git's https helper needs its DLLs on PATH
+# sign in to GitHub with the GitHub CLI's login (gh auth login), so git never asks for a password
+$cred = @('-c', 'credential.helper=', '-c', 'credential.helper=!"/c/Program Files/GitHub CLI/gh.exe" auth git-credential')
+function G { & $git @cred -C $repo @args; if ($LASTEXITCODE) { throw "git $args failed" } }
 
 if (G status --porcelain --untracked-files=no) { throw 'Commit or undo your changes first (git status shows uncommitted work).' }
 $pj = Join-Path $repo 'plugin.json'

@@ -24,8 +24,8 @@ jobs:
         include:
           - { platform: win-x64, os: windows-latest, sdk: win-x64 }
           - { platform: lin-x64, os: ubuntu-22.04, sdk: lin-x64 }
-          - { platform: mac-x64, os: macos-15-intel, sdk: mac-x64+arm64 }
-          - { platform: mac-arm64, os: macos-15, sdk: mac-x64+arm64 }
+          - { platform: mac-x64, os: macos-15-intel, sdk: mac-x64 }
+          - { platform: mac-arm64, os: macos-15, sdk: mac-arm64 }
     defaults:
       run:
         shell: ${{ matrix.platform == 'win-x64' && 'msys2 {0}' || 'bash' }}
@@ -39,9 +39,8 @@ jobs:
           msystem: MINGW64
           update: true
           install: >-
-            make tar zstd unzip
+            make tar zstd unzip jq curl
             mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-jq
 
       - name: Tools (Linux)
         if: matrix.platform == 'lin-x64'
