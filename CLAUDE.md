@@ -29,6 +29,16 @@ user's Rack doesn't have the new build. Fix: the user double-clicks `Install Syn
 Desktop, which copies it with robocopy into the real folder (or copies the folder by hand in File Explorer).
 Symptom: PATCH GEN on liquidnick.com counts one plugin too few.
 
+## One-click scripts (repo root, double-click — no terminal typing)
+These `.bat` launchers let a Claude computer-use session run things by double-clicking in File Explorer, since
+it can't type into the MSYS2 / PowerShell terminal (those are granted click-only). Each wraps the real commands.
+- `build_and_install.bat`: `make -j4 devinstall` in MSYS2; full output to `build.log`.
+- `clean_build.bat`: `make clean` then a full `make -j4 devinstall` from scratch; output to `build.log`.
+- `start_workbench.bat`: runs `tools/open_workbench.ps1` (serves the workbench on 127.0.0.1:8766 + the Tailscale
+  address, starts the feeds, opens it in Firefox).
+- `sync_push.bat`: `git pull --rebase --autostash` then push with the gh credential helper (via `git_sync.sh`);
+  output to `git_push.log`. Use after committing, or to recover a push rejected as non-fast-forward.
+
 ## Releases (automated)
 - Every push builds win-x64, lin-x64, mac-x64 and mac-arm64 in GitHub Actions (`.github/workflows/build.yml`).
 - `powershell -ExecutionPolicy Bypass -File tools\release.ps1` (or `-Minor`, `-Version 2.x.y`) bumps
