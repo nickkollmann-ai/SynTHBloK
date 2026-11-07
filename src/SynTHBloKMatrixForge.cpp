@@ -934,4 +934,4 @@ struct SynTHBloKMatrixForgeWidget : ModuleWidget {
 
 } // namespace
 
-Model* modelSynTHBloKMatrixForge = createModel<SynTHBloKMatrixForge, SynTHBloKMatrixForgeWidget>("SynTHBloKMatrixForge");
+Model* modelSynTHBloKMatrixForge = createModel<SynTHBloKMatrixForge, SynTHBloKMatrixForgeWidget>("MatrixForge");

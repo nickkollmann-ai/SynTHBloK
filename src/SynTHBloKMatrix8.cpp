@@ -809,4 +809,4 @@ struct SynTHBloKMatrix8Widget : ModuleWidget {
 
 } // namespace
 
-Model* modelSynTHBloKMatrix8 = createModel<SynTHBloKMatrix8, SynTHBloKMatrix8Widget>("SynTHBloKMatrix8");
+Model* modelSynTHBloKMatrix8 = createModel<SynTHBloKMatrix8, SynTHBloKMatrix8Widget>("Matrix8");

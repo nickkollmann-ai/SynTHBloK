@@ -221,4 +221,4 @@ struct SynTHBloKKickWidget : ModuleWidget {
     }
 };
 
-Model* modelSynTHBloKKick = createModel<SynTHBloKKick, SynTHBloKKickWidget>("SynTHBloKKick");
+Model* modelSynTHBloKKick = createModel<SynTHBloKKick, SynTHBloKKickWidget>("Kick");

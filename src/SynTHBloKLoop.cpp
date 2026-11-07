@@ -2849,4 +2849,4 @@ struct SynTHBloKLoopWidget : ModuleWidget {
 
 } // namespace
 
-Model* modelSynTHBloKLoop = createModel<SynTHBloKLoop, SynTHBloKLoopWidget>("SynTHBloKLoop");
+Model* modelSynTHBloKLoop = createModel<SynTHBloKLoop, SynTHBloKLoopWidget>("Loop");

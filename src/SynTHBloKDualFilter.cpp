@@ -535,4 +535,4 @@ struct SynTHBloKDualFilterWidget : ModuleWidget {
     }
 };
 
-Model* modelSynTHBloKDualFilter = createModel<SynTHBloKDualFilter, SynTHBloKDualFilterWidget>("SynTHBloKDualFilter");
+Model* modelSynTHBloKDualFilter = createModel<SynTHBloKDualFilter, SynTHBloKDualFilterWidget>("DualFilter");

@@ -1037,4 +1037,4 @@ addChild(analyzer);
 };
 
 Model* modelSynTHBloKStereo =
-    createModel<SynTHBloKStereo, SynTHBloKStereoWidget>("SynTHBloKStereo");
+    createModel<SynTHBloKStereo, SynTHBloKStereoWidget>("Stereo");

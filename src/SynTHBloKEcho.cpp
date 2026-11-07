@@ -1046,4 +1046,4 @@ struct SynTHBloKEchoWidget : ModuleWidget {
     }
 };
 
-Model* modelSynTHBloKEcho = createModel<SynTHBloKEcho, SynTHBloKEchoWidget>("SynTHBloKEcho");
+Model* modelSynTHBloKEcho = createModel<SynTHBloKEcho, SynTHBloKEchoWidget>("Echo");

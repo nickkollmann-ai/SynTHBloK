@@ -16,3 +16,11 @@ build.log
 # what Claude is looking over, for the workbench (tools/design_watch.html)
 tools/wb_focus.json
 tailscale_status.txt
+# the workbench THINKING view (written by Claude, local only)
+tools/claude_thinking.json
+# the singles (singles/<slug>/): build output, and the res/ files + licence copied in from the repo root
+/singles/*/build
+/singles/*/dist
+/singles/*/res
+/singles/*/LICENSE.txt
+/singles/*/make.log

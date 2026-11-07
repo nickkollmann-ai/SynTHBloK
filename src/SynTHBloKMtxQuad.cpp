@@ -602,4 +602,4 @@ struct SynTHBloKMtxQuadWidget : ModuleWidget {
     }
 };
 
-Model* modelSynTHBloKMtxQuad = createModel<SynTHBloKMtxQuad, SynTHBloKMtxQuadWidget>("SynTHBloKMtxQuad");
+Model* modelSynTHBloKMtxQuad = createModel<SynTHBloKMtxQuad, SynTHBloKMtxQuadWidget>("MtxQuad");

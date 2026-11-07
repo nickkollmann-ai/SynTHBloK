@@ -52,7 +52,7 @@ def own_modules(p):
         for side in ('leftModuleId', 'rightModuleId'):
             if m.get(side) in gone: del m[side]
     p['cables'] = [c for c in p['cables'] if c['outputModuleId'] not in gone and c['inputModuleId'] not in gone]
-    song, drum, quad, loop, echo = (mod(p, s) for s in ('SynTHBloKMatrixSong', 'SynTHBloKDrum', 'SynTHBloKMtxQuad', 'SynTHBloKLoop', 'SynTHBloKEcho'))
+    song, drum, quad, loop, echo = (mod(p, s) for s in ('MatrixSong', 'Drum', 'MtxQuad', 'Loop', 'Echo'))
     # the clock now comes from the song, so the drum's clock no longer feeds the others or the song
     p['cables'] = [c for c in p['cables'] if not (c['outputModuleId'] == drum['id'] and c['outputId'] == 27)]
     CLK, RUN, RST = 0, 1, 2   # MatrixSong outputs
@@ -64,11 +64,11 @@ def own_modules(p):
 def synth_sweep(p):
     """The MTX QUAD through the DUAL FILTER: a 24 dB low-pass swept by an ADSR on every grid note and a slow,
     bar-long LFO, the high-pass on B taking out the mud, a touch of phaser."""
-    df, quad, mix, drum = mod(p, 'SynTHBloKDualFilter'), mod(p, 'SynTHBloKMtxQuad'), mod(p, 'SynTHBloKMix12'), mod(p, 'SynTHBloKDrum')
+    df, quad, mix, drum = mod(p, 'DualFilter'), mod(p, 'MtxQuad'), mod(p, 'Mix12'), mod(p, 'Drum')
     unplug(p, mix, [26, 27])
     plug(p, quad, 7, df, IN_L, '#ff9300'); plug(p, quad, 8, df, IN_R, '#ff9300')
     plug(p, df, OUT_L, mix, 26, '#00b56e'); plug(p, df, OUT_R, mix, 27, '#3695ef')
-    plug(p, quad, 14, df, GATE, '#ffb437'); plug(p, mod(p, 'SynTHBloKMatrixSong'), 0, df, SYNC_IN, '#9437ff')
+    plug(p, quad, 14, df, GATE, '#ffb437'); plug(p, mod(p, 'MatrixSong'), 0, df, SYNC_IN, '#9437ff')
     setp(df, {ROUTE: 0, A_CUT: 0.42, A_RES: 0.55, A_MODE: 0, A_SLOPE: 1, A_DRIVE: 0.2,
               B_CUT: 0.2, B_RES: 0.1, B_MODE: 3, B_SLOPE: 0,
               ENV_SRC: 1, ENV_A: 0.05, ENV_D: 0.45, ENV_S: 0.2, ENV_R: 0.4, ENV_AMT: 0.45,
@@ -78,11 +78,11 @@ def synth_sweep(p):
 def drum_bus(p):
     """The drum master through the DUAL FILTER: a driven 24 dB high-pass into a resonant low-pass that a saw LFO
     opens every half bar, with the follower kicking it open on every hit."""
-    df, mix, drum = mod(p, 'SynTHBloKDualFilter'), mod(p, 'SynTHBloKMix12'), mod(p, 'SynTHBloKDrum')
+    df, mix, drum = mod(p, 'DualFilter'), mod(p, 'Mix12'), mod(p, 'Drum')
     unplug(p, mix, [22, 23])
     plug(p, drum, 0, df, IN_L, '#ff9300'); plug(p, drum, 1, df, IN_R, '#ff9300')
     plug(p, df, OUT_L, mix, 22, '#00b56e'); plug(p, df, OUT_R, mix, 23, '#3695ef')
-    plug(p, mod(p, 'SynTHBloKMatrixSong'), 0, df, SYNC_IN, '#9437ff')
+    plug(p, mod(p, 'MatrixSong'), 0, df, SYNC_IN, '#9437ff')
     setp(df, {ROUTE: 0, A_CUT: 0.25, A_RES: 0.3, A_MODE: 3, A_SLOPE: 1, A_DRIVE: 0.3,
               B_CUT: 0.72, B_RES: 0.45, B_MODE: 0, B_SLOPE: 1,
               ENV_SRC: 0, ENV_AMT: 0.25,
@@ -92,19 +92,19 @@ def drum_bus(p):
 def loop_phase(p):
     """The LOOP's mix through the DUAL FILTER in STEREO: two resonant band-passes, a random LFO stepping their
     cutoffs every beat, a deep slow phaser, blended in at 70%."""
-    df, mix, loop, drum = mod(p, 'SynTHBloKDualFilter'), mod(p, 'SynTHBloKMix12'), mod(p, 'SynTHBloKLoop'), mod(p, 'SynTHBloKDrum')
+    df, mix, loop, drum = mod(p, 'DualFilter'), mod(p, 'Mix12'), mod(p, 'Loop'), mod(p, 'Drum')
     unplug(p, mix, [28, 29])
     plug(p, loop, 8, df, IN_L, '#ff9300'); plug(p, loop, 9, df, IN_R, '#ff9300')
     plug(p, df, OUT_L, mix, 28, '#00b56e'); plug(p, df, OUT_R, mix, 29, '#3695ef')
-    plug(p, mod(p, 'SynTHBloKMatrixSong'), 0, df, SYNC_IN, '#9437ff')
+    plug(p, mod(p, 'MatrixSong'), 0, df, SYNC_IN, '#9437ff')
     setp(df, {ROUTE: 2, A_CUT: 0.55, A_RES: 0.6, A_MODE: 1, A_SLOPE: 0, B_CUT: 0.62, B_RES: 0.6, B_MODE: 1, B_SLOPE: 0,
               LFO_SHAPE: 3, LFO_DEST: 0, LFO_AMT: 0.2, SYNC: 1, LFO_RATE: sync_div(4),
               PH_MIX: 0.6, PH_DEPTH: 0.8, PH_FDBK: 0.6, PH_RATE: 0.25, MIX: 0.7})
 
 # --- the rest of the series: each patch brings in more SynTHBloK modules, placed on a new row under the track ---
 VERSION = json.load(open(os.path.join(REPO, 'plugin.json'), encoding='utf-8'))['version']
-HP = {'SynTHBloKKick': 9, 'SynTHBloKSnareHat': 9, 'SynTHBloKEuclid': 9, 'SynTHBloKPoly': 9, 'SynTHBloKStereo': 12,
-      'SynTHBloKFX': 12, 'NoizeeFlagshipFilter': 13, 'BlokMaster': 44, 'SynTHBloKGrainForge': 40, 'SynTHBloKMatrixFx': 44}
+HP = {'Kick': 9, 'SnareHat': 9, 'Euclid': 9, 'Poly': 9, 'Stereo': 12,
+      'FX': 12, 'NoizeeFlagshipFilter': 13, 'BlokMaster': 44, 'GrainForge': 40, 'MatrixFx': 44}
 
 def remove(p, *models):
     """takes modules out with their cables"""
@@ -128,14 +128,14 @@ def add(p, model, params=None, plugin='SynTHBloK', version=None):
 
 def master_chain(p):
     """MIX-12's master through BloKMaster on its way to the speakers"""
-    mix, audio = mod(p, 'SynTHBloKMix12'), next(m for m in p['modules'] if m['model'].startswith('AudioInterface'))
+    mix, audio = mod(p, 'Mix12'), next(m for m in p['modules'] if m['model'].startswith('AudioInterface'))
     bm = add(p, 'BlokMaster')
     unplug(p, audio, [0, 1])
     plug(p, mix, 0, bm, 0, '#ff9300'); plug(p, mix, 1, bm, 1, '#ff9300')
     plug(p, bm, 0, audio, 0, '#00b56e'); plug(p, bm, 1, audio, 1, '#3695ef')
 
 def clocked(p, m, clk, rst=None, run=None):
-    song = mod(p, 'SynTHBloKMatrixSong')
+    song = mod(p, 'MatrixSong')
     plug(p, song, 0, m, clk, '#9437ff')
     if rst is not None: plug(p, song, 2, m, rst, '#3695ef')
     if run is not None: plug(p, song, 1, m, run, '#00b56e')
@@ -143,11 +143,11 @@ def clocked(p, m, clk, rst=None, run=None):
 def euclid_kit(p):
     """A synth drum kit in place of the MTX-DRUM: EUCLID plays KICK (four on the floor) and SNARE/HAT (backbeat,
     off-beat closed hats, an open hat at the end of the bar), mixed on channels 1-3, through BloKMaster."""
-    remove(p, 'SynTHBloKDrum', 'SynTHBloKDualFilter')
-    mix = mod(p, 'SynTHBloKMix12')
-    eu = add(p, 'SynTHBloKEuclid', {0: 16, 1: 4, 2: 0,  3: 16, 4: 2, 5: 4,  6: 16, 7: 8, 8: 1,  9: 16, 10: 1, 11: 14})
+    remove(p, 'Drum', 'DualFilter')
+    mix = mod(p, 'Mix12')
+    eu = add(p, 'Euclid', {0: 16, 1: 4, 2: 0,  3: 16, 4: 2, 5: 4,  6: 16, 7: 8, 8: 1,  9: 16, 10: 1, 11: 14})
     clocked(p, eu, 0, rst=1)
-    kick, sh = add(p, 'SynTHBloKKick'), add(p, 'SynTHBloKSnareHat')
+    kick, sh = add(p, 'Kick'), add(p, 'SnareHat')
     plug(p, eu, 0, kick, 0, '#ff2b2b'); plug(p, eu, 1, sh, 0, '#ffb437'); plug(p, eu, 2, sh, 1, '#ffe14a'); plug(p, eu, 3, sh, 2, '#ffe14a')
     plug(p, kick, 0, mix, 6, '#ff2b2b'); plug(p, sh, 0, mix, 8, '#ffb437'); plug(p, sh, 1, mix, 10, '#ffe14a')
     master_chain(p)
@@ -155,9 +155,9 @@ def euclid_kit(p):
 def poly_pad(p):
     """The MTX QUAD's chord grid played by POLY (one voice per chord note) into the CHARACTER DELAY, clocked to the
     song, on channel 11."""
-    remove(p, 'SynTHBloKDualFilter')
-    quad, mix = mod(p, 'SynTHBloKMtxQuad'), mod(p, 'SynTHBloKMix12')
-    poly, dl = add(p, 'SynTHBloKPoly'), add(p, 'SynTHBloKFX')
+    remove(p, 'DualFilter')
+    quad, mix = mod(p, 'MtxQuad'), mod(p, 'Mix12')
+    poly, dl = add(p, 'Poly'), add(p, 'FX')
     unplug(p, mix, [26, 27])
     plug(p, quad, 13, poly, 0, '#ffb437'); plug(p, quad, 14, poly, 1, '#ffe14a')
     plug(p, poly, 0, dl, 9, '#ff9300'); plug(p, poly, 1, dl, 10, '#ff9300')
@@ -167,20 +167,20 @@ def poly_pad(p):
 def morph_quad(p):
     """The MTX QUAD through the MORPH FILTER, the song's section CV turning the morph, then the STEREO width stage, on
     channel 11."""
-    remove(p, 'SynTHBloKDualFilter')
-    quad, mix = mod(p, 'SynTHBloKMtxQuad'), mod(p, 'SynTHBloKMix12')
-    mf, st = add(p, 'NoizeeFlagshipFilter'), add(p, 'SynTHBloKStereo')
+    remove(p, 'DualFilter')
+    quad, mix = mod(p, 'MtxQuad'), mod(p, 'Mix12')
+    mf, st = add(p, 'NoizeeFlagshipFilter'), add(p, 'Stereo')
     unplug(p, mix, [26, 27])
     plug(p, quad, 7, mf, 16, '#ff9300'); plug(p, quad, 8, mf, 17, '#ff9300')
-    plug(p, mod(p, 'SynTHBloKMatrixSong'), 4, mf, 2, '#9437ff')   # the song's section CV turns the morph
+    plug(p, mod(p, 'MatrixSong'), 4, mf, 2, '#9437ff')   # the song's section CV turns the morph
     plug(p, mf, 0, st, 0, '#ff9300')
     plug(p, st, 0, mix, 26, '#00b56e'); plug(p, st, 1, mix, 27, '#3695ef')
 
 def grain_loop(p):
     """The MTX-LOOP's mix through GRAIN-FORGE, stepped by the song's clock and reset with it, on channel 12."""
-    remove(p, 'SynTHBloKDualFilter')
-    loop, mix = mod(p, 'SynTHBloKLoop'), mod(p, 'SynTHBloKMix12')
-    gf = add(p, 'SynTHBloKGrainForge')
+    remove(p, 'DualFilter')
+    loop, mix = mod(p, 'Loop'), mod(p, 'Mix12')
+    gf = add(p, 'GrainForge')
     unplug(p, mix, [28, 29])
     plug(p, loop, 8, gf, 0, '#ff9300'); plug(p, loop, 9, gf, 1, '#ff9300')
     clocked(p, gf, 2, rst=3)
@@ -189,9 +189,9 @@ def grain_loop(p):
 def mtx_fx_bus(p):
     """Drums, synth and loops all through MTX-FX (inputs 1-3), clocked, reset and run by the song, on channel 9,
     then BloKMaster."""
-    remove(p, 'SynTHBloKDualFilter')
-    drum, quad, loop, mix = (mod(p, s) for s in ('SynTHBloKDrum', 'SynTHBloKMtxQuad', 'SynTHBloKLoop', 'SynTHBloKMix12'))
-    fx = add(p, 'SynTHBloKMatrixFx')
+    remove(p, 'DualFilter')
+    drum, quad, loop, mix = (mod(p, s) for s in ('Drum', 'MtxQuad', 'Loop', 'Mix12'))
+    fx = add(p, 'MatrixFx')
     unplug(p, mix, list(range(6, 24)) + [26, 27, 28, 29])
     plug(p, drum, 0, fx, 0, '#ff2b2b'); plug(p, quad, 7, fx, 1, '#ff9300'); plug(p, loop, 8, fx, 2, '#ffb437')
     clocked(p, fx, 8, rst=9, run=10)
@@ -203,6 +203,9 @@ RECIPES = [('DualFilter_Synth_Sweep', synth_sweep), ('DualFilter_Drum_Bus', drum
            ('GrainForge_Loop', grain_loop), ('MatrixFX_Bus', mtx_fx_bus)]
 
 def save_vcv(p, path):
+    # recipes name every SynTHBloK module under the plugin "SynTHBloK": move the singles to their own plugins
+    from convert_slugs import rename
+    rename(p)
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, 'modules'))
         with open(os.path.join(d, 'patch.json'), 'w', encoding='utf-8') as f: json.dump(p, f, indent=2)
@@ -218,9 +221,9 @@ def write_all(recipes):
         own_modules(p)
         recipe(p)
         # a DUAL FILTER the recipe didn't patch only takes up room
-        df = next((m for m in p['modules'] if m['model'] == 'SynTHBloKDualFilter'), None)
+        df = next((m for m in p['modules'] if m['model'] == 'DualFilter'), None)
         if df and not any(df['id'] in (c['inputModuleId'], c['outputModuleId']) for c in p['cables']):
-            remove(p, 'SynTHBloKDualFilter')
+            remove(p, 'DualFilter')
         for k in [k for k in p if k.startswith('_')]: del p[k]   # the recipes' own notes
         path = os.path.join(OUT, name + '.vcv')
         save_vcv(p, path)

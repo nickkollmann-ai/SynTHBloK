@@ -1,0 +1,101 @@
+# NEW GitHub Actions workflow for the split (MTX pack + singles). Copy this file over .github/workflows/build.yml.
+# Builds every SynTHBloK plugin (the MTX pack and each single in singles/) for every platform the VCV Library ships (Windows, Linux, macOS Intel + Apple Silicon)
+# on each push, so a change that breaks another OS shows up straight away.
+# Pushing a version tag (v2.0.1, made by tools/release.ps1) also publishes a GitHub Release with the
+# four .vcvplugin files attached.
+name: Build
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  RACK_SDK_VERSION: 2.6.4
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: win-x64, os: windows-latest, sdk: win-x64 }
+          - { platform: lin-x64, os: ubuntu-22.04, sdk: lin-x64 }
+          - { platform: mac-x64, os: macos-15-intel, sdk: mac-x64 }
+          - { platform: mac-arm64, os: macos-15, sdk: mac-arm64 }
+    defaults:
+      run:
+        shell: ${{ matrix.platform == 'win-x64' && 'msys2 {0}' || 'bash' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: MSYS2 (Windows)
+        if: matrix.platform == 'win-x64'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            make tar zstd unzip jq curl
+            mingw-w64-x86_64-gcc
+
+      - name: Tools (Linux)
+        if: matrix.platform == 'lin-x64'
+        run: sudo apt-get update && sudo apt-get install -y jq zstd unzip
+
+      - name: Tools (macOS)
+        if: startsWith(matrix.platform, 'mac')
+        run: brew install jq zstd || true
+
+      - name: Rack SDK ${{ env.RACK_SDK_VERSION }}
+        run: |
+          curl -fsSL -o sdk.zip "https://vcvrack.com/downloads/Rack-SDK-${RACK_SDK_VERSION}-${{ matrix.sdk }}.zip"
+          unzip -q sdk.zip -d "$HOME"
+          rm sdk.zip
+          echo "RACK_DIR=$HOME/Rack-SDK" >> "$GITHUB_ENV"
+
+      - name: Build (MTX pack + singles)
+        run: |
+          make dist -j4 RACK_DIR="$RACK_DIR"
+          for d in singles/*/; do
+            echo "== $d"
+            make -C "$d" dist -j4 RACK_DIR="$RACK_DIR"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SynTHBloK-${{ matrix.platform }}
+          path: |
+            dist/*.vcvplugin
+            singles/*/dist/*.vcvplugin
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      - name: Check the tag matches every plugin.json
+        run: |
+          for pj in plugin.json singles/*/plugin.json; do
+            v=$(jq -r .version "$pj")
+            [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "$pj says $v but the tag is ${GITHUB_REF_NAME}"; exit 1; }
+          done
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" packages/*.vcvplugin \
+            --title "SynTHBloK $GITHUB_REF_NAME" --generate-notes

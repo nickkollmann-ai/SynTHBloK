@@ -13,18 +13,22 @@ param(
 $repo = Split-Path $PSScriptRoot
 $user = Join-Path $env:LOCALAPPDATA 'Rack2-shots'
 $plugins = Join-Path $user 'plugins-win-x64'
-$installed = Join-Path $env:LOCALAPPDATA 'Rack2\plugins-win-x64\SynTHBloK'
-$shots = Join-Path $user 'screenshots\SynTHBloK'
+$installedRoot = Join-Path $env:LOCALAPPDATA 'Rack2\plugins-win-x64'
+$installed = Join-Path $installedRoot 'SynTHBloK'
+$shotsRoot = Join-Path $user 'screenshots'   # one folder per plugin: SynTHBloK (MTX pack), SynTHBloK-Kick, ...
 $dest = Join-Path $repo 'web-images\screenshots'
 
 if (-not (Test-Path (Join-Path $installed 'plugin.dll'))) { Write-Host 'SHOTS SKIPPED - SynTHBloK is not installed in Rack.'; exit 1 }
 New-Item -ItemType Directory -Force $plugins, $dest | Out-Null
-# only SynTHBloK in the private folder (Rack unpacks Fundamental into it at each start: removed here, so it is never more than that)
-Get-ChildItem $plugins | Where-Object { $_.Name -ne 'SynTHBloK' } | ForEach-Object { Remove-Item $_.FullName -Recurse -Force }
-$copy = Join-Path $plugins 'SynTHBloK'
-if (Test-Path $copy) { Remove-Item $copy -Recurse -Force }
-Copy-Item $installed $copy -Recurse
-if (Test-Path $shots) { Remove-Item $shots -Recurse -Force }
+# only the SynTHBloK plugins (MTX pack + singles) in the private folder (Rack unpacks Fundamental into it at each
+# start: removed here, so it is never more than that)
+Get-ChildItem $plugins | ForEach-Object { Remove-Item $_.FullName -Recurse -Force }
+$ours = @(Get-ChildItem $installedRoot -Directory | Where-Object { $_.Name -eq 'SynTHBloK' -or $_.Name -like 'SynTHBloK-*' })
+foreach ($d in $ours) {
+    Copy-Item $d.FullName (Join-Path $plugins $d.Name) -Recurse
+    $old = Join-Path $shotsRoot $d.Name
+    if (Test-Path $old) { Remove-Item $old -Recurse -Force }
+}
 
 $t0 = Get-Date
 $p = Start-Process -FilePath $Rack -ArgumentList '-u', "`"$user`"", '-t', $Zoom -WorkingDirectory (Split-Path $Rack) -WindowStyle Minimized -PassThru
@@ -35,7 +39,7 @@ if (-not $p.WaitForExit($Timeout * 1000)) {
 }
 
 $n = 0
-foreach ($f in @(Get-ChildItem $shots -Filter *.png -ErrorAction SilentlyContinue)) {
+foreach ($f in @($ours | ForEach-Object { Get-ChildItem (Join-Path $shotsRoot $_.Name) -Filter *.png -ErrorAction SilentlyContinue })) {
     Copy-Item $f.FullName (Join-Path $dest $f.Name) -Force
     $n++
 }

@@ -1,0 +1,26 @@
+{
+  "slug": "SynTHBloK-SnareHat",
+  "name": "SynTHBloK Snare/Hat",
+  "version": "2.0.0",
+  "license": "GPL-3.0-or-later",
+  "brand": "NoiZee ToyZ",
+  "author": "Nicholas Kollmann",
+  "authorEmail": "support@liquidnick.com",
+  "authorUrl": "https://www.liquidnick.com",
+  "pluginUrl": "https://www.liquidnick.com/#modular",
+  "manualUrl": "https://github.com/nickkollmann-ai/SynTHBloK#readme",
+  "sourceUrl": "https://github.com/nickkollmann-ai/SynTHBloK",
+  "changelogUrl": "https://github.com/nickkollmann-ai/SynTHBloK/releases",
+  "donateUrl": "",
+  "modules": [
+    {
+      "slug": "SnareHat",
+      "name": "Snare/Hat",
+      "description": "Techno snare and hi-hat voice: two-oscillator snare body with noise snap, six-oscillator metallic hats with closed/open triggers and choke, drive, tone and accent",
+      "tags": [
+        "Drum",
+        "Synth voice"
+      ]
+    }
+  ]
+}

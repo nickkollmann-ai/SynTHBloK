@@ -1369,4 +1369,4 @@ void SynTHBloKMix24Widget::appendContextMenu(Menu* menu) {
 // -------------------------------------------------------------
 // MODEL
 // -------------------------------------------------------------
-Model* modelSynTHBloKMix24 = createModel<SynTHBloKMix24, SynTHBloKMix24Widget>("SynTHBloKMix24");
+Model* modelSynTHBloKMix24 = createModel<SynTHBloKMix24, SynTHBloKMix24Widget>("Mix24");

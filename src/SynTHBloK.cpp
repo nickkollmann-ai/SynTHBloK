@@ -26,4 +26,4 @@ struct SynTHBloKWidget : ModuleWidget {
     }
 };
 
-Model* modelSynTHBloK = createModel<SynTHBloK, SynTHBloKWidget>("SynTHBloK");
+Model* modelSynTHBloK = createModel<SynTHBloK, SynTHBloKWidget>("Quad");

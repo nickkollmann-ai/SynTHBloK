@@ -157,12 +157,11 @@ struct SynTHBloKJamProbe : Module {
 
     void saveFile(bool quiet) {
         std::string s = summary();
-        const std::string paths[2] = {asset::plugin(pluginInstance, "JamProbe_map.txt"), asset::user("SynTHBloK_JamProbe.txt")};
+        // only into Rack's user folder: a plugin's own folder is replaced on updates and may be read-only
+        const std::string path = asset::user("SynTHBloK_JamProbe.txt");
         bool ok = false;
-        for (int i = 0; i < 2; i++) {
-            FILE* f = fopen(paths[i].c_str(), "wb");
-            if (f) { fwrite(s.data(), 1, s.size(), f); fclose(f); ok = true; }
-        }
+        FILE* f = fopen(path.c_str(), "wb");
+        if (f) { ok = fwrite(s.data(), 1, s.size(), f) == s.size(); fclose(f); }
         if (!quiet) addLog(ok ? "SAVED map file" : "SAVE FAILED");
         lastSavedTotal = total + (int)lit.size() * 100003;
     }
@@ -488,4 +487,4 @@ struct SynTHBloKJamProbeWidget : ModuleWidget {
     }
 };
 
-Model* modelSynTHBloKJamProbe = createModel<SynTHBloKJamProbe, SynTHBloKJamProbeWidget>("SynTHBloKJamProbe");
+Model* modelSynTHBloKJamProbe = createModel<SynTHBloKJamProbe, SynTHBloKJamProbeWidget>("JamProbe");

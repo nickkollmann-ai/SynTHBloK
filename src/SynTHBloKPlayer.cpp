@@ -1162,4 +1162,4 @@ struct SynTHBloKPlayerWidget : ModuleWidget {
     }
 };
 
-Model* modelSynTHBloKPlayer = createModel<SynTHBloKPlayer, SynTHBloKPlayerWidget>("SynTHBloKPlayer");
+Model* modelSynTHBloKPlayer = createModel<SynTHBloKPlayer, SynTHBloKPlayerWidget>("Player");

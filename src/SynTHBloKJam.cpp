@@ -878,4 +878,4 @@ struct SynTHBloKJamWidget : ModuleWidget {
 
 } // namespace
 
-Model* modelSynTHBloKJam = createModel<SynTHBloKJam, SynTHBloKJamWidget>("SynTHBloKJam");
+Model* modelSynTHBloKJam = createModel<SynTHBloKJam, SynTHBloKJamWidget>("Jam");

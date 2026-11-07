@@ -114,22 +114,22 @@ def clock(P, song, m):
         if i is not None: P.w((song, out), (m, i), ['#9437ff', '#00b56e', '#3695ef'][[0, 1, 2].index(out) if out != 2 else 2])
 
 # --- the parts ---
-SERIES_FX = [('SynTHBloKDualFilter', 'DualFilter'), ('NoizeeFlagshipFilter', 'Morph'), ('SynTHBloKGrainForge', 'GrainForge'),
-             ('SynTHBloKFX', 'CharDelay'), ('SynTHBloKStereo', 'Stereo')]
+SERIES_FX = [('DualFilter', 'DualFilter'), ('NoizeeFlagshipFilter', 'Morph'), ('GrainForge', 'GrainForge'),
+             ('FX', 'CharDelay'), ('Stereo', 'Stereo')]
 OTHER_FX = [('AudibleInstruments', 'Clouds', 'Clouds'), ('Valley', 'Plateau', 'Plateau'), ('SurgeXTRack', 'SurgeXTFXChorus', 'SurgeChorus'),
             ('SurgeXTRack', 'SurgeXTFXPhaser', 'SurgePhaser'), ('SurgeXTRack', 'SurgeXTDelay', 'SurgeDelay'),
             ('VCV-Pro', 'Chorus', 'ProChorus'), ('VCV-Pro', 'Flanger', 'ProFlanger'), ('VCV-Pro', 'Phaser', 'ProPhaser'),
             ('ChowDSP', 'ChowTape', 'Tape'), ('ChowDSP', 'ChowChorus', 'ChowChorus'), ('4ms-ProducerPack', 'StereoWidth', 'Width'),
             ('4ms-ProducerPack', 'SeventiesComp', 'Comp70s'), ('AS', 'DelayPlusStereoFx', 'ASDelay'), ('GP', 'StereoChorus', 'GPChorus'),
             ('Fundamental', 'Delay', 'FDelay')]
-SENDS = [('SynTHBloK', 'SynTHBloKEcho', 'Echo'), ('SynTHBloK', 'SynTHBloKEcho', 'Echo'), ('Valley', 'Plateau', 'Plateau'),
+SENDS = [('SynTHBloK', 'Echo', 'Echo'), ('SynTHBloK', 'Echo', 'Echo'), ('Valley', 'Plateau', 'Plateau'),
          ('SurgeXTRack', 'SurgeXTFXReverb2', 'SurgeReverb'), ('Befaco', 'SpringReverb', 'Spring'), ('VCV-Pro', 'Reverb', 'ProReverb'),
          ('AS', 'ReverbStereoFx', 'ASReverb'), ('ChowDSP', 'ChowFDN', 'FDN'), ('Fundamental', 'Delay', 'FDelay')]
 # effects whose clock jack sets their time: not on the COMPOSER clock
 NO_CLOCK = {'Delay'}
 # CV jacks worth moving on each effect (by name), for the modulation
-MOD_TARGETS = {'SynTHBloKDualFilter': ['filter a cutoff', 'filter b cutoff'], 'NoizeeFlagshipFilter': ['morph cv', 'cutoff cv', 'width cv'],
-               'SynTHBloKStereo': ['width', 'tilt', 'air'], 'SynTHBloKFX': ['time cv', 'fbk', 'tone'],
+MOD_TARGETS = {'DualFilter': ['filter a cutoff', 'filter b cutoff'], 'NoizeeFlagshipFilter': ['morph cv', 'cutoff cv', 'width cv'],
+               'Stereo': ['width', 'tilt', 'air'], 'FX': ['time cv', 'fbk', 'tone'],
                'Clouds': ['position', 'size', 'texture'], 'Plateau': ['size', 'decay'], 'BlokMaster': ['saturation', 'stereo width'],
                'Chorus': ['depth'], 'Phaser': ['frequency'], 'StereoWidth': ['width cv'], 'StereoChorus': ['cv depth']}
 
@@ -147,7 +147,7 @@ def chain(P, song, src, fxs, mods):
         m = P.add(plugin, model, fx_knobs(P.rng, model, P.g))
         if not m: continue
         il, ir, ol, orr = io(P, m)
-        if model == 'SynTHBloKFX': il, ir = 9, 10
+        if model == 'FX': il, ir = 9, 10
         if model == 'NoizeeFlagshipFilter': il, ir = 16, 17
         if il is None or ol is None: continue
         P.w(src[0], (m, il), '#ff9300')
@@ -161,7 +161,7 @@ def chain(P, song, src, fxs, mods):
 def fx_knobs(rng, model, g):
     """an effect's knobs for the style: resonance, feedback and wet levels kept where they stay clean"""
     br, rev, dly, drv = g['bright'], g['rev'], g['dly'], g['drive']
-    if model == 'SynTHBloKDualFilter':   # ids from src/SynTHBloKDualFilter.cpp (see tools/make_patches.py)
+    if model == 'DualFilter':   # ids from src/SynTHBloKDualFilter.cpp (see tools/make_patches.py)
         return {0: 0.3 + 0.35 * br + rng.uniform(-0.05, 0.05), 1: rng.uniform(0.15, 0.4), 3: rng.choice([0, 0, 1, 2]),
                 16: rng.choice([0, 1, 2]), 4: 0.4 + 0.3 * br, 5: rng.uniform(0.1, 0.3), 7: 3, 8: 0, 14: 1,
                 11: rng.uniform(0.2, 0.45), 12: rng.uniform(0.0, 0.25), 19: 0, 2: drv * 0.5, 6: 0.0,
@@ -169,12 +169,12 @@ def fx_knobs(rng, model, g):
     if model == 'NoizeeFlagshipFilter':
         return {0: 0.4 + 0.3 * br, 1: rng.uniform(0.1, 0.35), 2: rng.choice([0.0, 0.0, 0.25, 0.5]), 3: drv * 0.5,
                 4: 0.0, 5: 0.0, 6: rng.choice([0.0, 0.05]), 7: 0.6, 8: rng.uniform(0.7, 1.0)}
-    if model == 'SynTHBloKGrainForge':
+    if model == 'GrainForge':
         return PG.grainforge(rng, g)
-    if model == 'SynTHBloKFX':   # character delay: tempo time, moderate feedback, a send-like mix
+    if model == 'FX':   # character delay: tempo time, moderate feedback, a send-like mix
         return {0: rng.choice([0.25, 0.375, 0.5]), 1: 0.2 + 0.35 * dly, 2: 0.15 + 0.25 * dly, 3: 0.35 + 0.3 * br,
                 4: rng.choice([0.0, 0.15]), 5: 0.2, 6: rng.choice([0.0, 0.3]), 7: 0.6}
-    if model == 'SynTHBloKStereo':
+    if model == 'Stereo':
         return {0: rng.uniform(1.1, 1.4), 1: (br - 0.5) * 0.3, 2: 0.1 + 0.2 * br, 3: 0.2, 4: rng.uniform(0.0, 0.3),
                 5: 0.0, 6: 1.0, 7: 1.0}
     if model == 'Clouds':   # grains in key: pitch by octaves only
@@ -216,7 +216,7 @@ def send_knobs(rng, model, g):
         return {0: 0.0, 1: 0.8, 2: 0.02, 5: 0.35 + 0.5 * rev, 7: 0.55 + 0.4 * rev, 8: 6.0 + 3 * br, 9: 2.0, 10: 0.1, 12: 0.5}
     if model == 'SpringReverb':
         return {0: 1.0, 3: 0.5}
-    if model == 'SynTHBloKEcho':   # wet repeats: kill dry, feedback by the style
+    if model == 'Echo':   # wet repeats: kill dry, feedback by the style
         return {0: rng.choice([0, 0, 1]), 2: rng.choice([3, 4, 4, 5]), 3: 0.25 + 0.4 * dly, 4: 0.8, 5: 0.35 + 0.3 * br,
                 6: rng.choice([0.0, 0.1]), 7: 0.3 * rev, 11: 1.0, 31: 1.0, 40: g['bpm']}
     if model == 'Reverb':   # VCV Pro: time in log2 seconds, filters in log2 Hz
@@ -230,8 +230,8 @@ def send_knobs(rng, model, g):
         return {0: t, 1: 0.25 + 0.3 * dly, 2: 0.35 + 0.25 * br, 3: 1.0}
     return {}
 
-MIX_SEND = {'SynTHBloKMix12': 96, 'SynTHBloKMix8': 64, 'SynTHBloKMix24': 58}
-MIX_MASTER = {'SynTHBloKMix12': 108, 'SynTHBloKMix8': 72, 'SynTHBloKMix24': 48}
+MIX_SEND = {'Mix12': 96, 'Mix8': 64, 'Mix24': 58}
+MIX_MASTER = {'Mix12': 108, 'Mix8': 72, 'Mix24': 48}
 def to_mixer(P, mixer, chans, src, level=1.0, pan=0.0, send=0.0):
     """the next free stereo channel of the mixer, at this level, pan and FX send"""
     while chans:
@@ -248,7 +248,7 @@ def drum_part(P, song, kind):
     """returns (audio sources [[(m, out)...]], trigger outs [(m, out)])"""
     rng, g = P.rng, P.g
     if kind == 'drum':   # the style's groove; the kick and snare rows tuned to the key, the FORGE FX only for glitch styles
-        d = P.add('SynTHBloK', 'SynTHBloKDrum', {17: 1 if g['glitch'] else 0, 21: 0.5, 108: 0.75, 109: 0.25 * g['dly'],
+        d = P.add('SynTHBloK', 'Drum', {17: 1 if g['glitch'] else 0, 21: 0.5, 108: 0.75, 109: 0.25 * g['dly'],
                                                  110: 0.35 * g['rev'], 94: 1.0, 95: 0.0, 96: 0.0, 106: 1.0,
                                                  35: 0.15 + 0.3 * g['drive'], 43: 0.1 + 0.3 * g['drive']})
         d['data']['patterns'] = PG.drum_patterns(rng, g)
@@ -258,13 +258,13 @@ def drum_part(P, song, kind):
         four = g['drums'][0].startswith('2000200')
         hits = {0: 16, 1: 4 if four else rng.choice([3, 5]), 2: 0, 3: 16, 4: 2, 5: 4,
                 6: 16, 7: 16 if g['drums'][3] == '11111111' else 8, 8: 0, 9: 16, 10: 4 if four else rng.choice([0, 1]), 11: 2}
-        e = P.add('SynTHBloK', 'SynTHBloKEuclid', hits); clock(P, song, e)
-        k = P.add('SynTHBloK', 'SynTHBloKKick', {0: PG.hz(g, 42, 62), 1: 0.5, 3: 0.4 + 0.2 * (g['bpm'] < 100), 6: 0.15 + 0.3 * g['drive'], 9: 0.8})
-        sh = P.add('SynTHBloK', 'SynTHBloKSnareHat', {0: PG.hz(g, 160, 260), 1: 0.55, 2: 0.4, 7: 0.1 + 0.3 * g['drive'], 9: 0.7, 10: 0.5})
+        e = P.add('SynTHBloK', 'Euclid', hits); clock(P, song, e)
+        k = P.add('SynTHBloK', 'Kick', {0: PG.hz(g, 42, 62), 1: 0.5, 3: 0.4 + 0.2 * (g['bpm'] < 100), 6: 0.15 + 0.3 * g['drive'], 9: 0.8})
+        sh = P.add('SynTHBloK', 'SnareHat', {0: PG.hz(g, 160, 260), 1: 0.55, 2: 0.4, 7: 0.1 + 0.3 * g['drive'], 9: 0.7, 10: 0.5})
         P.w((e, 0), (k, 0), '#ff2b2b'); P.w((e, 1), (sh, 0), '#ffb437'); P.w((e, 2), (sh, 1), '#ffe14a'); P.w((e, 3), (sh, 2), '#ffe14a')
         P.names.append('Euclid')
         return [[(k, 0)], [(sh, 2)]], [(e, i) for i in range(4)]
-    model, name = {'mtx8': ('SynTHBloKMatrix8', 'Mtx8'), 'forge': ('SynTHBloKMatrixForge', 'Forge')}[kind]
+    model, name = {'mtx8': ('Matrix8', 'Mtx8'), 'forge': ('MatrixForge', 'Forge')}[kind]
     params = {15: 0.75, 17: 0.35 * g['rev'], 19: 0.0} if kind == 'mtx8' else {**PG.grainforge(rng, g), 91: 0.75, 93: 0.35 * g['rev'], 95: 0.0}
     m = P.add('SynTHBloK', model, params, data={'patterns': PG.voice_patterns(rng, g)}); clock(P, song, m)
     P.names.append(name)
@@ -280,7 +280,7 @@ def main_voice(P, song, kind):
         role = rng.choice(g['quad'])
         P.quad_role = role
         cut = {'bass': 0.25, 'lead': 0.4, 'chords': 0.38, 'acid': 0.22}[role] + 0.15 * br
-        q = P.add('SynTHBloK', 'SynTHBloKMtxQuad', {
+        q = P.add('SynTHBloK', 'MtxQuad', {
             39: g['key'], 40: g['scale'], 41: {'bass': -1, 'acid': -1, 'lead': 0, 'chords': 0}[role], 37: 8, 36: 1, 44: 1,
             9: cut, 10: {'acid': 0.5}.get(role, rng.uniform(0.1, 0.3)), 8: {'acid': 0.55, 'chords': 0.25}.get(role, 0.35),
             12: 0.25 if role == 'chords' and g['bpm'] < 100 else 0.02, 13: {'chords': 0.5, 'acid': 0.25}.get(role, 0.35),
@@ -290,7 +290,7 @@ def main_voice(P, song, kind):
             35: 0.2 + 0.4 * drv, 3: 0.0, 4: 0.0, 6: 0.0, 7: 0.3 if role == 'lead' else 0.0}, data=PG.quad_data(rng, g, role))
         clock(P, song, q); P.names.append('MtxQuad')
         return [(q, 7), (q, 8)], (q, 13), (q, 14), [(q, 15)]
-    d = P.add('SynTHBloK', 'SynTHBloKDuo', {
+    d = P.add('SynTHBloK', 'Duo', {
         4: g['key'], 5: g['scale'], 0: 1, 1: 8, 73: 1 if g['glitch'] else 0, 47: 0.75, 58: 0.5,
         12: 0.0, 15: 0.1 + 0.3 * drv, 16: 0.6, 17: 0.4 + 0.25 * br, 18: rng.uniform(0.1, 0.3), 19: 0.35,
         20: 0.1, 22: 0.4, 23: 0.5, 25: 0.55, 26: 0, 27: 0,
@@ -307,7 +307,7 @@ def layer(P, kind, pitch, gate):
     br, rev, slow = g['bright'], g['rev'], g['bpm'] < 95
     up = 1 if getattr(P, 'low_voice', False) else 0
     if kind == 'poly':   # pads for slow styles, plucks for fast ones
-        m = P.add('SynTHBloK', 'SynTHBloKPoly', {0: rng.choice([0.33, 0.66]), 1: 0, 2: 0.15 if slow else 0.01, 3: 0.5 if slow else 0.25,
+        m = P.add('SynTHBloK', 'Poly', {0: rng.choice([0.33, 0.66]), 1: 0, 2: 0.15 if slow else 0.01, 3: 0.5 if slow else 0.25,
                                                  4: 0.6 if slow else 0.3, 5: 0.6 if slow else 0.25, 6: (br - 0.5) * 0.8, 7: 0.4, 8: 0.7})
         P.w(pitch, (m, 0), '#ffb437'); P.w(gate, (m, 1), '#ffe14a'); P.names.append('Poly')
         return [(m, 0), (m, 1)]
@@ -439,7 +439,7 @@ def build(n, seed=None, style=None, prefix='SB_%03d'):
     drum_kind = P.drum_kind = rng.choice(['drum', 'drum', 'euclid', 'mtx8', 'forge'])
     g = P.g = PG.pick(rng, n, drum_kind in ('mtx8', 'forge'), style)
     # MTX COMPOSER: the style's tempo; sections A-D play patterns 1-4 (the progression), 2 bars each, cycling
-    song = P.add('SynTHBloK', 'SynTHBloKMatrixSong', {0: 0, 5: g['bpm'], 8: 3, 9: 1, 10: 0})
+    song = P.add('SynTHBloK', 'MatrixSong', {0: 0, 5: g['bpm'], 8: 3, 9: 1, 10: 0})
     song['data']['cells'] = [[[s % 4, False, 0, 1.0] for r in range(8)] for s in range(8)]
     song['data']['section'] = 0
     drums, trigs = drum_part(P, song, drum_kind)
@@ -452,7 +452,7 @@ def build(n, seed=None, style=None, prefix='SB_%03d'):
     # the drum part, often through a series effect
     for k, src in enumerate(drums):
         if k == 0 and rng.random() < 0.55:
-            src = chain(P, song, src, [rng.choice([('SynTHBloK', 'SynTHBloKDualFilter'), ('SynTHBloK', 'SynTHBloKGrainForge'), ('SynTHBloK', 'SynTHBloKStereo')])], mods)
+            src = chain(P, song, src, [rng.choice([('SynTHBloK', 'DualFilter'), ('SynTHBloK', 'GrainForge'), ('SynTHBloK', 'Stereo')])], mods)
         sources.append((src, 0.95 if k == 0 else 0.75, 0.0, 0.1 * rev))
     # 0-2 of the installed drum modules on the drum part's triggers
     for pick in rng.sample(extra_drums(P), rng.choice([0, 1, 1, 2])):
@@ -471,7 +471,7 @@ def build(n, seed=None, style=None, prefix='SB_%03d'):
         if rng.random() < 0.65: src = chain(P, song, src, [rng.choice(layer_fx)], mods)
         sources.append((src, 0.55, pans.pop() if pans else 0.0, 0.15 + 0.45 * rev))
     # the mixer, the send/return, the master
-    mix_model = rng.choice(['SynTHBloKMix12', 'SynTHBloKMix12', 'SynTHBloKMix8', 'SynTHBloKMix24'])
+    mix_model = rng.choice(['Mix12', 'Mix12', 'Mix8', 'Mix24'])
     mixer = P.add('SynTHBloK', mix_model, newrow=True)
     mixer['params'] = []   # not the saved mixer's knobs: its solos and levels belong to another song
     setp(mixer, {MIX_MASTER[mix_model]: 0.9})

@@ -260,6 +260,63 @@ footer .nav:hover{border-color:var(--cy)}
 #mod figure img{flex:1;min-height:0;width:100%;max-width:100%;object-fit:contain;box-shadow:0 0 0 1px var(--line),0 20px 60px #000c}
 #mod figcaption{margin-top:6px;font-size:10px;letter-spacing:.14em;color:var(--mut);text-align:center}
 #mod .none{flex:1 1 0;min-height:0;align-self:stretch;display:flex;align-items:center;justify-content:center;border:1px dashed var(--line);color:var(--bad);padding:20px;min-width:160px;text-align:center}
+
+/* CLAUDE · THINKING: what Claude is doing, why, and the plan (tools/claude_thinking.json, written by Claude) */
+#think-btn{background:transparent;border:1px solid var(--line);color:var(--ok);font:inherit;font-size:11px;letter-spacing:.12em;padding:2px 10px;cursor:pointer;max-width:34vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#think-btn i{font-style:normal;display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin-right:6px;box-shadow:0 0 8px var(--ok);animation:tpulse 1.4s ease-in-out infinite}
+#think-btn b{color:var(--tx);font-weight:500;margin-left:6px}
+#think-btn.hot{border-color:var(--ok);animation:gpulse 1s ease 3}
+#think-btn.idle i{background:var(--mut);box-shadow:none;animation:none}
+@keyframes tpulse{50%{opacity:.25}}
+#think{position:fixed;inset:0;z-index:10;display:none;grid-template-rows:auto minmax(0,1fr);background:var(--bg)}
+#think.on{display:grid}
+#think>.head{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);background:#070b10}
+#think>.head b{color:var(--ok);letter-spacing:.16em;font-weight:600}
+#think>.head span{color:var(--mut)}
+#think-x{background:none;border:1px solid var(--line);color:var(--tx);font:inherit;font-size:16px;line-height:1;padding:2px 9px;cursor:pointer}
+#think-body{display:grid;grid-template-columns:minmax(260px,.9fr) minmax(0,1.4fr) minmax(280px,1fr);grid-template-rows:minmax(300px,58vh) minmax(0,1fr);gap:0;min-height:0}
+@media(max-width:1000px){#think-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(220px,45vh) auto auto minmax(0,1fr);overflow:auto}#t-mind,#t-plan,#t-log{grid-column:1!important;grid-row:auto!important}}
+/* MIND: a living painting of the work (WebGL field + planets for the plan + bursts for decisions) */
+#t-mind{grid-column:1/-1;grid-row:1;position:relative;overflow:hidden;border-bottom:1px solid var(--line);background:#02030a}
+#t-mind canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
+#t-mind #t-now{display:none}   /* the readout shows what is happening itself */
+#t-mind .label{position:absolute;top:10px;left:14px;font-size:10px;letter-spacing:.24em;color:#ffffffb0;text-shadow:0 0 8px #000}
+#t-mind .label b{color:#fff;font-weight:600}
+#think-body .card{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:12px 14px;min-height:0;overflow:auto}
+#think-body h4{margin:0 0 8px;font-size:10px;letter-spacing:.18em;color:var(--mut);font-weight:500}
+#t-goal{font-size:14px;color:var(--tx)}
+#t-now{position:absolute;left:14px;bottom:14px;max-width:min(560px,60%);padding:12px 14px;background:#070b10cc;border:1px solid #ffffff22;backdrop-filter:blur(6px);border-radius:3px;box-shadow:0 10px 40px #000a}
+#t-now .title{font-size:16px;color:var(--ok);margin:4px 0 8px}
+#t-now .title::before{content:'';display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--ok);margin-right:8px;box-shadow:0 0 10px var(--ok);animation:tpulse 1.4s ease-in-out infinite}
+#t-now .detail{color:#cfe2ea;white-space:pre-wrap}
+#t-now .why{margin-top:10px;color:var(--or);white-space:pre-wrap}
+#t-now .why::before{content:'WHY  ';color:var(--mut);letter-spacing:.14em}
+#t-q div{border-left:2px solid var(--mg);padding:3px 8px;margin:6px 0;color:#f6d0e8}
+#t-plan{grid-column:2;grid-row:2}
+.flow{display:flex;flex-direction:column;gap:0}
+.step{display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;align-items:start}
+.step .dot{width:14px;height:14px;border-radius:50%;border:2px solid var(--line);margin:3px auto 0;position:relative;background:var(--bg)}
+.step .rail{width:2px;background:var(--line);margin:0 auto;min-height:18px;height:100%}
+.step .col{display:flex;flex-direction:column;align-items:center}
+.step .txt{padding-bottom:14px}
+.step .txt b{font-weight:500;color:var(--tx)}
+.step .txt span{display:block;color:var(--mut);font-size:11px;white-space:pre-wrap}
+.step.done .dot{background:var(--ok);border-color:var(--ok)}
+.step.done .rail{background:var(--ok)}
+.step.done .txt b{color:#9fe3bb}
+.step.now .dot{border-color:var(--cy);background:var(--cy);box-shadow:0 0 12px var(--cy);animation:tpulse 1.2s ease-in-out infinite}
+.step.now .txt b{color:var(--cy)}
+.step.next .dot{border-color:var(--or)}
+.step.later .txt b{color:var(--mut)}
+.step.blocked .dot{border-color:var(--bad);background:var(--bad)}
+#t-log{grid-column:3;grid-row:2}
+#t-goalc{grid-column:1;grid-row:2}
+#t-log .e{display:grid;grid-template-columns:52px 54px minmax(0,1fr);gap:8px;padding:4px 0;border-bottom:1px solid #0e2f3966}
+#t-log .e time{color:var(--mut)}
+#t-log .e i{font-style:normal;font-size:10px;letter-spacing:.1em;text-align:center;border:1px solid currentColor;border-radius:2px;height:fit-content;padding:0 3px}
+#t-log .e.think i{color:var(--cy)}#t-log .e.do i{color:var(--or)}#t-log .e.check i{color:var(--ok)}#t-log .e.fix i{color:var(--bad)}#t-log .e.ask i{color:var(--mg)}
+#t-log .e.new{animation:tnew 1.6s ease}
+@keyframes tnew{0%{background:#00e5ff22}100%{background:transparent}}
 </style>
 </head>
 <body>
@@ -268,6 +325,7 @@ footer .nav:hover{border-color:var(--cy)}
   <button type="button" id="patch-btn" title="Rack's live patch">PATCH MAP<b id="patch-n"></b></button>
   <button type="button" id="lib-btn" title="Saved patches: patches/ and Rack's patches folder">PATCHES<b id="lib-n"></b></button>
   <div id="git"><span id="g-commit">COMMIT<b>-</b></span><i>→</i><span id="g-push">PUSH<b>-</b></span></div>
+  <button type="button" id="think-btn" class="idle" title="What Claude is doing and why (tools/claude_thinking.json)"><i></i>THINKING<b id="think-now">-</b></button>
   <span id="live">● watching</span></header>
 <main>
   <section class="pane" id="p-design">
@@ -301,18 +359,28 @@ footer .nav:hover{border-color:var(--cy)}
   <div class="note">Rack closes the patch that is open now and opens this one. Rack saves what was open first, and a copy goes to <b>Rack2/autosave-before-open</b>.</div>
   <div class="st" id="ro-st"></div></div>
   <div class="bot"><button type="button" class="cancel">CANCEL</button><button type="button" class="go">OPEN IN RACK</button></div></div></div>
+<div id="think" role="dialog" aria-modal="true" aria-label="Claude thinking"><div class="head"><span><b>CLAUDE · THINKING</b> &nbsp;<span id="t-at">waiting for tools/claude_thinking.json</span></span><button type="button" id="think-x" aria-label="Close">&times;</button></div>
+  <div id="think-body">
+    <div id="t-mind"><canvas id="mind-2d"></canvas>
+      <div id="t-now"><h4>RIGHT NOW</h4><div class="title" id="t-title">-</div><div class="detail" id="t-detail"></div><div class="why" id="t-why"></div></div></div>
+    <div class="card" id="t-goalc"><h4>GOAL</h4><div id="t-goal">-</div><h4 style="margin-top:14px">OPEN QUESTIONS FOR YOU</h4><div id="t-q"><div style="border:0;color:var(--mut)">none</div></div></div>
+    <div class="card" id="t-plan"><h4>PLAN</h4><div class="flow" id="t-flow"></div></div>
+    <div class="card" id="t-log"><h4>DECISIONS · NEWEST FIRST</h4><div id="t-entries"></div></div>
+  </div></div>
 <div id="zoom"><img alt=""><span id="zoom-cap">click the image for actual size · click outside or press Esc to close</span></div>
 <script>
 const ROOTS = ['/res/', '/web-images/'], IMG = /\.(svg|png|webp|jpe?g)$/i, POLL = 1500;
 const files = new Map();          // path -> last-modified ms
 let shown = null, pinned = false, logStamp = '';
-// MODULES view: one tile per module in plugin.json, so a new module shows up as soon as it is added there.
+// MODULES view: one tile per module in tools/modules.json (every SynTHBloK module, the MTX pack's and the singles'),
+// so a new module shows up as soon as it is added there.
 let mods = [], modText = '', strip = 'mod';
 const KNOWN = 'wb-known-modules';
 const known = new Set((() => { try { return JSON.parse(localStorage.getItem(KNOWN)) || []; } catch (e) { return []; } })());
-// modules whose panel SVG is not named after their slug
-const PANEL_FILE = {SynTHBloKResonator: 'SynTHBloKFilter'};
-const panelOf = slug => [...files.keys()].find(p => p.toLowerCase() === ('/res/' + (PANEL_FILE[slug] || slug) + '.svg').toLowerCase());
+// modules whose panel SVG is not named after their slug. The slugs lost their "SynTHBloK" prefix for the VCV
+// Library (Drum, MtxQuad, ...) but the panels kept their names (SynTHBloKDrum.svg): panelOf tries both.
+const PANEL_FILE = {Resonator: 'SynTHBloKFilter', Quad: 'SynTHBloK', BlokMaster: 'BloKMaster'};
+const panelOf = slug => [PANEL_FILE[slug], slug, 'SynTHBloK' + slug].filter(Boolean).map(n => [...files.keys()].find(p => p.toLowerCase() === ('/res/' + n + '.svg').toLowerCase())).find(Boolean);
 const shotOf = slug => [...files.keys()].find(p => p.toLowerCase() === ('/web-images/screenshots/' + slug + '.png').toLowerCase());
 const modOf = p => mods.find(m => p === panelOf(m.slug) || p === shotOf(m.slug));
 // A module's source file is the src/ file that registers its slug with createModel.
@@ -443,19 +511,19 @@ document.querySelectorAll('.modes button').forEach(b => b.onclick = () => {
 });
 
 async function scanModules(first) {
-  const r = await fetch('/plugin.json', {cache: 'no-store'});
+  const r = await fetch('/tools/modules.json', {cache: 'no-store'});
   if (!r.ok) return;
   const text = await r.text();
   if (text === modText) return;
   let list;
-  try { list = JSON.parse(text).modules || []; } catch (e) { return; }   // half-saved plugin.json: wait for the next poll
+  try { list = Object.values(JSON.parse(text).modules || {}); } catch (e) { return; }   // half-saved file: wait for the next poll
   modText = text;
   const firstEver = known.size === 0, added = [];
   mods = list.map(m => ({slug: m.slug, name: m.name || m.slug, tags: m.tags, isNew: !firstEver && !known.has(m.slug)}));
   mods.forEach(m => { if (!known.has(m.slug)) { known.add(m.slug); if (!firstEver) added.push(m); } });
   try { localStorage.setItem(KNOWN, JSON.stringify([...known])); } catch (e) {}
   document.getElementById('nmod').textContent = mods.length;
-  added.forEach(m => feed(`new module <b>${m.name}</b> in plugin.json`));
+  added.forEach(m => feed(`new module <b>${m.name}</b> in modules.json`));
   if (!first && added.length && !pinned && strip === 'mod') show('mod:' + added[0].slug, 'change');
   else if (!first) drawStrip();
 }
@@ -474,7 +542,9 @@ function feeder(id) {
   };
   return (msg, at) => { q.push(`${time(at || Date.now())} ${msg}`); if (!timer) timer = setInterval(next, 140); };
 }
-const feed = feeder('feed'), gitFeed = feeder('gitfeed');
+const feed0 = feeder('feed'), gitFeed0 = feeder('gitfeed');
+const feed = (m, at) => { feed0(m, at); try { Mind.note('feed', m); } catch (e) {} };          // every change reaches the READOUT
+const gitFeed = (m, at) => { gitFeed0(m, at); try { Mind.note('git', m); } catch (e) {} };
 
 // The commit screen: commits (.git/logs/HEAD) and pushes (the origin branch's log), newest on top.
 // On load it shows the last few, then each new one as it lands.
@@ -553,6 +623,7 @@ async function scanLog() {
   const wasRunning = logStamp !== '';
   logStamp = s;
   const text = await r.text(), lines = text.split('\n').slice(-400);
+  try { Mind.build(lines); } catch (e) {}
   const esc = l => l.replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
   const log = document.getElementById('log'), atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
   log.innerHTML = lines.map(l => /error|Error \d|\*\*\*/.test(l) ? `<span class="e">${esc(l)}</span>` : /warning/.test(l) ? `<span class="w">${esc(l)}</span>` : /^(g\+\+|gcc|cp |mkdir|Linking|Compiling)/.test(l) ? `<span class="c">${esc(l)}</span>` : esc(l)).join('\n');
@@ -561,6 +632,11 @@ async function scanLog() {
   const failed = /\*\*\*|error:/.test(text), done = /^(cp |mkdir).*plugins-win|Nothing to be done|is up to date/m.test(text) || age > 8000;
   st.className = failed ? 'bad' : done ? 'ok' : 'run';
   st.textContent = failed ? 'FAILED' : done ? 'BUILD OK' : 'COMPILING…';
+  try {
+    Mind.compile(!failed && !done);
+    if (wasRunning && st.dataset.last === 'COMPILING…' && st.textContent !== 'COMPILING…')
+      [0, 350, 700].forEach(d => setTimeout(() => Mind.event(failed ? 'fix' : 'check'), d));
+  } catch (e) {}
   if (wasRunning && st.dataset.last !== st.textContent) feed(`compiler: <b>${st.textContent}</b>`);
   st.dataset.last = st.textContent;
 }
@@ -779,6 +855,7 @@ async function scanChat() {
     return `<div data-k="${k}"${had && !old.has(k) ? ' class="in"' : ''}>${time(m.t)} <b class="${m.who}">${m.who === 'you' ? 'YOU' : 'CLAUDE'}</b> ${esc(m.text)}</div>`;
   }).join('');
   f.scrollTop = 0;
+  if (had) items.filter(m => !old.has(m.t + m.who + m.text.length)).slice(-3).forEach(m => { try { Mind.note('chat', (m.who === 'you' ? 'YOU: ' : 'CLAUDE: ') + m.text); } catch (e) {} });
   document.getElementById('chat-at').textContent = d.session || '';
 }
 
@@ -806,6 +883,7 @@ async function scanPatch() {
   if (changed && !document.getElementById('patch').classList.contains('on')) {
     const b = document.getElementById('patch-btn'); b.classList.remove('hot'); void b.offsetWidth; b.classList.add('hot');
   }
+  if (changed) try { Mind.note('rack', `rack patch: ${fresh.length} new cable${fresh.length === 1 ? '' : 's'} · ${d.cables.length} total`); } catch (e) {}
   drawPick();
   if (pShown.live) drawPatch(new Set(fresh), false);
 }
@@ -1064,9 +1142,402 @@ document.getElementById('patch-list').onclick = e => {
   pickPatch(patchSel && patchSel.k === +r.dataset.k ? null : { k: +r.dataset.k });
 };
 
+
+
+// ---- READOUT: a live technical display of every process running while Claude works ----
+// Process table (left), gauge core (centre), telemetry stream (right), activity oscilloscope (bottom).
+// Every signal the workbench already sees feeds it: the thinking file, file edits, the compiler log,
+// git, the chat relay and Rack's live patch. Glyphs are a made-up script: each letter always maps to the
+// same glyph, so the same words always read the same way.
+const Mind = (() => {
+  const cv = document.getElementById('mind-2d'), ctx = cv.getContext('2d');
+  const C = {cy: '#5ff6ff', gr: '#7dffb2', am: '#ffb347', mg: '#ff4fd8', rd: '#ff4466', wh: '#e8fbff', dim: '#1d4450', bg: '#010407'};
+  const KC = {think: C.cy, do: C.am, check: C.gr, fix: C.rd, ask: C.mg, file: C.am, git: C.gr, chat: C.mg, rack: C.cy, build: C.am, sys: C.dim};
+  const OP = {think: 'INFR', do: 'EXEC', check: 'VRFY', fix: 'PTCH', ask: 'QERY', file: 'WRIT', git: 'CMIT', chat: 'RECV', rack: 'LINK', build: 'CMPL', sys: 'SYS '};
+  const P = [
+    ['CORTEX', 'reasoning / plan'], ['SYNTHESIS', 'source writes'], ['FORGE', 'compiler'], ['LINKER', 'plugin.dll'],
+    ['DEPLOY', 'install to Rack'], ['ARCHIVE', 'git'], ['RACK-LINK', 'live patch'], ['RELAY', 'chat'], ['OPTIC', 'panel art / shots'],
+  ].map(([id, d], i) => ({id, d, lv: 0, n: 0, last: 0, hist: new Float32Array(48), pid: (0x1A3F + i * 0x2D7).toString(16).toUpperCase()}));
+  const proc = id => P.find(p => p.id === id);
+  const hit = (id, a = 1) => { const p = proc(id); p.lv = Math.min(1, p.lv + a); p.n++; p.last = Date.now(); };
+
+  const stream = [], spikes = [], hist = new Float32Array(300);
+  let act = .3, energy = .3, heat = 0, logHot = false, thinkHot = false, compiling = false;
+  let plan = [], nowT = '', mode = 'idle', running = false, last = 0, born = Date.now(), sampleT = 0, procT = 0;
+  let bDone = 0, bTotal = 35, glitch = 0, seenBuild = new Set(), evTimes = [];
+
+  // ---- the alien script ----
+  const H = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
+  const SEG = [[0,0,1,0],[1,0,2,0],[0,0,0,1],[2,0,2,1],[0,1,1,1],[1,1,2,1],[0,1,0,2],[2,1,2,2],[0,2,1,2],[1,2,2,2],[0,0,1,1],[2,0,1,1],[1,1,0,2],[1,1,2,2],[1,0,1,1],[1,1,1,2]];
+  function glyph(x, y, s, code, col, a = 1) {
+    ctx.strokeStyle = col; ctx.globalAlpha = a; ctx.lineWidth = Math.max(1, s * .13); ctx.beginPath();
+    let n = 0;
+    for (let i = 0; i < 16; i++) if (code >> i & 1 && n < 5) { const g = SEG[i]; ctx.moveTo(x + g[0] * s / 2, y + g[1] * s / 2); ctx.lineTo(x + g[2] * s / 2, y + g[3] * s / 2); n++; }
+    ctx.stroke();
+    if (code >> 17 & 1) { ctx.fillStyle = col; ctx.fillRect(x + s * .45, y - s * .25, s * .12, s * .12); }
+    ctx.globalAlpha = 1;
+  }
+  function alien(x, y, s, str, col, a = 1, max = 99) {
+    let cx = x;
+    for (const ch of String(str).toUpperCase().slice(0, max)) {
+      if (ch === ' ') { cx += s * .7; continue; }
+      glyph(cx, y, s, H('g' + ch) | 0x11, col, a); cx += s * 1.25;
+    }
+    return cx;
+  }
+  const hex = (v, n = 4) => (v >>> 0).toString(16).toUpperCase().padStart(n, '0').slice(-n);
+  const clock = ms => { const s = Math.floor(ms / 1000); return [s / 3600 | 0, (s / 60 | 0) % 60, s % 60].map(v => String(v).padStart(2, '0')).join(':'); };
+  const strip = t => String(t || '').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim();
+  const font = (px, w = 400) => { ctx.font = `${w} ${px}px "JetBrains Mono","Cascadia Mono",Consolas,monospace`; };
+
+  function push(k, txt) {
+    const t = performance.now();
+    stream.unshift({t, k, txt: strip(txt).slice(0, 110), addr: H(txt + t) });
+    if (stream.length > 80) stream.pop();
+    spikes.push({t, k, a: Math.random() * 6.283});
+    if (spikes.length > 60) spikes.shift();
+    evTimes.push(Date.now());
+    act = Math.min(1, act + .22);
+    glitch = .12;
+  }
+
+  // ---- drawing helpers ----
+  function panel(x, y, w, h, title, col = C.cy) {
+    ctx.strokeStyle = col; ctx.globalAlpha = .35; ctx.lineWidth = 1;
+    const c = 9;
+    ctx.beginPath();
+    ctx.moveTo(x + c, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + h - c); ctx.lineTo(x + w - c, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + c); ctx.closePath(); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = col; ctx.fillRect(x, y + c, 2, 18); ctx.fillRect(x + w - 2, y + h - c - 18, 2, 18);
+    if (title) { font(9, 600); ctx.fillStyle = col; ctx.globalAlpha = .9; ctx.fillText(title, x + 14, y + 13); ctx.globalAlpha = 1; alien(x + 14 + ctx.measureText(title).width + 8, y + 6, 7, title, col, .55, 10); }
+  }
+  function bar(x, y, w, h, v, col, cells = 20) {
+    const cw = w / cells;
+    for (let i = 0; i < cells; i++) {
+      const on = i / cells < v;
+      ctx.fillStyle = on ? (i > cells * .8 ? C.rd : i > cells * .6 ? C.am : col) : '#0a1a20';
+      ctx.globalAlpha = on ? .95 : 1;
+      ctx.fillRect(x + i * cw + 1, y, cw - 2, h);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function draw(t, dt) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const W = cv.clientWidth, Hh = cv.clientHeight;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(Hh * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(Hh * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.textBaseline = 'alphabetic';
+
+    // background: deep black, a faint hex lattice that drifts with activity
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, Hh);
+    ctx.strokeStyle = C.cy; ctx.globalAlpha = .045 + .04 * energy; ctx.lineWidth = 1; ctx.beginPath();
+    const gs = 26, off = (t * 4 * (.3 + energy)) % gs;
+    for (let x = -gs + off; x < W + gs; x += gs) { ctx.moveTo(x, 0); ctx.lineTo(x + Hh * .25, Hh); }
+    for (let y = off; y < Hh; y += gs) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke(); ctx.globalAlpha = 1;
+
+    // ---- top bar ----
+    const up = Date.now() - born;
+    evTimes = evTimes.filter(v => Date.now() - v < 60000);
+    font(10, 600); ctx.fillStyle = C.cy; ctx.fillText('SYNTHBLOK // OPERATOR TELEMETRY', 14, 18);
+    alien(250, 10, 8, 'operator telemetry', C.cy, .6, 16);
+    const modeTxt = compiling ? 'COMPILING' : mode === 'idle' ? 'DORMANT' : energy > .55 ? 'ACTIVE' : 'THINKING';
+    const modeCol = compiling ? C.am : mode === 'idle' ? C.dim : C.gr;
+    font(10, 700); const mw = ctx.measureText(modeTxt).width + 22, mx = W / 2 - mw / 2;
+    ctx.fillStyle = modeCol; ctx.globalAlpha = .18 + .12 * Math.sin(t * (compiling ? 9 : 3)); ctx.fillRect(mx, 6, mw, 17); ctx.globalAlpha = 1;
+    ctx.strokeStyle = modeCol; ctx.strokeRect(mx + .5, 6.5, mw, 17); ctx.fillStyle = modeCol; ctx.fillText(modeTxt, mx + 11, 19);
+    font(9); ctx.fillStyle = C.cy; ctx.textAlign = 'right';
+    ctx.fillText(`T+${clock(up)}   EV/MIN ${String(evTimes.length).padStart(3, '0')}   ${new Date().toTimeString().slice(0, 8)}`, W - 14, 18);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = C.cy; ctx.globalAlpha = .4; ctx.fillRect(14, 27, W - 28, 1); ctx.globalAlpha = 1;
+
+    const top = 36, bot = Hh - Math.max(84, Hh * .17);   // the scope gets ~17 % of the height
+    const lw = Math.min(330, W * .29), rw = Math.min(440, W * .34);
+    const cx0 = 14 + lw + 12, cw = W - 28 - lw - rw - 24;
+
+    // ---- process table ----
+    panel(14, top, lw, bot - top, 'PROCESSES', C.cy);
+    const rh = (bot - top - 26) / P.length;
+    P.forEach((p, i) => {
+      const y = top + 24 + i * rh, live = p.lv > .04;
+      const col = p.id === 'FORGE' || p.id === 'LINKER' ? C.am : p.id === 'RELAY' ? C.mg : p.id === 'DEPLOY' || p.id === 'ARCHIVE' ? C.gr : C.cy;
+      glyph(22, y + 2, 10, H(p.id) | 0x101, live ? col : C.dim, live ? 1 : .6);
+      font(10, 700); ctx.fillStyle = live ? col : '#3d6c78'; ctx.fillText(p.id, 40, y + 10);
+      font(8); ctx.fillStyle = '#4b7f8c'; ctx.fillText(`PID ${p.pid}  ${p.d}`, 40, y + 21);
+      const st = p.lv > .6 ? 'HOT' : p.lv > .2 ? 'RUN' : live ? 'IDLE' : 'SLEEP';
+      ctx.textAlign = 'right'; font(9, 700); ctx.fillStyle = st === 'HOT' ? C.rd : st === 'RUN' ? col : '#3d6c78';
+      ctx.fillText(st, 14 + lw - 10, y + 10);
+      font(8); ctx.fillStyle = '#4b7f8c'; ctx.fillText(`${String(p.n).padStart(4, '0')} OPS`, 14 + lw - 10, y + 21); ctx.textAlign = 'left';
+      // level cells and a sparkline of the last ~50 s
+      const bx = 40, bw = lw - 120, by = y + 25;
+      if (rh > 34) bar(bx, by, bw * .45, 4, p.lv, col, 12);
+      if (rh > 34) {
+        ctx.strokeStyle = col; ctx.globalAlpha = .8; ctx.lineWidth = 1; ctx.beginPath();
+        const sx = bx + bw * .5, sw = bw * .5 + 50;
+        for (let k = 0; k < p.hist.length; k++) { const v = p.hist[(procT + k) % p.hist.length]; const px = sx + k / (p.hist.length - 1) * sw, py = by + 4 - v * 10; k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+        ctx.stroke(); ctx.globalAlpha = 1;
+      }
+    });
+
+    // ---- gauge core ----
+    const R = Math.max(40, Math.min(cw * .46, (bot - top) * .48)), gx = cx0 + cw / 2, gy = top + (bot - top) / 2;
+    const rot = t * (.08 + .5 * energy + .9 * heat);
+    // outer tick ring
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 144; i++) {
+      const a = i / 144 * 6.283 + rot * .3, long = i % 12 === 0;
+      const r1 = R, r2 = R - (long ? 11 : 5);
+      ctx.strokeStyle = long ? C.cy : C.dim; ctx.globalAlpha = long ? .9 : .7;
+      ctx.beginPath(); ctx.moveTo(gx + Math.cos(a) * r1, gy + Math.sin(a) * r1); ctx.lineTo(gx + Math.cos(a) * r2, gy + Math.sin(a) * r2); ctx.stroke();
+      if (long && R > 90) { glyph(gx + Math.cos(a) * (R + 9) - 4, gy + Math.sin(a) * (R + 9) - 4, 8, H('r' + i) | 0x21, C.cy, .55); }
+    }
+    ctx.globalAlpha = 1;
+    // plan ring: one arc per step
+    const n = Math.max(1, plan.length), gap = .05;
+    plan.forEach((s, i) => {
+      const a0 = -1.5708 + i / n * 6.283 + gap, a1 = -1.5708 + (i + 1) / n * 6.283 - gap;
+      const st = s.state || 'later';
+      ctx.strokeStyle = st === 'done' ? C.gr : st === 'now' ? C.cy : st === 'next' ? C.am : st === 'blocked' ? C.rd : C.dim;
+      ctx.globalAlpha = st === 'now' ? .6 + .4 * Math.sin(t * 5) : st === 'later' ? .5 : .9;
+      ctx.lineWidth = st === 'now' ? 6 : 4;
+      ctx.beginPath(); ctx.arc(gx, gy, R - 20, a0, a1); ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+    // energy gauge: 270 degrees, cells, needle
+    const g0 = 2.356, span = 4.712, R2 = R - 36;
+    for (let i = 0; i < 54; i++) {
+      const a = g0 + i / 54 * span, on = i / 54 < energy;
+      ctx.strokeStyle = on ? (i > 44 ? C.rd : i > 34 ? C.am : C.cy) : '#0b2129'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(gx, gy, R2, a, a + span / 54 * .7); ctx.stroke();
+    }
+    const na = g0 + span * Math.min(1, energy + .01 * Math.sin(t * 13));
+    ctx.strokeStyle = C.wh; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(gx + Math.cos(na) * (R2 + 6), gy + Math.sin(na) * (R2 + 6)); ctx.stroke();
+    // forge ring: compile progress
+    const R3 = R2 - 16;
+    ctx.strokeStyle = '#1a1206'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(gx, gy, R3, 0, 6.283); ctx.stroke();
+    if (heat > .02) {
+      const pr = Math.min(1, bDone / bTotal);
+      ctx.strokeStyle = C.am; ctx.globalAlpha = heat; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(gx, gy, R3, -1.5708, -1.5708 + 6.283 * pr); ctx.stroke();
+      for (let i = 0; i < 6; i++) { const a = rot * 3 + i * 1.047; ctx.fillStyle = C.am; ctx.fillRect(gx + Math.cos(a) * R3 - 1.5, gy + Math.sin(a) * R3 - 1.5, 3, 3); }
+      ctx.globalAlpha = 1;
+    }
+    // radar sweep and event blips
+    const sw = (t * (.6 + 2 * energy + 2 * heat)) % 6.283;
+    const grd = ctx.createConicGradient ? ctx.createConicGradient(sw - 1.2, gx, gy) : null;
+    if (grd) {
+      grd.addColorStop(0, 'rgba(95,246,255,0)'); grd.addColorStop(.19, `rgba(95,246,255,${.05 + .12 * energy})`); grd.addColorStop(.191, 'rgba(95,246,255,0)');
+      ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(gx, gy, R3 - 4, 0, 6.283); ctx.fill();
+    }
+    const nowMs = performance.now();
+    spikes.forEach(s => {
+      const age = (nowMs - s.t) / 1000; if (age > 40) return;
+      const r = (R3 - 8) * (.25 + .7 * Math.min(1, age / 40));
+      ctx.fillStyle = KC[s.k] || C.cy; ctx.globalAlpha = Math.max(0, 1 - age / 40);
+      ctx.beginPath(); ctx.arc(gx + Math.cos(s.a) * r, gy + Math.sin(s.a) * r, age < 1 ? 4 : 2, 0, 6.283); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // centre readout
+    ctx.textAlign = 'center';
+    font(Math.max(14, R * .2), 700); ctx.fillStyle = C.wh; ctx.shadowColor = C.cy; ctx.shadowBlur = 12;
+    ctx.fillText(`Ψ ${(energy * 100).toFixed(1)}`, gx, gy + 2); ctx.shadowBlur = 0;
+    font(8); ctx.fillStyle = C.cy; ctx.fillText(`COGNITIVE LOAD  ·  HEAT ${(heat * 100).toFixed(0).padStart(3, '0')}  ·  Φ ${hex(H(nowT) ^ (t * 7 | 0))}`, gx, gy + 16);
+    if (heat > .05) { font(8, 700); ctx.fillStyle = C.am; ctx.fillText(`FORGE ${Math.min(bDone, bTotal)}/${bTotal} UNITS`, gx, gy - R * .2 - 6); }
+    font(9, 600); ctx.fillStyle = C.gr; const tt = nowT.toUpperCase().slice(0, Math.max(10, Math.floor(R / 4)));
+    ctx.fillText(tt, gx, gy + R * .32);
+    ctx.textAlign = 'left';
+    const aw = Math.min(tt.length, 14) * 10;
+    alien(gx - aw / 2, gy + R * .32 + 7, 8, tt, C.gr, .7, 14);
+
+    // ---- telemetry stream ----
+    const sx = W - 14 - rw;
+    panel(sx, top, rw, bot - top, 'TELEMETRY STREAM', C.am);
+    ctx.save(); ctx.beginPath(); ctx.rect(sx + 4, top + 20, rw - 8, bot - top - 24); ctx.clip();
+    const lh = 15;
+    let y = top + 34;
+    stream.forEach((e, i) => {
+      if (y > bot - 4) return;
+      const age = (nowMs - e.t) / 1000, col = KC[e.k] || C.cy;
+      const shown = i === 0 ? Math.floor(Math.min(1, age * 2.5) * e.txt.length) : e.txt.length;   // the newest line types itself out
+      font(8); ctx.fillStyle = '#3d6c78'; ctx.fillText(`${hex(e.addr, 6)}`, sx + 10, y);
+      font(8, 700); ctx.fillStyle = col; ctx.fillText(OP[e.k] || 'SYS ', sx + 56, y);
+      font(9); ctx.fillStyle = i === 0 ? C.wh : col; ctx.globalAlpha = Math.max(.35, 1 - i * .035);
+      ctx.fillText(e.txt.slice(0, shown) + (i === 0 && shown < e.txt.length && (t * 6 | 0) % 2 ? '▌' : ''), sx + 92, y);
+      ctx.globalAlpha = 1;
+      y += lh;
+    });
+    if (!stream.length) { font(9); ctx.fillStyle = '#3d6c78'; ctx.fillText('awaiting signal…', sx + 14, top + 40); }
+    ctx.restore();
+
+    // ---- oscilloscope ----
+    const oy = bot + 8, oh = Hh - oy - 10;
+    panel(14, oy, W - 28, oh, '', C.cy);
+    font(8, 600); ctx.fillStyle = C.cy; ctx.fillText('ACTIVITY  5 MIN', 24, oy + 13);
+    const ox = 110, ow = W - 28 - 110 - 10;
+    ctx.strokeStyle = C.dim; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(ox, oy + oh / 2); ctx.lineTo(ox + ow, oy + oh / 2); ctx.stroke();
+    const mid = oy + oh / 2, amp = oh / 2 - 5, pts = [];
+    for (let k = 0; k < hist.length; k++) {
+      const v = hist[(sampleT + k) % hist.length], px = ox + k / (hist.length - 1) * ow;
+      const carrier = Math.sin(k * .9 + t * 6) * v * .5;
+      pts.push([px, mid - Math.max(0, v * .7 + carrier * .3) * amp]);
+    }
+    // intensity fill: a semi-transparent gradient under the trace, cyan when calm, amber then red at the peaks
+    const fill = ctx.createLinearGradient(0, mid - amp, 0, mid);
+    fill.addColorStop(0, 'rgba(255,68,102,.55)');
+    fill.addColorStop(.3, 'rgba(255,179,71,.42)');
+    fill.addColorStop(.65, 'rgba(95,246,255,.28)');
+    fill.addColorStop(1, 'rgba(95,246,255,.02)');
+    ctx.beginPath(); ctx.moveTo(pts[0][0], mid);
+    pts.forEach(([x, y]) => ctx.lineTo(x, y));
+    ctx.lineTo(pts[pts.length - 1][0], mid); ctx.closePath();
+    ctx.fillStyle = fill; ctx.fill();
+    // a faint mirror below the centre line
+    const refl = ctx.createLinearGradient(0, mid, 0, mid + amp);
+    refl.addColorStop(0, 'rgba(95,246,255,.16)'); refl.addColorStop(1, 'rgba(95,246,255,0)');
+    ctx.beginPath(); ctx.moveTo(pts[0][0], mid);
+    pts.forEach(([x, y]) => ctx.lineTo(x, mid + (mid - y) * .6));
+    ctx.lineTo(pts[pts.length - 1][0], mid); ctx.closePath();
+    ctx.fillStyle = refl; ctx.fill();
+    // the trace on top, its glow following the intensity
+    ctx.strokeStyle = energy > .7 ? C.am : C.cy; ctx.lineWidth = 1.5; ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 6 + 10 * energy; ctx.beginPath();
+    pts.forEach(([x, y], k) => k ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+    ctx.stroke(); ctx.shadowBlur = 0;
+    spikes.forEach(s => {
+      const age = (nowMs - s.t) / 1000; if (age > 300) return;
+      const px = ox + ow - age / 300 * ow;
+      ctx.fillStyle = KC[s.k] || C.cy; ctx.fillRect(px, oy + 4, 1.5, oh - 8);
+    });
+
+    // scanlines + a glitch band on each new event
+    ctx.fillStyle = '#000'; ctx.globalAlpha = .18;
+    for (let yy = 0; yy < Hh; yy += 3) ctx.fillRect(0, yy, W, 1);
+    ctx.globalAlpha = 1;
+    if (glitch > 0) {
+      glitch -= dt;
+      const gyb = Math.random() * Hh, gh = 4 + Math.random() * 14;
+      try { ctx.drawImage(cv, 0, gyb * dpr, cv.width, gh * dpr, (Math.random() - .5) * 18, gyb, W, gh); } catch (e) {}
+    }
+  }
+
+  function frame(ms) {
+    if (!running) return;
+    requestAnimationFrame(frame);
+    const dt = Math.min(.1, (ms - last) / 1000 || .016);
+    if (dt < 1 / 32 && last) return;   // ~30 fps is plenty
+    last = ms;
+    const t = ms / 1000;
+    // dynamics
+    act *= Math.exp(-dt / 45);
+    const floor = Date.now() - thinkSeen < 60 * 1000 ? .45 : 0;
+    const tgt = mode === 'idle' && !compiling ? Math.min(act, .15) : Math.max(act, floor, heat > .05 ? .85 : 0);
+    energy += (tgt - energy) * dt * (tgt > energy ? 2.5 : .5);
+    heat += ((compiling ? 1 : 0) - heat) * dt * (compiling ? 1.5 : .5);
+    P.forEach(p => { p.lv *= Math.exp(-dt / 8); });
+    proc('FORGE').lv = Math.max(proc('FORGE').lv, heat);
+    if (Date.now() - thinkSeen < 60 * 1000) proc('CORTEX').lv = Math.max(proc('CORTEX').lv, .3);
+    sampleT += 0;
+    if ((frame.acc = (frame.acc || 0) + dt) > 1) { frame.acc = 0; hist[sampleT % hist.length] = energy; sampleT++; }
+    if ((frame.pacc = (frame.pacc || 0) + dt) > 1) { frame.pacc = 0; P.forEach(p => { p.hist[procT % p.hist.length] = p.lv; }); procT++; }
+    draw(t, dt);
+  }
+
+  return {
+    start() { if (running) return; running = true; last = 0; requestAnimationFrame(frame); },
+    stop() { running = false; },
+    setPlan(p) { plan = p || []; },
+    setNow(j) { nowT = (j.now && j.now.title) || j.task || ''; if (j.mode) mode = j.mode; },
+    pulse(a) { act = Math.min(1, Math.max(act, a)); },
+    rest() { act = 0; mode = 'idle'; },
+    compile(on, src = 'log') {
+      src === 'log' ? (logHot = !!on) : (thinkHot = !!on);
+      const was = compiling; compiling = logHot || thinkHot;
+      if (compiling && !was) { bDone = 0; seenBuild.clear(); push('build', 'FORGE ignition · compiling the plugin'); hit('FORGE'); }
+      if (on) act = 1;
+    },
+    event(kind, text) {
+      hit(kind === 'check' && /build|install|dll/i.test(text || '') ? 'DEPLOY' : 'CORTEX', .7);
+      push(kind in OP ? kind : 'do', text || kind.toUpperCase() + ' signal');
+    },
+    note(src, msg) {
+      const m = strip(msg);
+      if (src === 'git') { hit('ARCHIVE'); push('git', m); return; }
+      if (src === 'chat') { hit('RELAY'); push('chat', m); return; }
+      if (src === 'rack') { hit('RACK-LINK'); push('rack', m); return; }
+      if (/^compiler:/i.test(m)) {
+        const ok = /OK/.test(m);
+        if (ok) { hit('DEPLOY'); hit('LINKER', .6); bDone = bTotal; }
+        push(ok ? 'check' : /FAIL/.test(m) ? 'fix' : 'build', m);
+        return;
+      }
+      if (/\.(svg|png|jpe?g)\b|res\/|web-images|screenshot/i.test(m)) { hit('OPTIC'); push('file', m); return; }
+      if (/\.vcv\b|patch/i.test(m)) { hit('RACK-LINK'); push('rack', m); return; }
+      hit('SYNTHESIS'); push('file', m);
+    },
+    build(lines) {
+      // each g++ line that compiles one source file is one unit of work; the link line hits the LINKER
+      let fresh = 0;
+      for (const l of lines) {
+        const c = l.match(/-c\s+src\/([\w.]+\.cpp)/) || l.match(/src\/([\w]+\.cpp)\b.*-o build/);
+        if (c && !seenBuild.has(c[1])) { seenBuild.add(c[1]); bDone++; if (fresh++ < 6) push('build', 'compile ' + c[1]); hit('FORGE', .3); }
+        if (/-shared .*-o plugin|-o plugin\.dll/.test(l) && !seenBuild.has('#link')) { seenBuild.add('#link'); hit('LINKER'); push('build', 'link plugin.dll'); }
+        if (/^cp plugin\.dll/.test(l) && !seenBuild.has('#cp')) { seenBuild.add('#cp'); hit('DEPLOY'); push('check', 'install plugin.dll into Rack'); }
+      }
+      bTotal = Math.max(bTotal, bDone);
+    },
+  };
+})();
+// ---- CLAUDE · THINKING (tools/claude_thinking.json) ----
+let thinkSeen = 0, thinkLog = new Set();
+const thinkEl = id => document.getElementById(id);
+function thinkTime(t) { const d = new Date(t); return d.toTimeString().slice(0, 5); }
+async function scanThink() {
+  const r = await fetch('/tools/claude_thinking.json?t=' + Date.now(), {cache: 'no-store'}).catch(() => null);
+  if (!r || !r.ok) return;
+  let j; try { j = await r.json(); } catch (e) { return; }
+  const up = j.updated || 0;
+  const btn = thinkEl('think-btn');
+  const fresh = Date.now() - up < 10 * 60 * 1000;
+  btn.classList.toggle('idle', !fresh);
+  thinkEl('think-now').textContent = (j.now && j.now.title) || '-';
+  try { Mind.compile(j.mode === 'compile' && Date.now() - up < 15 * 60 * 1000, 'think'); } catch (e) {}
+  if (up === thinkSeen) return;
+  try { j.mode === 'idle' ? Mind.rest() : Mind.pulse(.8); } catch (e) {}
+  if (thinkSeen) { btn.classList.remove('hot'); void btn.offsetWidth; btn.classList.add('hot'); }
+  thinkSeen = up;
+  thinkEl('t-at').textContent = 'updated ' + thinkTime(up) + (j.task ? ' · ' + j.task : '');
+  thinkEl('t-goal').textContent = j.goal || '-';
+  const now = j.now || {};
+  thinkEl('t-title').textContent = now.title || '-';
+  thinkEl('t-detail').textContent = now.detail || '';
+  thinkEl('t-why').textContent = now.why || '';
+  thinkEl('t-why').style.display = now.why ? '' : 'none';
+  const q = j.questions || [];
+  thinkEl('t-q').innerHTML = q.length ? q.map(x => `<div>${esc(x)}</div>`).join('') : '<div style="border:0;color:var(--mut)">none</div>';
+  thinkEl('t-flow').innerHTML = (j.plan || []).map((p, i, a) =>
+    `<div class="step ${esc(p.state || 'later')}"><div class="col"><div class="dot"></div>${i < a.length - 1 ? '<div class="rail"></div>' : ''}</div>` +
+    `<div class="txt"><b>${esc(p.title || '')}</b>${p.note ? `<span>${esc(p.note)}</span>` : ''}</div></div>`).join('');
+  Mind.setPlan(j.plan || []);
+  Mind.setNow(j);
+  const log = (j.log || []).slice().sort((a, b) => (b.t || 0) - (a.t || 0));
+  thinkEl('t-entries').innerHTML = log.map(e => {
+    const k = (e.t || 0) + e.text, isNew = thinkLog.size && !thinkLog.has(k);
+    return `<div class="e ${esc(e.kind || 'do')}${isNew ? ' new' : ''}"><time>${thinkTime(e.t || 0)}</time><i>${esc((e.kind || 'do').toUpperCase())}</i><div>${esc(e.text || '')}</div></div>`;
+  }).join('');
+  if (!thinkLog.size) log.slice(0, 8).reverse().forEach(e => { try { Mind.event(e.kind, e.text); } catch (x) {} });   // first look: recent history
+  const newEntries = thinkLog.size ? log.filter(e => !thinkLog.has((e.t || 0) + e.text)) : [];
+  newEntries.slice(0, 6).reverse().forEach((e, i) => setTimeout(() => Mind.event(e.kind, e.text), i * 450));
+  log.forEach(e => thinkLog.add((e.t || 0) + e.text));
+}
+const thinkOpen = on => { thinkEl('think').classList.toggle('on', on); on ? (Mind.start(), Mind.event('think', 'READOUT online · listening to every process')) : Mind.stop(); };
+thinkEl('think-btn').onclick = () => thinkOpen(true);
+thinkEl('think-x').onclick = () => thinkOpen(false);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') thinkOpen(false); });
+thinkEl('t-mind').onclick = () => Mind.event('ask', 'operator probe: ping from the workbench');
+
 async function tick(first) {
   try {
-    await Promise.all([scanArt(first), scanModules(first), scanLog(), scanCode(first), scanGit(first), scanFocus(first), scanChat(), scanPatch(), scanLib()]);
+    await Promise.all([scanArt(first), scanModules(first), scanLog(), scanCode(first), scanGit(first), scanFocus(first), scanChat(), scanPatch(), scanLib(), scanThink()]);
     if (!running && pendingReview) review(pendingReview);
     if (first) await cacheAll();
     if (first) show(latest());

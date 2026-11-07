@@ -2,7 +2,7 @@
 #   powershell -ExecutionPolicy Bypass -File tools\release.ps1            (2.0.0 -> 2.0.1)
 #   powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Minor     (2.0.1 -> 2.1.0)
 #   powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Version 2.3.0
-# It sets the version in plugin.json, commits, tags v<version> and pushes. GitHub then builds Windows, Linux and
+# It sets the version in every plugin.json (the MTX pack and each single: they release together), commits, tags v<version> and pushes. GitHub then builds Windows, Linux and
 # both Macs and publishes a GitHub Release (.github/workflows/build.yml). Last, it offers to tell the VCV Library
 # about the new version, by a comment on the plugin's issue there (the number is kept in tools/vcv-library-issue.txt).
 param([string]$Version, [switch]$Minor, [switch]$NoLibrary)
@@ -26,9 +26,13 @@ if (-not $Version) {
 if ($Version -notmatch '^2\.\d+\.\d+$') { throw "Rack 2 plugin versions look like 2.x.y, not $Version" }
 if (G tag --list "v$Version") { throw "v$Version already exists" }
 
-$new = [regex]::Replace($text, '("version"\s*:\s*")[^"]*(")', "`${1}$Version`${2}", 1)
-[IO.File]::WriteAllText($pj, $new, (New-Object Text.UTF8Encoding $false))
-G add plugin.json
+$all = @($pj) + @(Get-ChildItem (Join-Path $repo 'singles') -Filter plugin.json -Recurse | ForEach-Object FullName)
+foreach ($f in $all) {
+    $t = [IO.File]::ReadAllText($f)
+    $n = [regex]::Replace($t, '("version"\s*:\s*")[^"]*(")', "`${1}$Version`${2}", 1)
+    [IO.File]::WriteAllText($f, $n, (New-Object Text.UTF8Encoding $false))
+    G add $f
+}
 G commit -q -m "Release v$Version"
 G tag -a "v$Version" -m "SynTHBloK v$Version"
 G push -q origin HEAD "v$Version"

@@ -1,8 +1,9 @@
 @echo off
-rem Builds and installs the SynTHBloK plugin with MSYS2, and saves the full output to build.log
+rem Builds and installs every SynTHBloK plugin with MSYS2: the MTX pack (repo root) and each single in singles\.
+rem Development build (SYNTHBLOK_DEV=1: includes the PATCH GEN pictures menu). Full output in build.log.
 set MSYSTEM=MINGW64
 set CHERE_INVOKING=1
-"C:\msys64\usr\bin\bash.exe" -lc "cd ~/SynTHBloK && export RACK_DIR=~/Rack-SDK && make -j4 devinstall 2>&1 | tee build.log; exit ${PIPESTATUS[0]}"
+"C:\msys64\usr\bin\bash.exe" -lc "cd ~/SynTHBloK && export RACK_DIR=~/Rack-SDK SYNTHBLOK_DEV=1 && { make -j4 devinstall && for d in singles/*/; do echo == $d; make -C $d -j4 devinstall || exit 1; done; } 2>&1 | tee build.log; exit ${PIPESTATUS[0]}"
 if errorlevel 1 (
   echo.
   echo BUILD FAILED - see build.log

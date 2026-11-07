@@ -148,4 +148,4 @@ struct SynTHBloKEuclidWidget : ModuleWidget {
     }
 };
 
-Model* modelSynTHBloKEuclid = createModel<SynTHBloKEuclid, SynTHBloKEuclidWidget>("SynTHBloKEuclid");
+Model* modelSynTHBloKEuclid = createModel<SynTHBloKEuclid, SynTHBloKEuclidWidget>("Euclid");

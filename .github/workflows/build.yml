@@ -1,4 +1,5 @@
-# Builds SynTHBloK for every platform the VCV Library ships (Windows, Linux, macOS Intel + Apple Silicon)
+# NEW GitHub Actions workflow for the split (MTX pack + singles). Copy this file over .github/workflows/build.yml.
+# Builds every SynTHBloK plugin (the MTX pack and each single in singles/) for every platform the VCV Library ships (Windows, Linux, macOS Intel + Apple Silicon)
 # on each push, so a change that breaks another OS shows up straight away.
 # Pushing a version tag (v2.0.1, made by tools/release.ps1) also publishes a GitHub Release with the
 # four .vcvplugin files attached.
@@ -57,13 +58,20 @@ jobs:
           rm sdk.zip
           echo "RACK_DIR=$HOME/Rack-SDK" >> "$GITHUB_ENV"
 
-      - name: Build
-        run: make dist -j4 RACK_DIR="$RACK_DIR"
+      - name: Build (MTX pack + singles)
+        run: |
+          make dist -j4 RACK_DIR="$RACK_DIR"
+          for d in singles/*/; do
+            echo "== $d"
+            make -C "$d" dist -j4 RACK_DIR="$RACK_DIR"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
           name: SynTHBloK-${{ matrix.platform }}
-          path: dist/*.vcvplugin
+          path: |
+            dist/*.vcvplugin
+            singles/*/dist/*.vcvplugin
           if-no-files-found: error
 
   release:
@@ -79,10 +87,12 @@ jobs:
         with:
           path: packages
           merge-multiple: true
-      - name: Check the tag matches plugin.json
+      - name: Check the tag matches every plugin.json
         run: |
-          v=$(jq -r .version plugin.json)
-          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "plugin.json says $v but the tag is ${GITHUB_REF_NAME}"; exit 1; }
+          for pj in plugin.json singles/*/plugin.json; do
+            v=$(jq -r .version "$pj")
+            [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "$pj says $v but the tag is ${GITHUB_REF_NAME}"; exit 1; }
+          done
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}

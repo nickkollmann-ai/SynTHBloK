@@ -27,4 +27,4 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
 
 } // namespace
 
-Model* modelSynTHBloKGrainForge = createModel<SynTHBloKGrainForge, SynTHBloKGrainForgeWidget>("SynTHBloKGrainForge");
+Model* modelSynTHBloKGrainForge = createModel<SynTHBloKGrainForge, SynTHBloKGrainForgeWidget>("GrainForge");

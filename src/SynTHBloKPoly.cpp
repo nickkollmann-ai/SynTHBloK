@@ -975,4 +975,4 @@ struct SynTHBloKPolyWidget : ModuleWidget {
 
 
 
-Model* modelSynTHBloKPoly = createModel<SynTHBloKPoly, SynTHBloKPolyWidget>("SynTHBloKPoly");
+Model* modelSynTHBloKPoly = createModel<SynTHBloKPoly, SynTHBloKPolyWidget>("Poly");

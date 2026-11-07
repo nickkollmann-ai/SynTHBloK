@@ -1512,4 +1512,7 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
 
 } // namespace
 
-Model* modelSynTHBloKMatrixSong = createModel<SynTHBloKMatrixSong, SynTHBloKMatrixSongWidget>("SynTHBloKMatrixSong");
+// RANDROYD follows the song: the section playing now (0-7), -1 when stopped or not a COMPOSER
+int randroydSongSection(Module* m) { if (SynTHBloKMatrixSong* s = dynamic_cast<SynTHBloKMatrixSong*>(m)) return s->running ? s->curSec : -1; return -1; }
+
+Model* modelSynTHBloKMatrixSong = createModel<SynTHBloKMatrixSong, SynTHBloKMatrixSongWidget>("MatrixSong");

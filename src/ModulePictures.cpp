@@ -12,6 +12,13 @@
 //   5. reopens Rack (with the patch) and PATCH GEN in the browser, and leaves the count in <user folder>-pictures.txt
 //      for this menu to show.
 #include "ModulePictures.hpp"
+// It closes Rack and starts programs, so it is only in development builds (make with SYNTHBLOK_DEV=1, as
+// build_and_install.bat does). Release builds (make dist, GitHub Actions, VCV Library) leave the menu item out.
+#ifndef SYNTHBLOK_DEV
+namespace ModulePictures {
+void appendMenu(rack::ui::Menu*) {}
+}
+#else
 #include <osdialog.h>
 #include <fstream>
 #if defined ARCH_WIN
@@ -229,3 +236,4 @@ void appendMenu(ui::Menu* menu) {
 }
 
 }  // namespace ModulePictures
+#endif  // SYNTHBLOK_DEV

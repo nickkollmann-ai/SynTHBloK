@@ -5,14 +5,25 @@ something that matters next time (a fix, a gotcha, a decision), add it here, the
 `git pull` picks it up. This repo is **public**: no passwords, private IPs, personal emails or account details.
 
 ## What this is
-A VCV Rack 2 plugin (slug `SynTHBloK`, brand NoiZee ToyZ, 28 modules), GPL-3.0-or-later. Branch: `master`.
-In the VCV Library process: thread https://github.com/VCVRack/library/issues/1015 (submitted at v2.0.0).
+SynTHBloK (brand NoiZee ToyZ, 29 modules, GPL-3.0-or-later), sold as 16 VCV Rack 2 plugins. Branch: `master`.
+- The **MTX pack** is the repo root (plugin slug `SynTHBloK`, 11 modules that work together through COMPOSER,
+  JAM and RANDROYD). In the VCV Library process: thread https://github.com/VCVRack/library/issues/1015.
+- **Singles** (15 plugins, 18 modules) live in `singles/<slug>/` (e.g. `SynTHBloK-Kick`), each its own plugin
+  built from the shared `src/` (via VPATH, see `singles/common.mk`).
+- `tools/lineup.json` says which module goes where (and the VCV store bundles); `tools/modules.json` holds each
+  module's name/description/tags. After editing either: `python3 tools/make_plugins.py` (writes every plugin.json,
+  the registrations and the Makefiles). RANDROYD's `locate()` table and `tools/convert_slugs.py` list the same
+  singles: keep the three in step. All plugins share one version; `tools/release.ps1` bumps them together.
+- RANDROYD builds with what's installed: RACK mode lists missing singles, BUILD mode skips recipes needing them.
 
 ## Build (Windows)
 - MSYS2 MINGW64 shell, Rack SDK 2.6.4 at `~/Rack-SDK` (`export RACK_DIR=~/Rack-SDK`). The repo lives at
   `~/SynTHBloK` (`C:\msys64\home\nickk\SynTHBloK`); scripts assume these paths.
 - `make` builds, `make dist` makes `dist/SynTHBloK-<ver>-win-x64.vcvplugin`, `make devinstall` copies into Rack's
-  plugins folder (`%LOCALAPPDATA%\Rack2\plugins-win-x64`).
+  plugins folder (`%LOCALAPPDATA%\Rack2\plugins-win-x64`). The same in `singles/<slug>/` for a single;
+  `build_and_install.bat` does the MTX pack and every single.
+- `SYNTHBLOK_DEV=1` (set by the .bat files) adds the PATCH GEN "module pictures" menu item, which closes Rack and
+  runs a helper: development only, never in release builds (GitHub Actions doesn't set it).
 - The Makefile links winpthread statically on Windows. Without it, new MSYS2 compilers make the plugin need
   `nanosleep64`, which Rack 2.6's bundled libwinpthread lacks, and Rack fails to load it with "code 127".
 - PowerShell runs `.ps1` files only with `powershell -ExecutionPolicy Bypass -File <script>`.
@@ -47,8 +58,18 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   build is green.
 - VCV rules: no other brands' names in module or effect names (the ladder filter is "LADDER LP"). Naming the
   Maschine JAM as the supported controller is fine.
+- VCV review (Nov 2026): module slugs and names must not contain the plugin slug/name, names are short (no
+  descriptions), tags only from VCV's list (no duplicates or aliases), no `expander` property in plugin.json. So the
+  slugs lost "SynTHBloK" (SynTHBloKDrum -> Drum, SynTHBloK -> Quad; MorphFilter keeps NoizeeFlagshipFilter,
+  BloKMaster keeps BlokMaster). Code passes the plugin slug "SynTHBloK" (unchanged) plus the new module slug.
+  Old patches: double-click `convert_patches.bat` (repo patches, Rack's autosave, Desktop .vcv; or drop files on it),
+  backups go to old-slugs-backup/. RANDROYD translates old slugs in saved tracks itself (newSlug in spawn()).
 
 ## Tools
+- THINKING view in the workbench (`design_watch.html`, header button): shows what Claude is doing, why, the plan and a
+  decision log, from `tools/claude_thinking.json` (local, git-ignored). Claude: update that file as you work (keys: updated,
+  mode: think|compile|idle (drives the MIND canvas: embers when idle, alive when thinking, hot while compiling), task, goal, now{title,detail,why}, questions[], plan[{title,state: done|now|next|later|blocked,note}], log[{t,kind:
+  think|do|check|fix|ask,text}]).
 - `tools/open_workbench.ps1`: the workbench on 127.0.0.1:8766 (plus the Tailscale address for the phone), with the
   chat, patch-feed and open-in-Rack helpers.
 - `tools/build_and_reload.ps1`: build, close Rack cleanly, devinstall, screenshots, reopen Rack.

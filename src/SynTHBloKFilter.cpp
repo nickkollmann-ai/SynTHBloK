@@ -659,4 +659,4 @@ addOutput(createOutputCentered<BlackJack>(mm2px(Vec(x2, 113)), module, SynTHBloK
 };
 
 Model* modelSynTHBloKFilter =
-    createModel<SynTHBloKFILTERModule, SynTHBloKFILTERWidget>("SynTHBloKResonator");
+    createModel<SynTHBloKFILTERModule, SynTHBloKFILTERWidget>("Resonator");

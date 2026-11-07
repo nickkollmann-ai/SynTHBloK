@@ -151,6 +151,8 @@ struct SynTHBloKDrum : Module, songlink::Member {   // MATRIX-SONG picks its pat
     bool storeArm = false;
     bool showGraph = false;       // voice OLED: the hit graph and its view / zoom cells (module menu)
     std::atomic<int> kitReq{-1};
+    uint8_t rdSilent = 0;   // rows RANDROYD plays on outside voices: their own level stays at 0 (triggers still fire)
+    void applySilent() { for (int r = 0; r < 8; r++) if (rdSilent >> r & 1) params[VOICE_PARAM + r * DK_NUM + DK_LEVEL].setValue(0.f); }
 
     int step = -1;
     bool running = true, pendingReset = false;
@@ -409,7 +411,7 @@ struct SynTHBloKDrum : Module, songlink::Member {   // MATRIX-SONG picks its pat
     // the pattern being left and loads the new pattern's kit. A new or old patch starts with the knobs in
     // all 8 kits.
     void captureKit(int p) { for (int r = 0; r < 8; r++) for (int b = 0; b < DK_NUM; b++) kit[p][r][b] = params[vp(r, b)].getValue(); }
-    void applyKit(int p) { for (int r = 0; r < 8; r++) for (int b = 0; b < DK_NUM; b++) params[vp(r, b)].setValue(kit[p][r][b]); }
+    void applyKit(int p) { for (int r = 0; r < 8; r++) for (int b = 0; b < DK_NUM; b++) params[vp(r, b)].setValue(kit[p][r][b]); applySilent(); }
     void fillKits() { for (int p = 0; p < 8; p++) captureKit(p); kitPat = curPat(); }
     // KIT row: load kit k (audio thread, from kitReq), or store the rows as user kit u (UI thread)
     void loadKit(int k) {
@@ -427,6 +429,7 @@ struct SynTHBloKDrum : Module, songlink::Member {   // MATRIX-SONG picks its pat
         }
         applyKit(kitPat);
         kitLoaded = k;
+        applySilent();
     }
     void storeKit(int u) {
         UserKit& s = userKit[u];
@@ -866,6 +869,7 @@ struct SynTHBloKDrum : Module, songlink::Member {   // MATRIX-SONG picks its pat
         json_object_set_new(root, "leaveMix", json_boolean(leaveMix));
         json_object_set_new(root, "showGraph", json_boolean(showGraph));
         json_object_set_new(root, "matchColors", json_boolean(matchColors));
+        json_object_set_new(root, "rdSilent", json_integer(rdSilent));
         json_object_set_new(root, "in", midiIn.toJson());
         json_object_set_new(root, "out", midiOut.toJson());
         json_t* fj = json_object();
@@ -935,6 +939,7 @@ struct SynTHBloKDrum : Module, songlink::Member {   // MATRIX-SONG picks its pat
         if (json_t* j = json_object_get(root, "leaveMix")) leaveMix = json_boolean_value(j);
         if (json_t* j = json_object_get(root, "showGraph")) showGraph = json_boolean_value(j);
         if (json_t* j = json_object_get(root, "matchColors")) matchColors = json_boolean_value(j);
+        if (json_t* j = json_object_get(root, "rdSilent")) rdSilent = (uint8_t) json_integer_value(j);
         if (json_t* j = json_object_get(root, "in")) midiIn.fromJson(j);
         if (json_t* j = json_object_get(root, "out")) midiOut.fromJson(j);
         if (json_t* j = json_object_get(root, "fx")) fxFromJson(j);
@@ -942,6 +947,7 @@ struct SynTHBloKDrum : Module, songlink::Member {   // MATRIX-SONG picks its pat
 };
 
 typedef SynTHBloKDrum DR;
+
 
 // ---------------------------------------------------------------- widgets ----------------
 
@@ -2113,4 +2119,10 @@ struct SynTHBloKDrumWidget : ModuleWidget {
 
 } // namespace
 
-Model* modelSynTHBloKDrum = createModel<SynTHBloKDrum, SynTHBloKDrumWidget>("SynTHBloKDrum");
+// RANDROYD builds drum rows and picks a factory kit for the genre (0 808, 1 909, 2 TECH, 3 ELEC, 4 LOFI,
+// 5 606, 6 HOUSE, 7 DUB, 8 INDUS); the audio thread loads it, like a press on the KIT row.
+// Outside the namespace above, so other files can call it.
+void randroydDrumKit(Module* m, int k) { if (DR* d = dynamic_cast<DR*>(m)) d->kitReq.store(k); }
+void randroydDrumSilence(Module* m, int mask) { if (DR* d = dynamic_cast<DR*>(m)) { d->rdSilent = (uint8_t) mask; d->applySilent(); } }
+
+Model* modelSynTHBloKDrum = createModel<SynTHBloKDrum, SynTHBloKDrumWidget>("Drum");

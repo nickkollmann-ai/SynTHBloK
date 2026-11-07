@@ -1720,4 +1720,4 @@ struct SynTHBloKMatrixFxWidget : ModuleWidget {
 
 } // namespace
 
-Model* modelSynTHBloKMatrixFx = createModel<SynTHBloKMatrixFx, SynTHBloKMatrixFxWidget>("SynTHBloKMatrixFx");
+Model* modelSynTHBloKMatrixFx = createModel<SynTHBloKMatrixFx, SynTHBloKMatrixFxWidget>("MatrixFx");

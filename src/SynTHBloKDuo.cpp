@@ -1708,4 +1708,4 @@ struct SynTHBloKDuoWidget : ModuleWidget {
 
 } // namespace
 
-Model* modelSynTHBloKDuo = createModel<SynTHBloKDuo, SynTHBloKDuoWidget>("SynTHBloKDuo");
+Model* modelSynTHBloKDuo = createModel<SynTHBloKDuo, SynTHBloKDuoWidget>("Duo");

@@ -925,4 +925,4 @@ void SynTHBloKFXModule::pingPongMix(float& dl, float& dr, float width) {
 // MODEL
 // -----------------------------------------------------------------------------
 Model* modelSynTHBloKFX =
-    createModel<SynTHBloKFXModule, SynTHBloKFXWidget>("SynTHBloKFX");
+    createModel<SynTHBloKFXModule, SynTHBloKFXWidget>("FX");

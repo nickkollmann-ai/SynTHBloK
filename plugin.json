@@ -1,232 +1,21 @@
 {
   "slug": "SynTHBloK",
-  "name": "SynTHBloK",
+  "name": "SynTHBloK MTX",
   "version": "2.0.0",
   "license": "GPL-3.0-or-later",
   "brand": "NoiZee ToyZ",
   "author": "Nicholas Kollmann",
+  "authorEmail": "support@liquidnick.com",
+  "authorUrl": "https://www.liquidnick.com",
+  "pluginUrl": "https://www.liquidnick.com/#modular",
+  "manualUrl": "https://github.com/nickkollmann-ai/SynTHBloK#readme",
+  "sourceUrl": "https://github.com/nickkollmann-ai/SynTHBloK",
+  "changelogUrl": "https://github.com/nickkollmann-ai/SynTHBloK/releases",
+  "donateUrl": "",
   "modules": [
     {
-      "slug": "SynTHBloK",
-      "name": "SynTHBloK-QUAD Quad Oscillator Synth",
-      "description": "Quad-oscillator synth voice with filter, envelope, glide, accent and LFO",
-      "tags": [
-        "Synth voice",
-        "Oscillator",
-        "Low-frequency oscillator"
-      ],
-      "expander": {
-        "direction": "right",
-        "child": [
-          "SynTHBloKPoly",
-          "SynTHBloKStereo",
-          "SynTHBloKFX"
-        ]
-      }
-    },
-    {
-      "slug": "SynTHBloKMtxQuad",
-      "name": "SynTHBloK MTX Quad Oscillator Synth",
-      "description": "The quad-oscillator synth voice played by an 8x8 note grid with per-step accent, cutoff, gate, glide, chance, ratchet, octave and resonance sliders",
-      "tags": [
-        "Synth voice",
-        "Oscillator",
-        "Sequencer",
-        "Polyphonic"
-      ]
-    },
-    {
-      "slug": "SynTHBloKDualFilter",
-      "name": "SynTHBloK DUAL FILTER",
-      "description": "Two stereo multimode filters (LP / BP / notch / HP sweep, 12 / 24 / 48 dB) with drive, run in series, parallel or stereo, linked cutoffs, a four-shape LFO, an ADSR or envelope follower, a stereo phaser and a three-band EQ",
-      "tags": [
-        "Filter",
-        "Dual",
-        "Stereo",
-        "Distortion",
-        "Low-frequency oscillator",
-        "Envelope generator",
-        "Envelope follower",
-        "Phaser",
-        "Equalizer"
-      ]
-    },
-    {
-      "slug": "SynTHBloKPoly",
-      "name": "SynTHBloK-P Poly",
-      "description": "Polyphonic unison engine for SynTHBloK",
-      "tags": [
-        "Synth voice",
-        "Polyphonic",
-        "Expander"
-      ],
-      "expander": {
-        "direction": "left",
-        "parent": "SynTHBloK"
-      }
-    },
-    {
-      "slug": "SynTHBloKStereo",
-      "name": "SynTHBloK-S Stereo Phaser",
-      "description": "Stereo width, tilt, air, glue, punch and clip, with analyzer",
-      "tags": [
-        "Effect",
-        "Dynamics",
-        "Expander"
-      ],
-      "expander": {
-        "direction": "left",
-        "parent": "SynTHBloK"
-      }
-    },
-    {
-      "slug": "SynTHBloKFX",
-      "name": "SynTHBloK-DL Character Delay",
-      "description": "Stereo delay with eight characters (clean, tape, analog, modern, ping-pong, dynamic, space, reverse), clock sync, hold and clear",
-      "tags": [
-        "Effect",
-        "Delay"
-      ]
-    },
-    {
-      "slug": "SynTHBloKResonator",
-      "name": "SynTHBloK-R Resonator",
-      "description": "Stereo modal resonator with metal, wood, membrane and tube bodies",
-      "tags": [
-        "Effect",
-        "Physical modeling",
-        "Filter"
-      ]
-    },
-    {
-      "slug": "SynTHBloKMix24",
-      "name": "SynTHBloK MIX-6 Fire Edition",
-      "description": "Six-channel stereo mixer with per-channel tilt, drive, air and glue, mute/solo, meters and an aux FX bus",
-      "tags": [
-        "Mixer",
-        "Utility"
-      ]
-    },
-    {
-      "slug": "SynTHBloKMix12",
-      "name": "SynTHBloK MIX-12 Fire Edition",
-      "description": "Twelve-channel stereo mixer with per-channel tilt, drive, air and glue, mute/solo, meters and an aux FX bus",
-      "tags": [
-        "Mixer",
-        "Utility"
-      ]
-    },
-    {
-      "slug": "SynTHBloKMix8",
-      "name": "SynTHBloK MIX-8 Fire Edition",
-      "description": "Eight-channel stereo mixer with per-channel tilt, drive, air and glue, mute/solo, meters and an aux FX bus",
-      "tags": [
-        "Mixer",
-        "Utility"
-      ]
-    },
-    {
-      "slug": "NoizeeFlagshipFilter",
-      "name": "SynTHBloK Morph Filter",
-      "description": "Stereo drive into a state-variable filter that morphs LP to BP to HP, with audio-rate FM, 1V/oct keytrack, random chaos drift and cutoff spread",
-      "tags": [
-        "Filter"
-      ]
-    },
-    {
-      "slug": "BlokMaster",
-      "name": "BloKMaster",
-      "description": "Mastering strip: trim, tilt EQ, shelves, glue compressor, punch, limiter, stereo tools, air and output gain",
-      "tags": [
-        "Dynamics",
-        "Limiter",
-        "Compressor",
-        "Equalizer",
-        "Utility"
-      ]
-    },
-    {
-      "slug": "SynTHBloKPlayer",
-      "name": "SynTHBloK Player Plus",
-      "description": "MIDI file player with a watch folder: 16 poly tracks (pitch, gate, velocity), 16th-note clock, reset and end outputs, speed and transpose",
-      "tags": [
-        "Sequencer",
-        "Utility",
-        "External"
-      ],
-      "expander": {
-        "direction": "right",
-        "child": [
-          "SynTHBloKPlayerView"
-        ]
-      }
-    },
-    {
-      "slug": "SynTHBloKKick",
-      "name": "SynTHBloK-K Kick",
-      "description": "Hard techno kick: pitch-swept sine, click, drive, tone, schranz rumble tail with ducking, accent and envelope out",
-      "tags": [
-        "Drum",
-        "Synth voice",
-        "Percussion"
-      ]
-    },
-    {
-      "slug": "SynTHBloKPlayerView",
-      "name": "SynTHBloK MIDI + Expansion",
-      "description": "MIDI display for Player Plus: scrolling piano roll of the loaded MIDI with playhead, track activity and transport readout",
-      "tags": [
-        "Visual",
-        "Utility",
-        "Expander"
-      ],
-      "expander": {
-        "direction": "left",
-        "parent": "SynTHBloKPlayer"
-      }
-    },
-    {
-      "slug": "SynTHBloKSnareHat",
-      "name": "SynTHBloK-D Snare/Hat",
-      "description": "Techno snare and hi-hat voice: two-oscillator snare body with noise snap, six-oscillator metallic hats with closed/open triggers and choke, drive, tone and accent",
-      "tags": [
-        "Drum",
-        "Synth voice",
-        "Percussion"
-      ]
-    },
-    {
-      "slug": "SynTHBloKEuclid",
-      "name": "SynTHBloK-E Euclid",
-      "description": "Four-channel Euclidean rhythm generator: steps, hits and rotate per channel, clock/reset/run inputs, 10 ms trigger outputs for drums and gates",
-      "tags": [
-        "Sequencer",
-        "Clock modulator",
-        "Utility"
-      ]
-    },
-    {
-      "slug": "SynTHBloKJamProbe",
-      "name": "SynTHBloK-J JAM Probe",
-      "description": "MIDI monitor and test transmitter for mapping controllers such as the Maschine JAM: live message log, per-control statistics, test notes/CCs, auto sweep, copy/save map summary",
-      "tags": [
-        "Utility",
-        "MIDI"
-      ]
-    },
-    {
-      "slug": "SynTHBloKJam",
-      "name": "SynTHBloK-K JAM",
-      "description": "Maschine JAM controller: 8x8 pad trigger sequencer with 8 patterns, plus the 8 touch strips as CV outputs with 8 banks; JAM lights follow the module",
-      "tags": [
-        "Sequencer",
-        "Controller",
-        "MIDI"
-      ]
-    },
-    {
-      "slug": "SynTHBloKMatrix8",
-      "name": "SynTHBloK MTX-8",
+      "slug": "Matrix8",
+      "name": "MTX-8",
       "description": "Maschine JAM groovebox: 8x8 step sequencer driving 8 built-in synth voices (morphing oscillator, resonant filter, envelopes, drive, pan), touch strips shape each voice, stereo out",
       "tags": [
         "Synth voice",
@@ -236,21 +25,8 @@
       ]
     },
     {
-      "slug": "SynTHBloKGrainForge",
-      "name": "SynTHBloK GRAIN-FORGE",
-      "description": "Beat shuffler, glitch, robot vocoder, clock-locked gate/filter and a warp delay whose repeats loop back through the robot and pulse stages; clock-locked stereo FX chain",
-      "tags": [
-        "Effect",
-        "Delay",
-        "Filter",
-        "Vocoder",
-        "Pitch shifter",
-        "Clock modulator"
-      ]
-    },
-    {
-      "slug": "SynTHBloKMatrixForge",
-      "name": "SynTHBloK MTX FORGE",
+      "slug": "MatrixForge",
+      "name": "MTX FORGE",
       "description": "Maschine JAM groovebox: the MTX-8 sequencer and 8 voices, and the whole mix (plus IN L/R) through the GRAIN-FORGE FX chain, clocked by the sequencer",
       "tags": [
         "Synth voice",
@@ -262,8 +38,8 @@
       ]
     },
     {
-      "slug": "SynTHBloKDuo",
-      "name": "SynTHBloK MTX-DUO",
+      "slug": "Duo",
+      "name": "MTX-DUO",
       "description": "LEAD and BASS dual-oscillator mono synths (wave morph, hard sync, FM, sub, 24 dB filter, ADSR, drive, glide) with their own 8-step note sequencer in a key and scale, 8 patterns, clock/reset/run in, audio, pitch and gate out",
       "tags": [
         "Synth voice",
@@ -272,8 +48,8 @@
       ]
     },
     {
-      "slug": "SynTHBloKDrum",
-      "name": "SynTHBloK MTX-DRUM",
+      "slug": "Drum",
+      "name": "MTX-DRUM",
       "description": "Drum-synth groovebox: 8 voices (kick, snare, clap, tom, hat, metal, FM, noise models) on the MTX 8x8 sequencer with accents, 8 patterns, strip banks, choke groups, per-voice audio and trigger outs, final filter, delay, reverb and FORGE FX, Maschine JAM control",
       "tags": [
         "Drum",
@@ -284,29 +60,19 @@
       ]
     },
     {
-      "slug": "SynTHBloKEcho",
-      "name": "SynTHBloK MTX-ECHO",
-      "description": "Stereo delay and looper: 12 delay types (MTX ping-pong, clean digital, chorused, analog, tape, lo-fi, ducking, reverse, ping-pong, slap, octave shimmer, multi-head space echo), tap tempo and clock with 11 subdivisions incl. dual, freeze, kill dry, trails, reverb, 6 presets, 60 s stereo looper with overdub, play once and undo",
+      "slug": "MtxQuad",
+      "name": "MTX Quad",
+      "description": "The quad-oscillator synth voice played by an 8x8 note grid with per-step accent, cutoff, gate, glide, chance, ratchet, octave and resonance sliders",
       "tags": [
-        "Effect",
-        "Delay",
-        "Reverb",
-        "Sampler"
+        "Synth voice",
+        "Oscillator",
+        "Sequencer",
+        "Polyphonic"
       ]
     },
     {
-      "slug": "SynTHBloKLoop",
-      "name": "SynTHBloK MTX-LOOP",
-      "description": "8-track loop sampler built on the MTX-ECHO looper: record / replace, play / stop, play once, undo / redo and clear per track, tempo-locked lengths with count-in, clock or tempo knob, mono or stereo (poly) tracks, 8 inputs with gain and monitor, 8 outputs and a stereo mix, scenes, a JAM-style grid and an OLED showing all 8 loops",
-      "tags": [
-        "Sampler",
-        "Recording",
-        "Mixer"
-      ]
-    },
-    {
-      "slug": "SynTHBloKMatrixFx",
-      "name": "SynTHBloK MTX-FX",
+      "slug": "MatrixFx",
+      "name": "MTX-FX",
       "description": "8-input effects matrix played from the MTX 8x8 grid and the Maschine JAM: 8 effect slots (64 effects in 7 tabs: drive, filter, mod, glitch, delay, reverb, dynamics), 12 one-click chains, accents, 8 routing scenes, slot links and dub chains, drag-and-drop OLED setup, musical RAND, DJ filter, 60 s tempo-locked looper (MTX-ECHO's)",
       "tags": [
         "Effect",
@@ -318,21 +84,54 @@
       ]
     },
     {
-      "slug": "SynTHBloKMatrixSong",
-      "name": "SynTHBloK MTX Composer",
+      "slug": "Echo",
+      "name": "MTX-ECHO",
+      "description": "Stereo delay and looper: 12 delay types (MTX ping-pong, clean digital, chorused, analog, tape, lo-fi, ducking, reverse, ping-pong, slap, octave shimmer, multi-head space echo), tap tempo and clock with 11 subdivisions incl. dual, freeze, kill dry, trails, reverb, 6 presets, 60 s stereo looper with overdub, play once and undo",
+      "tags": [
+        "Effect",
+        "Delay",
+        "Reverb",
+        "Sampler"
+      ]
+    },
+    {
+      "slug": "Loop",
+      "name": "MTX-LOOP",
+      "description": "8-track loop sampler built on the MTX-ECHO looper: record / replace, play / stop, play once, undo / redo and clear per track, tempo-locked lengths with count-in, clock or tempo knob, mono or stereo (poly) tracks, 8 inputs with gain and monitor, 8 outputs and a stereo mix, scenes, a JAM-style grid and an OLED showing all 8 loops",
+      "tags": [
+        "Sampler",
+        "Recording",
+        "Mixer"
+      ]
+    },
+    {
+      "slug": "MatrixSong",
+      "name": "MTX Composer",
       "description": "Song arranger for the MTX modules: finds MTX-8, FORGE, DUO, DRUM, FX, ECHO and LOOP in the patch by itself (no cables), 8 sections A-H that set each module's pattern, mute, level and loop action, launches on the bar or beat, cycles through 1-8 sections every 1-16 bars, master clock (CLOCK, BAR, SECT) and Maschine JAM control",
       "tags": [
         "Sequencer",
         "Clock generator",
         "Utility"
       ]
+    },
+    {
+      "slug": "Jam",
+      "name": "JAM",
+      "description": "Maschine JAM controller: 8x8 pad trigger sequencer with 8 patterns, plus the 8 touch strips as CV outputs with 8 banks; JAM lights follow the module",
+      "tags": [
+        "Sequencer",
+        "Controller",
+        "MIDI"
+      ]
+    },
+    {
+      "slug": "Randroyd",
+      "name": "RANDROYD",
+      "description": "Track generator: builds a rack of MTX modules and a mixer, writes genre-based songs into it with an arrangement, ROLL / MUTATE / GROW, and 8 save banks of 8 tracks",
+      "tags": [
+        "Random",
+        "Utility"
+      ]
     }
-  ],
-  "authorEmail": "support@liquidnick.com",
-  "authorUrl": "https://www.liquidnick.com",
-  "pluginUrl": "https://www.liquidnick.com/#modular",
-  "manualUrl": "https://github.com/nickkollmann-ai/SynTHBloK#readme",
-  "sourceUrl": "https://github.com/nickkollmann-ai/SynTHBloK",
-  "changelogUrl": "https://github.com/nickkollmann-ai/SynTHBloK/releases",
-  "donateUrl": ""
+  ]
 }

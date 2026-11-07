@@ -856,4 +856,4 @@ struct SynTHBloKMix8Widget : ModuleWidget {
     }
 };
 
-Model* modelSynTHBloKMix8 = createModel<SynTHBloKMix8, SynTHBloKMix8Widget>("SynTHBloKMix8");
+Model* modelSynTHBloKMix8 = createModel<SynTHBloKMix8, SynTHBloKMix8Widget>("Mix8");

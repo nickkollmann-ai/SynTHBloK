@@ -88,7 +88,7 @@ def jack_pos(slug, model, info):
 
 def picture(slug, model):
     """The module's picture as the workbench loads it, or None."""
-    if slug == 'SynTHBloK' and os.path.exists(os.path.join(REPO_SHOTS, model + '.png')):
+    if slug.startswith('SynTHBloK') and os.path.exists(os.path.join(REPO_SHOTS, model + '.png')):   # MTX pack + singles
         return '/web-images/screenshots/%s.png' % model
     src = os.path.join(SHOTS, slug, model + '.png')
     if not os.path.exists(src): return None

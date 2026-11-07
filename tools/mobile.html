@@ -200,9 +200,9 @@ const saved = (p, at) => { $('s-save').textContent = `${time(at)} saved ${p.repl
 // ---- DESIGN: one module at a time; follows the latest saved panel until you pick one ----
 let mods = [], modText = '', shown = null, view = 'panel', follow = true;
 const stamps = new Map();     // /res/*.svg, /src/*, screenshots -> last-modified
-const PANEL_FILE = {SynTHBloKResonator: 'SynTHBloKFilter'};
+const PANEL_FILE = {Resonator: 'SynTHBloKFilter', Quad: 'SynTHBloK', BlokMaster: 'BloKMaster'};   // panels kept their old names
 const find = want => [...stamps.keys()].find(p => p.toLowerCase() === want.toLowerCase());
-const panelOf = s => find('/res/' + (PANEL_FILE[s] || s) + '.svg');
+const panelOf = s => [PANEL_FILE[s], s, 'SynTHBloK' + s].filter(Boolean).map(n => find('/res/' + n + '.svg')).find(Boolean);
 const shotOf = s => find('/web-images/screenshots/' + s + '.png');
 const shortName = m => m.name.replace(/^SynTHBloK[- ]?/, '');
 const url = p => encodeURI(p) + '?t=' + stamps.get(p);
@@ -361,9 +361,9 @@ let lastTap = 0;
 zoom.onclick = () => { const now = Date.now(); if (now - lastTap < 300) { zoom.classList.toggle('full'); lastTap = 0; return; } lastTap = now; setTimeout(() => { if (lastTap === now) zoom.className = ''; }, 320); };
 
 async function scanModules() {
-  const text = await getText('/plugin.json');
+  const text = await getText('/tools/modules.json');   // every module: the MTX pack's and the singles'
   if (text === null || text === modText) return;
-  let l; try { l = JSON.parse(text).modules || []; } catch (e) { return; }
+  let l; try { l = Object.values(JSON.parse(text).modules || {}); } catch (e) { return; }
   modText = text;
   mods = l.map(m => ({slug: m.slug, name: m.name || m.slug}));
   if (!shown && mods.length) { const m = latestMod(); if (m) showMod(m.slug); } else drawStrip();

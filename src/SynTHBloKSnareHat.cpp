@@ -220,4 +220,4 @@ struct SynTHBloKSnareHatWidget : ModuleWidget {
     }
 };
 
-Model* modelSynTHBloKSnareHat = createModel<SynTHBloKSnareHat, SynTHBloKSnareHatWidget>("SynTHBloKSnareHat");
+Model* modelSynTHBloKSnareHat = createModel<SynTHBloKSnareHat, SynTHBloKSnareHatWidget>("SnareHat");
