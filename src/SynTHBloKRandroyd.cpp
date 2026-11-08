@@ -250,7 +250,8 @@ struct SynTHBloKRandroyd : Module {
     int bank = 0, set = 0, scene = -1, selTrack = -1;
     int curPad = -1;       // the spot whose track is in the rack (bank * SPOTS + spot), -1 none
     int mode = 0;          // 0 BUILD (recipes), 1 RACK (one rack, new songs, GROW)
-    struct Grow { int64_t mod = -1; int track = 0; int ch = 0; int kind = 0; };
+    struct Grow { int64_t mod = -1; int track = 0; int ch = 0; int kind = 0; int move = -1; };   // move: the GROW move (style)
+    std::vector<int> growHist;   // the last GROW moves, so the next one is something new
     std::vector<Grow> grown;   // modules GROW added, oldest first
     uint8_t arr[8] = {255, 255, 255, 255, 255, 255, 255, 255};   // arrangement: bit t = layer t plays in section A-H
     int arrKind = -1;
@@ -569,6 +570,7 @@ struct SynTHBloKRandroyd : Module {
             json_t* e = json_array();
             json_array_append_new(e, json_integer(g.mod)); json_array_append_new(e, json_integer(g.track));
             json_array_append_new(e, json_integer(g.ch)); json_array_append_new(e, json_integer(g.kind));
+            json_array_append_new(e, json_integer(g.move));
             json_array_append_new(gw, e);
         }
         json_object_set_new(root, "grown", gw);
@@ -647,6 +649,7 @@ struct SynTHBloKRandroyd : Module {
                 Grow g;
                 g.mod = json_integer_value(json_array_get(e, 0)); g.track = (int) json_integer_value(json_array_get(e, 1));
                 g.ch = (int) json_integer_value(json_array_get(e, 2)); g.kind = (int) json_integer_value(json_array_get(e, 3));
+                g.move = json_array_size(e) > 4 ? (int) json_integer_value(json_array_get(e, 4)) : -1;
                 grown.push_back(g);
             }
         }
@@ -3997,7 +4000,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         if (app::ModuleWidget* r = modOf(4, "Resonator")) percResTone(r->module, rng);
         if (app::ModuleWidget* e = modOf(5, "Echo")) { texTone(e->module, rng); texPhase = 1; }
         if (app::ModuleWidget* f = masterOf("GrainForge")) forgeTone(f->module, g, rng);
-        for (const SynTHBloKRandroyd::Grow& gr : m->grown) if (app::ModuleWidget* mw = findMw(gr.mod)) growTone(mw->module, gr.kind, g, rng);
+        for (const SynTHBloKRandroyd::Grow& gr : m->grown) if (app::ModuleWidget* mw = findMw(gr.mod)) growTone(mw->module, gr.kind, g, rng, gr.move, gr.track);
         if (app::ModuleWidget* mix = findMw(m->mixerId)) setP(mix->module, "FX program", (float) std::uniform_int_distribution<int>(0, 7)(rng));
         for (int t = 0; t < 8; t++) if (!m->trackMods[t].empty() || m->trackRecipe[t] == 8) m->trackGenre[t] = g;
         dealArrangement(rng);
@@ -4060,19 +4063,138 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         m->say(string::f("NEW SOUNDS + PATTERNS, SAME KEY AND CHORDS  ·  %s  ·  SAVE TO KEEP IT", arrName(m->arrKind)));
     }
 
-    // ---- GROW: one module into the rack, on a part's way to the mixer. At SIZE's cap the oldest goes first.
-    // Kinds: 0 RESONATOR, 1 MORPH FILTER, 2 DUAL FILTER, 3 DELAY
-    static const char* growName(int k) { static const char* n[4] = {"RESONATOR", "MORPH FILTER", "DUAL FILTER", "DELAY"}; return n[clamp(k, 0, 3)]; }
-    static const char* growModel(int k) { static const char* n[4] = {"Resonator", "NoizeeFlagshipFilter", "DualFilter", "FX"}; return n[clamp(k, 0, 3)]; }
+    // ---- GROW: one module into the rack, on a part's way to the mixer: a musical MOVE picked for that part's
+    // role, tuned to the key, locked to the tempo, never the same move twice in a row. In AUTO it keeps growing
+    // while the CPU has room; when it is full, the oldest move makes way (or a part evolves), so the song keeps
+    // changing. Kinds: 0 RESONATOR, 1 MORPH FILTER, 2 DUAL FILTER, 3 DELAY, 4 GRAIN-FORGE
+    static const char* growName(int k) { static const char* n[5] = {"RESONATOR", "MORPH FILTER", "DUAL FILTER", "DELAY", "GRAIN-FORGE"}; return n[clamp(k, 0, 4)]; }
+    static const char* growModel(int k) { static const char* n[5] = {"Resonator", "NoizeeFlagshipFilter", "DualFilter", "FX", "GrainForge"}; return n[clamp(k, 0, 4)]; }
     static void growPorts(int k, const char*& inL, const char*& inR, const char*& outL, const char*& outR) {
-        static const char* p[4][4] = {{"In L", "In R", "Out L", "Out R"}, {"Left in", "Right in", "Left out", "Right out"},
-                                      {"Left", "Right", "Left", "Right"}, {"In L", "In R", "Out L", "Out R"}};
-        int i = clamp(k, 0, 3);
+        static const char* p[5][4] = {{"In L", "In R", "Out L", "Out R"}, {"Left in", "Right in", "Left out", "Right out"},
+                                      {"Left", "Right", "Left", "Right"}, {"In L", "In R", "Out L", "Out R"}, {"Left", "Right", "Left", "Right"}};
+        int i = clamp(k, 0, 4);
         inL = p[i][0]; inR = p[i][1]; outL = p[i][2]; outR = p[i][3];
     }
-    void growTone(engine::Module* mod, int kind, int g, std::mt19937& rng) {
-        if (kind == 0) chordResTone(mod, rng);
-        else insertTone(mod, kind == 1 ? 4 : kind == 2 ? 6 : 5, g, rng, true);
+    // THE MOVES. roles: bit = the part (0 drums 1 bass 2 lead 3 chords 4 perc 5 pad / texture)
+    struct GMove { int kind; const char* name; int roles; };
+    enum { R_DR = 1, R_BA = 2, R_LE = 4, R_CH = 8, R_PE = 16, R_PA = 32 };
+    static const GMove* moves(int& n) {
+        static const GMove M[11] = {
+            {2, "FILTER SWEEP", R_LE | R_CH | R_PA},      // 0 a slow low-pass over 1-2 bars
+            {2, "TRANCE GATE", R_CH | R_PA | R_LE},       // 1 chopped in 8ths / 16ths
+            {2, "WOBBLE", R_BA},                          // 2 bass music only
+            {2, "DRUM SWEEP", R_DR | R_PE},               // 3 a high-pass breathing over 2 bars
+            {1, "GRIT", R_BA | R_DR | R_PE},              // 4 drive + a little band
+            {1, "TALK FILTER", R_LE | R_CH},              // 5 vowel morph, drifting
+            {0, "TUNED BODY", R_DR | R_PE},               // 6 rings on the key's root, low
+            {0, "KEY SHIMMER", R_LE | R_CH | R_PA},       // 7 rings on the root / fifth, high
+            {3, "DOTTED ECHO", R_LE | R_CH | R_PE},       // 8 a dotted-8th delay at the song's tempo
+            {3, "DUB ECHO", R_PE | R_CH | R_PA | R_DR},   // 9 a long, dark, feeding-back delay
+            {4, "BEAT SLICER", R_DR | R_PE | R_LE | R_CH} // 10 clocked slices, rolls, shuffles
+        };
+        n = 11;
+        return M;
+    }
+    // how well a move suits the genre (0 = not at all)
+    static float moveFit(int mv, int g) {
+        bool echo = rdz::has(g, rdz::F_E), gate = rdz::has(g, rdz::F_G), psy = rdz::has(g, rdz::F_X), wob = rdz::has(g, rdz::F_W),
+             tech = rdz::has(g, rdz::F_T), glitch = rdz::GDRUMS[clamp(g, 0, rdz::NG - 1)].glitch, sparse = rdz::has(g, rdz::F_S);
+        switch (mv) {
+            case 1: return gate || tech ? 2.f : 0.8f;
+            case 2: return wob ? 3.f : 0.f;
+            case 3: return tech ? 1.6f : 1.f;
+            case 4: return wob || tech ? 1.6f : sparse ? 0.3f : 1.f;
+            case 5: return psy || wob ? 2.f : 1.f;
+            case 7: return psy || echo || sparse ? 2.f : 1.f;
+            case 9: return echo ? 2.5f : 0.7f;
+            case 10: return glitch || gate ? 2.f : sparse ? 0.f : 0.6f;
+            default: return 1.f;
+        }
+    }
+    // a move's settings. depth: 1 for the first move on a part, less as more pile up (so the part stays itself)
+    void growTone(engine::Module* mod, int kind, int g, std::mt19937& rng, int mv = -1, int track = 0, float depth = 1.f) {
+        auto uni = [&](float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); };
+        SynTHBloKRandroyd* m = rd();
+        int key = std::max(0, m->hKey);
+        g = clamp(g, 0, rdz::NG - 1);
+        auto syncDiv = [&](int idx) { return (idx + 0.5f) / 7.f; };   // DualFilter's synced LFO: 32 16 8 4 2 1 0.5 sixteenths
+        int bpm = curTempo((rdz::GENRES[g].bpmLo + rdz::GENRES[g].bpmHi) / 2);
+        auto delayFor = [&](float beats) { float sec = beats * 60.f / std::max(40, bpm); return clamp((sec - 0.02f) / 1.98f, 0.f, 1.f); };
+        switch (mv) {
+            case 0:   // FILTER SWEEP
+                setP(mod, "Filter A mode", 0.f); setP(mod, "Filter A slope", 1.f);
+                setP(mod, "Filter A cutoff", uni(0.5f, 0.62f)); setP(mod, "Filter A resonance", uni(0.25f, 0.45f));
+                setP(mod, "Filter B cutoff", 0.95f); setP(mod, "Routing", 0.f);
+                setP(mod, "Sync the LFO to the SYNC jack", 1.f); setP(mod, "LFO rate", syncDiv(uni(0, 1) < 0.5f ? 0 : 1));
+                setP(mod, "LFO shape", 0.f); setP(mod, "LFO moves", 1.f); setP(mod, "LFO to cutoff", uni(0.25f, 0.45f) * depth);
+                setP(mod, "Envelope to cutoffs", 0.f); setP(mod, "Phaser mix", uni(0.f, 0.2f)); setP(mod, "Dry/wet", 1.f);
+                return;
+            case 1:   // TRANCE GATE
+                setP(mod, "Filter A mode", 0.f); setP(mod, "Filter A slope", 1.f);
+                setP(mod, "Filter A cutoff", uni(0.36f, 0.46f)); setP(mod, "Filter A resonance", uni(0.15f, 0.3f));
+                setP(mod, "Filter B cutoff", 0.95f); setP(mod, "Routing", 0.f);
+                setP(mod, "Sync the LFO to the SYNC jack", 1.f); setP(mod, "LFO rate", syncDiv(uni(0, 1) < 0.6f ? 4 : 5));
+                setP(mod, "LFO shape", 2.f); setP(mod, "LFO moves", 1.f); setP(mod, "LFO to cutoff", uni(0.5f, 0.7f));
+                setP(mod, "Envelope to cutoffs", 0.f); setP(mod, "Phaser mix", 0.f); setP(mod, "Dry/wet", uni(0.55f, 0.8f) * depth);
+                return;
+            case 2:   // WOBBLE
+                insertTone(mod, 6, g, rng, true, 0);
+                return;
+            case 3:   // DRUM SWEEP
+                setP(mod, "Filter A mode", 3.f); setP(mod, "Filter A slope", 0.f);
+                setP(mod, "Filter A cutoff", uni(0.1f, 0.2f)); setP(mod, "Filter A resonance", uni(0.2f, 0.35f));
+                setP(mod, "Filter B cutoff", 0.95f); setP(mod, "Routing", 0.f);
+                setP(mod, "Sync the LFO to the SYNC jack", 1.f); setP(mod, "LFO rate", syncDiv(0));
+                setP(mod, "LFO shape", 0.f); setP(mod, "LFO moves", 1.f); setP(mod, "LFO to cutoff", uni(0.15f, 0.3f) * depth);
+                setP(mod, "Envelope to cutoffs", 0.f); setP(mod, "Phaser mix", 0.f); setP(mod, "Dry/wet", uni(0.6f, 0.8f));
+                return;
+            case 4:   // GRIT
+                setP(mod, "Cutoff", uni(0.65f, 0.8f)); setP(mod, "Resonance", uni(0.1f, 0.3f)); setP(mod, "Morph", uni(0.f, 0.1f));
+                setP(mod, "Drive", uni(0.45f, 0.75f)); setP(mod, "FM amount", 0.f); setP(mod, "Chaos", uni(0.05f, 0.15f));
+                setP(mod, "Stereo width", uni(0.4f, 0.6f)); setP(mod, "Dry/wet mix", uni(0.5f, 0.8f) * depth);
+                return;
+            case 5:   // TALK FILTER
+                setP(mod, "Cutoff", uni(0.45f, 0.6f)); setP(mod, "Resonance", uni(0.45f, 0.65f)); setP(mod, "Morph", uni(0.35f, 0.7f));
+                setP(mod, "Drive", uni(0.2f, 0.4f)); setP(mod, "FM amount", uni(0.1f, 0.25f)); setP(mod, "Chaos", uni(0.35f, 0.6f));
+                setP(mod, "Stereo width", uni(0.6f, 0.85f)); setP(mod, "Dry/wet mix", uni(0.5f, 0.75f) * depth);
+                return;
+            case 6:   // TUNED BODY: the key's root, low
+                resBody(mod, uni(0, 1) < 0.6f ? 2 : 1);
+                setP(mod, "Body tuning", resTune(key, 2)); setP(mod, "Resonance", uni(0.45f, 0.6f));
+                setP(mod, "Material damping", uni(0.5f, 0.7f)); setP(mod, "Exciter strength", uni(0.3f, 0.5f));
+                setP(mod, "Dry/wet", uni(0.2f, 0.35f) * depth);
+                return;
+            case 7: { // KEY SHIMMER: the root or the fifth, high
+                resBody(mod, uni(0, 1) < 0.5f ? 0 : 3);
+                int semi = (key + (uni(0, 1) < 0.5f ? 7 : 0)) % 12;
+                setP(mod, "Body tuning", resTune(semi, uni(0, 1) < 0.5f ? 4 : 5)); setP(mod, "Resonance", uni(0.7f, 0.85f));
+                setP(mod, "Material damping", uni(0.3f, 0.5f)); setP(mod, "Exciter strength", uni(0.3f, 0.45f));
+                setP(mod, "Dry/wet", uni(0.15f, 0.3f) * depth);
+                return;
+            }
+            case 8: { // DOTTED ECHO
+                static const int modes[3] = {2, 3, 4};   // analog, modern, ping-pong
+                setP(mod, "Delay mode", (float) modes[std::uniform_int_distribution<int>(0, 2)(rng)]);
+                setP(mod, "Time", delayFor(0.75f)); setP(mod, "FBK", uni(0.3f, 0.45f)); setP(mod, "Mix", uni(0.15f, 0.28f) * depth);
+                setP(mod, "Tone", uni(0.4f, 0.6f)); setP(mod, "Depth", uni(0.05f, 0.2f)); setP(mod, "Duck", uni(0.4f, 0.6f)); setP(mod, "Width", uni(0.7f, 0.9f));
+                return;
+            }
+            case 9: { // DUB ECHO
+                setP(mod, "Delay mode", uni(0, 1) < 0.6f ? 1.f : 6.f);   // tape, space
+                setP(mod, "Time", delayFor(uni(0, 1) < 0.5f ? 0.75f : 1.5f)); setP(mod, "FBK", uni(0.5f, 0.65f)); setP(mod, "Mix", uni(0.2f, 0.32f) * depth);
+                setP(mod, "Tone", uni(0.3f, 0.45f)); setP(mod, "Depth", uni(0.2f, 0.4f)); setP(mod, "Duck", uni(0.25f, 0.4f)); setP(mod, "Width", uni(0.75f, 0.95f));
+                return;
+            }
+            case 10:  // BEAT SLICER
+                forgeTone(mod, g, rng);
+                setP(mod, "Glitch chance per step", uni(0.04f, 0.18f) * depth);
+                setP(mod, "Shuffle amount", uni(0.1f, 0.3f) * depth);
+                return;
+            default:  // older grown modules: by kind
+                if (kind == 0) chordResTone(mod, rng);
+                else if (kind == 4) forgeTone(mod, g, rng);
+                else insertTone(mod, kind == 1 ? 4 : kind == 2 ? 6 : 5, g, rng, true, kind == 2 && track == 1 ? 0 : -1);
+        }
     }
     void chanVals(int ch, float& lvl, float& pan, float& send) {
         lvl = 0.7f; pan = 0.f; send = 0.f;
@@ -4091,10 +4213,10 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         if (size == 1) return 2;
         if (size == 2) return 4;
         if (size == 3) return 6;
-        // AUTO: keep adding while the CPU has room (under 85 %), up to 6; past that, the oldest makes way
+        // AUTO: keep adding while the CPU has room (under 80 %), no fixed limit; past that, the oldest makes way
         float load = m->cpuLoad.load();
         int n = (int) m->grown.size();
-        return load < 0.85f ? std::min(6, n + 1) : std::max(1, n);
+        return load < 0.80f ? n + 1 : std::max(1, n);
     }
     void ungrow(size_t i) {
         SynTHBloKRandroyd* m = rd();
@@ -4137,15 +4259,47 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         int cap = growCap();   // once: in AUTO it depends on how many have grown
         while ((int) m->grown.size() >= cap && !m->grown.empty()) { ungrow(0); swapped++; }
         std::mt19937 rng(random::u32());
-        // a channel RANDROYD routes, and an effect it doesn't have on it yet
-        std::vector<int> chans;
-        for (const SynTHBloKRandroyd::Lock& l : m->locks) if (l.channel >= 1 && l.channel <= 6 && std::find(chans.begin(), chans.end(), l.channel) == chans.end()) chans.push_back(l.channel);
+        // a part RANDROYD routes: the ones with fewer moves on them first (3 at most a part, so it stays itself)
+        std::vector<int> chans, chanTrack;
+        for (const SynTHBloKRandroyd::Lock& l : m->locks)
+            if (l.channel >= 1 && l.channel <= 6 && std::find(chans.begin(), chans.end(), l.channel) == chans.end()) { chans.push_back(l.channel); chanTrack.push_back(l.track); }
         if (chans.empty()) { m->say("NOTHING TO GROW ON"); return; }
-        int ch = chans[std::uniform_int_distribution<int>(0, (int) chans.size() - 1)(rng)];
-        std::vector<int> kinds;   // GROW picks among the effect singles that are installed
-        for (int k = 0; k < 4; k++) if (have(growModel(k))) kinds.push_back(k);
-        if (kinds.empty()) { m->say("GROW NEEDS ONE OF: RESONATOR, MORPH FILTER, DUAL FILTER, CHARACTER DELAY"); return; }
-        int kind = kinds[std::uniform_int_distribution<int>(0, (int) kinds.size() - 1)(rng)];
+        auto onCh = [&](int c) { int n = 0; for (const SynTHBloKRandroyd::Grow& gr : m->grown) n += gr.ch == c; return n; };
+        auto kindOnCh = [&](int c, int k) { for (const SynTHBloKRandroyd::Grow& gr : m->grown) if (gr.ch == c && gr.kind == k) return true; return false; };
+        // every (part, move) pair that fits, weighted: the genre's taste, something new (not the last few
+        // moves, not a kind already on that part), quieter parts first
+        int nm = 0;
+        const GMove* M = moves(nm);
+        struct Opt { int ch, track, mv; float w; };
+        std::vector<Opt> opts;
+        float total = 0.f;
+        for (size_t i = 0; i < chans.size(); i++) {
+            int c = chans[i], t = chanTrack[i], here = onCh(c);
+            if (here >= 3) continue;
+            int gt = clamp(m->trackGenre[t] >= 0 ? m->trackGenre[t] : 0, 0, rdz::NG - 1);
+            for (int mv = 0; mv < nm; mv++) {
+                if (!(M[mv].roles >> clamp(t, 0, 5) & 1) || !have(growModel(M[mv].kind))) continue;
+                float w = moveFit(mv, gt);
+                if (w <= 0.f) continue;
+                if (std::find(m->growHist.begin(), m->growHist.end(), mv) != m->growHist.end()) w *= 0.12f;
+                if (kindOnCh(c, M[mv].kind)) w *= 0.2f;
+                w /= (1.f + here) * (1.f + here);
+                opts.push_back({c, t, mv, w});
+                total += w;
+            }
+        }
+        if (opts.empty() || total <= 0.f) {   // every part is full: the oldest move makes way, the song moves on
+            if (!m->grown.empty()) { ungrow(0); growPressed(); return; }
+            m->say("GROW NEEDS ONE OF: RESONATOR, MORPH FILTER, DUAL FILTER, CHARACTER DELAY, GRAIN-FORGE");
+            return;
+        }
+        float r = std::uniform_real_distribution<float>(0.f, total)(rng);
+        Opt pick = opts.back();
+        for (const Opt& o : opts) { if (r < o.w) { pick = o; break; } r -= o.w; }
+        int ch = pick.ch, mv = pick.mv, kind = M[mv].kind;
+        float depth = 1.f / (1.f + 0.35f * onCh(ch));
+        m->growHist.push_back(mv);
+        if (m->growHist.size() > 4) m->growHist.erase(m->growHist.begin());
         float lvl, pan, send;
         chanVals(ch, lvl, pan, send);
         int track = 0;
@@ -4171,7 +4325,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         if (!srcL) srcL = srcR;
         float x = box.pos.x, y = box.pos.y + (1 + track) * rowH();
         int g = clamp(m->trackGenre[track] >= 0 ? m->trackGenre[track] : 0, 0, rdz::NG - 1);
-        app::ModuleWidget* fxm = spawn("SynTHBloK", growModel(kind), x, y, h, [&](engine::Module* mod) { growTone(mod, kind, g, rng); });
+        app::ModuleWidget* fxm = spawn("SynTHBloK", growModel(kind), x, y, h, [&](engine::Module* mod) { growTone(mod, kind, g, rng, mv, track, depth); });
         const char *inL, *inR, *outL, *outR;
         growPorts(kind, inL, inR, outL, outR);
         if (fxm && srcL) {
@@ -4179,14 +4333,32 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             if (srcR && srcR != srcL) wire(srcR, port(fxm, false, inR), rdz::ramp(track), h);
             toMixer(track, port(fxm, true, outL), port(fxm, true, outR), lvl, pan, send, h, ch);
             m->trackMods[track].push_back(fxm->module->id);
-            SynTHBloKRandroyd::Grow gr; gr.mod = fxm->module->id; gr.track = track; gr.ch = ch; gr.kind = kind;
+            // tempo-locked moves follow the COMPOSER clock: the dual filter's LFO, the slicer's steps
+            if (app::ModuleWidget* song = findMw(m->composerId)) {
+                if (kind == 2) wire(port(song, true, "Clock"), port(fxm, false, "LFO sync"), nvgRGB(0x94, 0x37, 0xff), h);
+                if (kind == 4) clockFrom(fxm, h);
+            }
+            SynTHBloKRandroyd::Grow gr; gr.mod = fxm->module->id; gr.track = track; gr.ch = ch; gr.kind = kind; gr.move = mv;
             m->grown.push_back(gr);
-            m->say(string::f("GREW: %s ON MIX CH %d  ·  %d GROWN%s", growName(kind), ch, (int) m->grown.size(),
-                             swapped ? "  (CPU / SIZE CAP: THE OLDEST WENT)" : ""));
+            m->say(string::f("GREW: %s (%s) ON T%d %s  ·  %d GROWN%s", M[mv].name, growName(kind), track + 1, rdz::ROLES[clamp(track, 0, 7)],
+                             (int) m->grown.size(), swapped ? "  (CPU FULL: THE OLDEST MADE WAY)" : ""));
         }
         else if (srcL) toMixer(track, srcL, srcR, lvl, pan, send, h, ch);
         if (h->isEmpty()) delete h; else APP->history->push(h);
         lastSec = -2;
+        // the CPU is full and the song keeps growing: now and then a part also EVOLVES (a MUTATE of its
+        // lines), so a long session keeps moving musically, not only in its effects
+        if (swapped && std::uniform_real_distribution<float>(0.f, 1.f)(rng) < 0.5f) {
+            std::vector<int> live;
+            for (int t = 1; t < 6; t++) if (trackLive(t) && !trackParked(t)) live.push_back(t);
+            if (!live.empty()) {
+                int keep = m->selTrack;
+                m->selTrack = live[std::uniform_int_distribution<int>(0, (int) live.size() - 1)(rng)];
+                int t = m->selTrack;
+                if (rollTrack(true)) m->say(string::f("GREW + EVOLVED: T%d %s HAS A NEW VARIATION", t + 1, rdz::ROLES[t]));
+                m->selTrack = keep;
+            }
+        }
     }
     void modePressed() {
         SynTHBloKRandroyd* m = rd();
