@@ -95,6 +95,18 @@ static const GenreHarm GHARM[16] = {
 // the SynTHBloK scale list: 0 minor 1 major 2 dorian 3 phrygian 4 mixolydian 5 harmonic minor 6 min pent 7 maj pent
 static const std::vector<int> SCALE_STEPS[8] = {{0, 2, 3, 5, 7, 8, 10}, {0, 2, 4, 5, 7, 9, 11}, {0, 2, 3, 5, 7, 9, 10}, {0, 1, 3, 5, 7, 8, 10},
                                                {0, 2, 4, 5, 7, 9, 10}, {0, 2, 3, 5, 7, 8, 11}, {0, 3, 5, 7, 10}, {0, 2, 4, 7, 9}};
+// VARIETY: each new track rolls its own lead and bass rhythms (a genre's own, or one of these, then a hit or two
+// flipped), its own drum groove around the genre's, and maybe a progression from the shared list, so two tracks
+// in one genre rarely sound alike. 8 sixteenths, '1' = a note.
+static const char* LEAD_POOL[16] = {"10010010", "10100100", "10110100", "10010110", "11010010", "10101010", "10001010", "10100110",
+                                    "10010100", "11011010", "10110110", "10000101", "00101101", "10100101", "01101010", "10011010"};
+static const char* BASS_POOL[16] = {"10000010", "10100010", "10010010", "10000110", "10010100", "11010010", "10110010", "10100100",
+                                    "00100010", "10001010", "10101010", "01110111", "10011010", "10000101", "10100011", "11000110"};
+static const char* HAT_POOL[8] = {"10101010", "11111111", "10111011", "11101110", "01110111", "10101011", "11011101", "01010101"};
+static const char* OHAT_POOL[6] = {"00100010", "00000010", "00100000", "00000000", "00100011", "00010010"};
+// progressions (scale degrees) that sit well in most scales
+static const int PROG_POOL[14][4] = {{0, 5, 3, 4}, {0, 3, 4, 3}, {0, 4, 5, 3}, {0, 6, 5, 4}, {0, 2, 3, 4}, {0, 5, 2, 3}, {0, 3, 5, 4},
+                                     {0, 0, 3, 4}, {0, 6, 3, 4}, {5, 3, 0, 4}, {0, 4, 0, 5}, {0, 3, 6, 4}, {0, 5, 6, 4}, {3, 4, 0, 0}};
 // factory kits that suit each genre (0 808, 1 909, 2 TECH, 3 ELEC, 4 LOFI, 5 606, 6 HOUSE, 7 DUB, 8 INDUS)
 static const std::vector<int> KITS[16] = {{6, 1}, {6, 0}, {2, 1, 8}, {0, 1}, {1}, {3, 0}, {4, 0}, {0}, {4}, {5, 0},
                                           {1, 2}, {7}, {4, 5}, {0, 4}, {4, 5}, {4, 7}};
@@ -160,6 +172,7 @@ struct SynTHBloKRandroyd : Module {
     // the rack's harmony, set by its first track: every instrument plays in this key, scale and progression
     int hKey = -1, hScale = 0;
     int hProg[4] = {0, 0, 0, 0};
+    std::string hLeadR, hBassR;   // this track's own lead / bass rhythms (8 sixteenths); empty = the genre's
     int trackRole[8] = {-1, -1, -1, -1, -1, -1, -1, -1};   // QUAD role: 0 bass 1 acid 2 lead 3 chords
     // each part's recipe (which modules build it): 0 the standard MTX build, 1 TECHNO RIG, 2 BROKEN BEAT,
     // 3 METAL GARDEN, 4 QUAD + MORPH FILTER, 5 QUAD + DELAY, 6 QUAD + DUAL FILTER, 7 MTX-DUO (bass part, plays the
@@ -268,6 +281,8 @@ struct SynTHBloKRandroyd : Module {
         json_t* hp = json_array();
         for (int i = 0; i < 4; i++) json_array_append_new(hp, json_integer(hProg[i]));
         json_object_set_new(root, "hProg", hp);
+        json_object_set_new(root, "hLeadR", json_string(hLeadR.c_str()));
+        json_object_set_new(root, "hBassR", json_string(hBassR.c_str()));
         json_t* rl = json_array();
         for (int i = 0; i < 8; i++) json_array_append_new(rl, json_integer(trackRole[i]));
         json_object_set_new(root, "roles", rl);
@@ -381,6 +396,8 @@ struct SynTHBloKRandroyd : Module {
         if (json_t* v = json_object_get(root, "hKey")) hKey = (int) json_integer_value(v);
         if (json_t* v = json_object_get(root, "hScale")) hScale = (int) json_integer_value(v);
         if (json_t* hp = json_object_get(root, "hProg")) for (int i = 0; i < 4; i++) hProg[i] = (int) json_integer_value(json_array_get(hp, i));
+        { const char* v = json_string_value(json_object_get(root, "hLeadR")); hLeadR = v ? v : ""; }
+        { const char* v = json_string_value(json_object_get(root, "hBassR")); hBassR = v ? v : ""; }
         if (json_t* rl = json_object_get(root, "roles")) for (int i = 0; i < 8; i++) trackRole[i] = rl && json_array_get(rl, i) ? (int) json_integer_value(json_array_get(rl, i)) : -1;
         if (json_t* rc = json_object_get(root, "recipes")) for (int i = 0; i < 8; i++) trackRecipe[i] = (int) json_integer_value(json_array_get(rc, i));
         if (json_t* fl = json_object_get(root, "flags")) for (int i = 0; i < 8; i++) trackFlags[i] = (int) json_integer_value(json_array_get(fl, i));
@@ -1494,10 +1511,35 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         const rdz::GenreDrums& G = rdz::GDRUMS[g];
         auto rnd = [&](int n) { return std::uniform_int_distribution<int>(0, n - 1)(rng); };
         auto chance = [&](float p) { return std::uniform_real_distribution<float>(0.f, 1.f)(rng) < p; };
+        // this track's own groove around the genre's: hat style, open hats, a kick push, ghost snares, perc rows
+        auto euclid = [&](int k, int rot) { std::string r(8, '0'); for (int i = 0; i < 8; i++) if (((i * k) % 8) < k) r[(i + rot) % 8] = '1'; return r; };
+        std::string base[8];
+        for (int r = 0; r < 8; r++) base[r] = G.rows[r];
+        bool floor4 = std::string(G.rows[0]).compare(0, 5, "20002") == 0;
+        bool sparse = g == 12;   // ambient keeps its space
+        if (!sparse && chance(0.5f + 0.3f * variety)) base[3] = rdz::HAT_POOL[rnd(8)];
+        if (!sparse && chance(0.4f)) base[4] = rdz::OHAT_POOL[rnd(6)];
+        for (int i = 0; i < 8; i++) if (base[3][i] != '0' && base[4][i] != '0') base[3][i] = '0';   // an open hat chokes the closed one
+        if (floor4) { if (chance(0.3f)) base[0][chance(0.5f) ? 3 : 7] = '1'; }   // a push into the next beat
+        else if (chance(0.6f)) {   // broken styles: a kick moves or joins off the grid
+            static const int spots[5] = {2, 3, 5, 6, 7};
+            int i = spots[rnd(5)];
+            if (base[1][i] == '0') base[0][i] = '1';
+        }
+        if (chance(0.35f + 0.3f * variety)) { int i = rnd(8); if (base[0][i] == '0' && base[1][i] == '0') base[1][i] = '1'; }   // a ghost snare
+        for (int r = 5; r < 8; r++) if (!sparse && chance(0.3f + 0.3f * variety)) base[r] = chance(0.35f) ? std::string("00000000") : euclid(1 + rnd(3), rnd(8));
         std::vector<std::string> pats;
-        for (int p = 0; p < 4; p++) {
+        for (int p = 0; p < 7; p++) {
             std::string rows[8];
-            for (int r = 0; r < 8; r++) rows[r] = G.rows[r];
+            for (int r = 0; r < 8; r++) rows[r] = base[r];
+            if (p >= 4) {   // EVOLUTION, 5-7: the peak sections' lifted grooves (5 16th hats, 6 rolling, 7 peak)
+                if (!sparse) for (int i = 0; i < 8; i++) if (rows[4][i] == '0') rows[3][i] = (i % 2 && p == 6) ? '2' : '1';
+                if (p >= 5) { int i = 1 + 2 * rnd(4); if (rows[3][i] != '0' && !sparse) { rows[4][i] = '1'; rows[3][i] = '0'; } }
+                if (p >= 5) for (int r = 5; r < 8; r++) for (int i = 0; i < 8; i++) if (rows[r][i] == '0' && chance(0.15f)) rows[r][i] = '1';
+                if (floor4 && p >= 5 && chance(0.5f)) rows[0][7] = '1';
+                if (p == 6) { rows[1][6] = std::max(rows[1][6], '1'); rows[1][7] = '2'; if (rows[2][4] == '0' && G.rows[2][4] != '0') rows[2][4] = '2'; }
+                if (p == 4 && chance(0.5f)) { int i = rnd(8); if (rows[1][i] == '0' && rows[0][i] == '0') rows[1][i] = '1'; }
+            }
             if (p == 1) {   // ghost hats
                 for (int k = 0; k < 1 + (int) (variety * 2); k++) { int i = rnd(8); if (rows[3][i] == '0') rows[3][i] = '1'; }
             }
@@ -1515,7 +1557,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             for (int r = 0; r < 8; r++) s += rows[r];
             pats.push_back(s);
         }
-        for (int p = 4; p < 8; p++) pats.push_back(pats[p % 4]);   // 5-8 copy 1-4, ready to edit
+        pats.push_back(pats[0]);   // 8: becomes the blank pattern in the arrangement
         return pats;
     }
     static std::vector<std::string> percPatterns(int g, std::mt19937& rng, float variety) {
@@ -1620,10 +1662,63 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         if (m->hKey >= 0) return;
         const rdz::GenreHarm& H = rdz::GHARM[g];
         auto pick3 = [&](const int* a) { return a[std::uniform_int_distribution<int>(0, 2)(rng)]; };
+        auto chance = [&](float p) { return std::uniform_real_distribution<float>(0.f, 1.f)(rng) < p; };
+        auto rnd = [&](int n) { return std::uniform_int_distribution<int>(0, n - 1)(rng); };
+        float variety = m->params[SynTHBloKRandroyd::DENSITY_PARAM].getValue();
         m->hScale = pick3(H.scales);
-        m->hKey = pick3(H.keys);
-        int pr = std::uniform_int_distribution<int>(0, 1)(rng);
-        for (int i = 0; i < 4; i++) m->hProg[i] = H.prog[pr][i];
+        m->hKey = chance(0.3f) ? rnd(12) : pick3(H.keys);   // now and then any key, not only the genre's three
+        if (chance(0.4f + 0.2f * variety)) { const int* pp = rdz::PROG_POOL[rnd(14)]; for (int i = 0; i < 4; i++) m->hProg[i] = pp[i]; }
+        else { int pr = rnd(2); for (int i = 0; i < 4; i++) m->hProg[i] = H.prog[pr][i]; }
+        if (chance(0.2f)) std::swap(m->hProg[1], m->hProg[2]);   // the same chords, a new order
+        // this track's rhythms; slow, sparse styles stay sparse
+        int maxHits = g == 12 ? 3 : rdz::GENRES[g].bpmHi < 90 ? 5 : 8;
+        m->hLeadR = varyRhythm(rng, H.lead, rdz::LEAD_POOL, variety, false, maxHits);
+        m->hBassR = varyRhythm(rng, H.bass, rdz::BASS_POOL, variety, true, std::max(3, maxHits));
+    }
+    // a genre rhythm, or one from the pool, with a hit or two flipped
+    static std::string varyRhythm(std::mt19937& rng, const char* base, const char* const* pool, float variety, bool keepDown, int maxHits) {
+        auto chance = [&](float p) { return std::uniform_real_distribution<float>(0.f, 1.f)(rng) < p; };
+        auto rnd = [&](int n) { return std::uniform_int_distribution<int>(0, n - 1)(rng); };
+        std::string r = chance(0.45f + 0.25f * variety) ? pool[rnd(16)] : base;
+        for (char& c : r) if (c != '0') c = '1';
+        int flips = rnd(2 + (int) (variety * 2));
+        for (int k = 0; k < flips; k++) { int i = 1 + rnd(7); r[i] = r[i] == '0' ? '1' : '0'; }
+        if (keepDown) r[0] = '1';
+        int hits = 0; for (char c : r) hits += c == '1';
+        while (hits > maxHits) { int i = 1 + rnd(7); if (r[i] == '1') { r[i] = '0'; hits--; } }
+        if (hits < 2) { r[0] = '1'; r[4] = '1'; }
+        return r;
+    }
+    void loadRhythms(json_t* root) {
+        const char* a = json_string_value(json_object_get(root, "leadR"));
+        const char* b = json_string_value(json_object_get(root, "bassR"));
+        rd()->hLeadR = a ? a : ""; rd()->hBassR = b ? b : "";
+    }
+    const char* leadR(int g) { const std::string& r = rd()->hLeadR; return r.size() == 8 ? r.c_str() : rdz::GHARM[g].lead; }
+    const char* bassR(int g) { const std::string& r = rd()->hBassR; return r.size() == 8 ? r.c_str() : rdz::GHARM[g].bass; }
+    // EVOLUTION: the lifted take of a line for the peak sections: passing notes run through the rests
+    // (faster movement), a bass gets octave jumps, chords push on the offbeats
+    std::vector<int> liftLine(std::mt19937& rng, int role, int root, const std::vector<int>& base) {
+        auto chance = [&](float p) { return std::uniform_real_distribution<float>(0.f, 1.f)(rng) < p; };
+        std::vector<int> out = base, tones = triad(root);
+        int n = scaleLen();
+        auto top = [](int mask) { for (int b = 7; b >= 0; b--) if (mask >> b & 1) return b; return -1; };
+        if (role == 3 || role == 4) {   // chords: an offbeat push
+            int mask = 0; for (int t : tones) mask |= 1 << t;
+            for (int c = 1; c < 8; c += 2) if (!out[c] && chance(0.35f)) out[c] = mask;
+            return out;
+        }
+        if (role == 0) {   // bass: octave jumps into the rests
+            int lo = tones[0] < n ? tones[0] : tones[0] - n;
+            for (int c = 1; c < 8; c++) if (!out[c] && chance(0.55f)) out[c] = 1 << (c % 2 ? std::min(7, lo + n) : lo);
+            return out;
+        }
+        int cur = top(out[0] ? out[0] : 1 << tones[0]);   // lead / acid: steps fill the gaps
+        for (int c = 0; c < 8; c++) {
+            if (out[c]) { cur = top(out[c]); continue; }
+            if (chance(role == 1 ? 0.7f : 0.55f)) { cur = clamp(cur + (chance(0.5f) ? 1 : -1), 0, 7); out[c] = 1 << cur; }
+        }
+        return out;
     }
     int scaleLen() { return (int) rdz::SCALE_STEPS[clamp(rd()->hScale, 0, 7)].size(); }
     // the chord on degree root as grid degrees 0..7: root, 3rd, 5th (pentatonic: root, +2, +3)
@@ -1697,9 +1792,9 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         std::vector<std::vector<int>> lines;
         for (int p = 0; p < 4; p++) {
             int root = m->hProg[p];
-            if (role == 2) lines.push_back(leadLine(rng, root, H.lead));
-            else if (role == 1) lines.push_back(acidLine(rng, root, H.lead));
-            else lines.push_back(bassLine(rng, root, H.bass));
+            if (role == 2) lines.push_back(leadLine(rng, root, leadR(g)));
+            else if (role == 1) lines.push_back(acidLine(rng, root, leadR(g)));
+            else lines.push_back(bassLine(rng, root, bassR(g)));
         }
         if (role == 2 || role == 1) {   // A B A' B': pattern 3 repeats pattern 1 on its own chord
             int shift = m->hProg[2] - m->hProg[0];
@@ -1724,14 +1819,14 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         for (int p = 0; p < 4; p++) {
             int root = m->hProg[p];
             if (role == 4) {   // pad: the chord held from step 1, nothing else
-                std::vector<int> st = stabLine(root, H.lead), pad(8, 0);
+                std::vector<int> st = stabLine(root, leadR(g)), pad(8, 0);
                 for (int v : st) if (v) { pad[0] = v; break; }
                 lines.push_back(pad);
             }
-            else if (role == 3) lines.push_back(stabLine(root, H.lead));
-            else if (role == 2) lines.push_back(leadLine(rng, root, H.lead));
-            else if (role == 1) lines.push_back(acidLine(rng, root, H.lead));
-            else lines.push_back(bassLine(rng, root, H.bass));
+            else if (role == 3) lines.push_back(stabLine(root, leadR(g)));
+            else if (role == 2) lines.push_back(leadLine(rng, root, leadR(g)));
+            else if (role == 1) lines.push_back(acidLine(rng, root, leadR(g)));
+            else lines.push_back(bassLine(rng, root, bassR(g)));
         }
         // repetition makes it music: pattern 3 repeats pattern 1's line moved to its own chord
         // (A B A' B'), so the phrase is heard twice
@@ -1745,9 +1840,23 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             }
             lines[2] = rep;
         }
+        // patterns 5-7: the lifted take of chords 1-3 (the peak sections switch to them); 8 stays a copy (blank later)
+        lines.reserve(8);
+        for (int p = 4; p < 8; p++) lines.push_back(p < 7 && role != 4 ? liftLine(rng, role, m->hProg[p - 4], lines[p - 4]) : lines[p % 4]);
         const float gate = role == 4 ? 1.f : role == 3 ? 0.35f : (role == 2 ? 0.55f : (role == 1 ? 0.5f : 0.45f));
         for (int p = 0; p < 8; p++) {
-            const std::vector<int>& line = lines[p % 4];
+            const std::vector<int>& line = lines[p];
+            const std::vector<int>& orig = lines[p % 4];
+            bool lifted = p >= 4 && p < 7;
+            // ratchet rolls: a lifted line gets one or two, a base lead or acid line now and then one
+            std::vector<float> ratch(8, 0.f), prob(8, 1.f);
+            if (role != 4) {
+                int rolls = lifted ? 1 + (uni(0, 1) < 0.5f) : (role <= 2 && uni(0, 1) < 0.35f);
+                for (int k = 0, guard = 0; k < rolls && guard < 20; guard++) { int c = (int) uni(0, 7.99f); if (line[c] && c % 4) { ratch[c] = uni(0, 1) < 0.7f ? 0.34f : 0.67f; k++; } }
+                // ghosts: an offbeat note or two plays on chance, so each pass is a little different
+                for (int c = 1; c < 8; c += 2) if (line[c] && uni(0, 1) < (lifted ? 0.25f : 0.2f)) prob[c] = uni(0.55f, 0.85f);
+                if (lifted) for (int c = 0; c < 8; c++) if (line[c] && !orig[c] && uni(0, 1) < 0.5f) prob[c] = uni(0.6f, 0.9f);
+            }
             std::string hx;
             if (p == 0 && keepFirst) {
                 const char* old = json_string_value(json_array_get(json_object_get(keepFirst, "notes"), 0));
@@ -1763,9 +1872,9 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
                     else if (b == 1) v = 0.5f + uni(-0.08f, 0.08f);                                     // cutoff
                     else if (b == 2) v = gate + uni(-0.1f, 0.1f);                                        // gate length
                     else if (b == 3) v = (role == 1 && uni(0, 1) < 0.3f) ? 0.55f : 0.f;                  // glide
-                    else if (b == 4) v = 1.f;                                                            // probability
-                    else if (b == 5) v = 0.f;                                                            // ratchet
-                    else if (b == 6) v = (role == 1 && uni(0, 1) < 0.15f) ? 0.75f : 0.5f;                 // octave
+                    else if (b == 4) v = prob[c];                                                        // probability
+                    else if (b == 5) v = ratch[c];                                                       // ratchet
+                    else if (b == 6) v = ((role == 1 && uni(0, 1) < 0.15f) || (lifted && role == 2 && on && uni(0, 1) < 0.15f)) ? 0.75f : 0.5f;   // octave
                     else v = 0.5f;                                                                       // resonance
                     json_array_append_new(steps, json_real(v));
                 }
@@ -2701,6 +2810,10 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         SynTHBloKRandroyd* m = rd();
         for (int sec = 0; sec < 8; sec++) for (int t = 0; t < 8; t++) secPat[sec][t] = sec % 4;
         auto on = [&](int sec, int bit) { return (m->arr[sec] >> bit & 1) != 0; };
+        // the peak: from section F on, any section where four or more parts play lifts (the drums also lift
+        // on E when the song was already full before it); the first time through stays plain
+        auto parts = [&](int sec) { int n = 0; for (int b = 0; b < 6; b++) n += m->arr[sec] >> b & 1; return n; };
+        auto lifted = [&](int sec, bool drum) { return (sec >= 5 && parts(sec) >= 4) || (drum && sec == 4 && parts(3) >= 4 && parts(4) >= 4); };
         for (int t = 0; t < 6; t++) {
             if (isLight(t) || m->trackMods[t].empty()) continue;
             app::ModuleWidget* mw = findMw(m->trackMods[t][0]);
@@ -2717,14 +2830,19 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             std::string pat[8];
             int from[8];   // the pattern each slot is built from (DUO accents follow it)
             for (int p = 0; p < 4; p++) { pat[p] = src[p]; from[p] = p; }
-            for (int p = 4; p < 8; p++) { pat[p] = src[p % 4]; from[p] = p % 4; }
+            // 5-7: a DUO rebuilds them here (half-blank chords, else copies); a DRUM or QUAD keeps its lifted takes
+            for (int p = 4; p < 8; p++) { pat[p] = isDuo ? src[p % 4] : src[p]; from[p] = isDuo ? p % 4 : p; }
             pat[7] = std::string(isDrum ? 64 : isQuad ? 16 : 32, '0');
             bool duoHalves = isDuo && t == 1 && m->trackRecipe[1] == 7;   // bass = layer 1, lead = layer 2
             int nextVar = 4;
             std::map<int, int> varSlot;   // chord * 2 + (lead ? 1 : 0) -> slot 4-6
             for (int sec = 0; sec < 8; sec++) {
                 int c = sec % 4;
-                if (!duoHalves) { if (!on(sec, t)) secPat[sec][t] = 7; continue; }
+                if (!duoHalves) {
+                    if (!on(sec, t)) secPat[sec][t] = 7;
+                    else if (!isDuo && lifted(sec, isDrum) && c < 3) secPat[sec][t] = 4 + c;   // EVOLUTION: the peak lifts
+                    continue;
+                }
                 bool bass = on(sec, 1), lead = on(sec, 2);
                 if (bass && lead) continue;
                 if (!bass && !lead) { secPat[sec][t] = 7; continue; }
@@ -3475,6 +3593,8 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         json_t* hp = json_array();
         for (int i = 0; i < 4; i++) json_array_append_new(hp, json_integer(m->hProg[i]));
         json_object_set_new(root, "prog", hp);
+        json_object_set_new(root, "leadR", json_string(m->hLeadR.c_str()));
+        json_object_set_new(root, "bassR", json_string(m->hBassR.c_str()));
         json_t* ar = json_array();
         for (int i = 0; i < 8; i++) json_array_append_new(ar, json_integer(m->arr[i]));
         json_object_set_new(root, "arr", ar);
@@ -3587,6 +3707,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             m->hScale = (int) json_integer_value(json_object_get(root, "scale"));
             json_t* hp = json_object_get(root, "prog");
             for (int i = 0; i < 4; i++) m->hProg[i] = (int) json_integer_value(json_array_get(hp, i));
+            loadRhythms(root);
             json_t* ar = json_object_get(root, "arr");
             for (int i = 0; i < 8; i++) m->arr[i] = ar ? (uint8_t) json_integer_value(json_array_get(ar, i)) : 255;
             m->arrKind = ar ? (int) json_integer_value(json_object_get(root, "arrKind")) : -1;
@@ -3641,6 +3762,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         m->hScale = (int) json_integer_value(json_object_get(root, "scale"));
         json_t* hp = json_object_get(root, "prog");
         for (int i = 0; i < 4; i++) m->hProg[i] = (int) json_integer_value(json_array_get(hp, i));
+        loadRhythms(root);
         json_t* ar = json_object_get(root, "arr");
         for (int i = 0; i < 8; i++) m->arr[i] = ar ? (uint8_t) json_integer_value(json_array_get(ar, i)) : 255;
         m->arrKind = ar ? (int) json_integer_value(json_object_get(root, "arrKind")) : -1;
