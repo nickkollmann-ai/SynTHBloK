@@ -56,3 +56,7 @@ tools/ni_relink*.json
 tools/ni_relink_xml_backup/
 tools/claude_startup.txt
 tools/ps_runs/
+# SITE tab: COMM messages and the BUILDER feed (local only)
+tools/site.json
+tools/site_inbox.json
+tools/site_build.json

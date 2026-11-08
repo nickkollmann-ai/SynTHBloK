@@ -79,6 +79,12 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
 - POWERSHELL tab console modes: PS, CMD (cmd.exe) and ADMIN. ADMIN starts `tools/admin_worker.ps1` through the Windows
   admin prompt (Nick clicks Yes once); it runs hidden, takes commands from `tools/ps_runs/admin/`, and quits after 15 min
   idle or on END ADMIN. After changing `rack_open_server.py`, run `tools/restart_feeds.ps1` (RUN THESE item) to load it.
+- SITE tab (liquidnick.com): LIVE shows the site + WATCH (the helper's GET /site/check hashes the page every minute) +
+  CHANGES/COMM; BUILDER shows Claude's live site work. Nick writes to `tools/site_inbox.json` ("check SITE" in chat);
+  Claude answers in `tools/site.json` ({messages[{t,text}], changes[{title,state: idea|planned|building|live,note}]}) and,
+  while working on the site, keeps `tools/site_build.json` current ({updated, mode: idle|think|build|deploy, task, rev, page,
+  now{title,detail,why}, plan[], files[{path,add,del,note}], log[{t,kind,text}]}; bump rev to reload the preview). The
+  BUILDER preview serves the local copy `Desktop\liquidnick_site_work` via the helper's GET /site/local/<path>.
 - `tools/build_and_reload.ps1`: build, close Rack cleanly, devinstall, screenshots, reopen Rack.
 - `tools/rack_shots.ps1`: module screenshots into `web-images/screenshots`. Its default Rack path is Rack2Pro; on a
   PC with Rack Free pass `-Rack 'C:\Program Files\VCV\Rack2Free\Rack.exe'`.

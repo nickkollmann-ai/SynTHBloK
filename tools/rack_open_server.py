@@ -31,6 +31,10 @@
 #   ADMIN console: POST /admin/start shows the normal Windows admin prompt (UAC); after Nick clicks Yes a hidden admin
 #        PowerShell (tools/admin_worker.ps1) runs the commands typed in ADMIN mode: POST /admin {"cmd"}, GET /admin/out?from=k,
 #        POST /admin/kill, POST /admin/stop, GET /admin/status. It closes itself after 15 min with no command, or on END.
+#   SITE tab: POST /site {"text", "page"}  a message for Claude about liquidnick.com (tools/site_inbox.json, local only)
+#        GET /site/check?url=...  fetches a liquidnick.com page (only that site) and returns its status, a hash of the
+#        page (to spot changes) and whether the site lets other pages show it in a frame
+#        GET /site/local/<path>   serves the local working copy (Desktop\liquidnick_site_work) for the BUILDER preview
 #   Only the workbench's own page can use it: its Origin, and the token this server writes at start (other
 #   sites can't read either). No interactive input (no vim / less): commands that finish, like make, git, ls.
 # Only .vcv files straight inside patches/ or Rack's patches folder can be opened.
@@ -59,6 +63,41 @@ except Exception:
 SH = {'id': 0, 'proc': None, 'buf': '', 'done': True, 'code': 0, 'cwd': REPO, 'lock': threading.Lock()}
 MARK = '\x01CWD:'
 CLEAN_LOCK = threading.Lock()
+# ---- SITE tab ----
+SITE_DIR = os.path.join(os.environ.get('USERPROFILE', r'C:\Users\nickk'), 'Desktop', 'liquidnick_site_work')
+SITE_HOST = re.compile(r'^(?:[\w-]+\.)*liquidnick\.com$', re.I)
+SITE_LOCK = threading.Lock()
+MIME = {'.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript',
+        '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2',
+        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.mp4': 'video/mp4', '.txt': 'text/plain; charset=utf-8'}
+def site_check(url):
+    import hashlib, time as _t, urllib.request, urllib.error
+    u = urllib.parse.urlparse(url)
+    if u.scheme not in ('http', 'https') or not SITE_HOST.match(u.hostname or ''): return {'ok': False, 'error': 'only liquidnick.com pages'}
+    t0 = _t.time()
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'SynTHBloK-workbench/1.0', 'Cache-Control': 'no-cache'})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            body = r.read(4 << 20); st = r.status; h = r.headers
+    except urllib.error.HTTPError as e:
+        body = e.read(1 << 16) if hasattr(e, 'read') else b''; st = e.code; h = e.headers
+    except Exception as e:
+        return {'ok': False, 'error': str(e)[:200]}
+    xfo = (h.get('X-Frame-Options') or '').strip(); csp = h.get('Content-Security-Policy') or ''
+    fa = re.search(r'frame-ancestors([^;]*)', csp, re.I)
+    blocked = bool(xfo) or bool(fa and "*" not in fa.group(1) and '127.0.0.1' not in fa.group(1))
+    return {'ok': True, 'status': st, 'hash': hashlib.sha1(body).hexdigest()[:16], 'bytes': len(body), 'ms': int((_t.time() - t0) * 1000),
+            'frameBlocked': blocked, 'xfo': xfo, 'frameAncestors': (fa.group(1).strip() if fa else '')}
+def site_local(rel):
+    rel = urllib.parse.unquote(rel.split('?')[0]).lstrip('/') or 'index.html'
+    base = os.path.realpath(SITE_DIR); path = os.path.realpath(os.path.join(base, rel))
+    if not (path == base or path.startswith(base + os.sep)): return None, None
+    if os.path.isdir(path): path = os.path.join(path, 'index.html')
+    if not os.path.isfile(path):
+        if os.path.isfile(path + '.html'): path += '.html'
+        else: return None, None
+    with open(path, 'rb') as f: return f.read(), MIME.get(os.path.splitext(path)[1].lower(), 'application/octet-stream')
 def sh_start(cmd):
     with SH['lock']:
         if SH['proc'] and SH['proc'].poll() is None: return None
@@ -457,6 +496,16 @@ class H(BaseHTTPRequestHandler):
                 txt, done, code = admin_read()
                 if not done and not admin_status()['alive']: done, code = True, 1   # the admin console closed mid-command
                 return self.reply(200, {'ok': True, 'id': ADM['id'], 'text': txt[frm:], 'next': len(txt), 'done': done, 'code': code, 'cwd': ADM['cwd']})
+        if self.path.startswith('/site/local/') or self.path == '/site/local':
+            # the BUILDER preview: the local working copy, read-only, this computer only
+            data, ctype = site_local(self.path[len('/site/local'):])
+            if data is None:
+                self.send_response(404); self.send_header('Content-Type', 'text/plain'); self.end_headers(); self.wfile.write(b'not in liquidnick_site_work'); return
+            self.send_response(200); self.send_header('Content-Type', ctype); self.send_header('Cache-Control', 'no-store'); self.end_headers(); self.wfile.write(data); return
+        if self.path.startswith('/site/check'):
+            if self.headers.get('Origin') not in ORIGINS: return self.reply(403, {'ok': False})
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            return self.reply(200, site_check((q.get('url') or [''])[0]))
         if self.path == '/cleaner/running':
             if self.headers.get('Origin') not in ORIGINS or self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False})
             return self.reply(200, {'ok': True, 'running': running_uninstallers()})
@@ -466,7 +515,7 @@ class H(BaseHTTPRequestHandler):
             except Exception as e: return self.reply(500, {'ok': False, 'error': str(e)})
         self.reply(404, {'ok': False})
     def do_POST(self):
-        if self.path not in ('/open', '/gen', '/sh', '/sh/kill', '/cleaner', '/cleaner/uninstall', '/cleaner/settings', '/runq/open', '/ps', '/ps/kill', '/ps/task', '/ps/task/in', '/ps/task/stop', '/cmd', '/cmd/kill', '/admin', '/admin/kill', '/admin/start', '/admin/stop'): return self.reply(404, {'ok': False})
+        if self.path not in ('/open', '/gen', '/sh', '/sh/kill', '/cleaner', '/cleaner/uninstall', '/cleaner/settings', '/runq/open', '/ps', '/ps/kill', '/ps/task', '/ps/task/in', '/ps/task/stop', '/site', '/cmd', '/cmd/kill', '/admin', '/admin/kill', '/admin/start', '/admin/stop'): return self.reply(404, {'ok': False})
         # pages from other sites can't use it: only the workbench's own origin
         if self.headers.get('Origin') not in ORIGINS: return self.reply(403, {'ok': False, 'error': 'not the workbench'})
         if self.path.startswith('/sh'):
@@ -486,6 +535,7 @@ class H(BaseHTTPRequestHandler):
             return self.reply(200, {'ok': True, 'id': i, 'cwd': SH['cwd']})
         if self.path == '/gen': return self.gen()
         if self.path == '/cleaner': return self.cleaner()
+        if self.path == '/site': return self.site_note()
         if self.path in ('/ps', '/ps/kill', '/ps/task', '/ps/task/in', '/ps/task/stop'):
             if self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False, 'error': 'no token'})
             if self.path == '/ps/kill':
@@ -577,6 +627,22 @@ class H(BaseHTTPRequestHandler):
             with open(path + '.tmp', 'w', encoding='utf-8') as f: json.dump(box, f, indent=1)
             os.replace(path + '.tmp', path)
         if reply: self.reply(200, {'ok': True, 'id': m['id']})
+    def site_note(self):
+        try: req = json.loads(self.rfile.read(min(int(self.headers.get('Content-Length') or 0), 20000)) or b'{}')
+        except Exception: return self.reply(400, {'ok': False, 'error': 'bad request'})
+        text = str(req.get('text') or '')[:4000]; page = str(req.get('page') or '')[:300]
+        if not text.strip(): return self.reply(400, {'ok': False, 'error': 'empty'})
+        path = os.path.join(HERE, 'site_inbox.json')
+        with SITE_LOCK:
+            try:
+                with open(path, encoding='utf-8') as f: box = json.load(f)
+            except Exception: box = {'messages': []}
+            import time as _t
+            m = {'id': len(box['messages']) + 1, 't': int(_t.time() * 1000), 'text': text, 'page': page}
+            box['messages'].append(m)
+            with open(path + '.tmp', 'w', encoding='utf-8') as f: json.dump(box, f, indent=1)
+            os.replace(path + '.tmp', path)
+        self.reply(200, {'ok': True, 'id': m['id']})
     def gen(self):
         try:
             style = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}').get('style') or ''

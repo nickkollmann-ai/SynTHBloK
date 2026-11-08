@@ -1203,6 +1203,72 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
 #ps-aend{display:none;margin-right:6px}#ps-aend.on{display:inline-block;--hb:#ff4466;color:#ff4466}
 #ps-con.admin{--hc:#ff4466;box-shadow:inset 0 0 0 1px #ff446666,inset 0 0 26px #ff446618}#ps-con.admin #ps-prompt{color:#ff4466}#ps-con.admin #ps-cmd{caret-color:#ff4466}
 #ps-mname .warn{color:#ff4466}#ps-mname .ok{color:#7dffb2}
+
+/* ===== SITE tab: liquidnick.com LIVE (+ COMM) and BUILDER (Claude's live work on the site) ===== */
+#sitex{position:fixed;inset:0;top:var(--tabs-h,80px);z-index:13;display:none;grid-template-rows:auto minmax(0,1fr);background:#010407}
+#sitex.on{display:grid}
+#sitex>.head{display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid var(--line);background:#02030a;font-size:10.5px;min-width:0}
+#sitex>.head>b{color:var(--ok);letter-spacing:.18em;font-weight:600;white-space:nowrap}
+#sitex .sb,#sitex>.head button,#site-comm button{--hb:#5ff6ff88;background-color:#04161c;color:#5ff6ff;font:inherit;font-size:9.5px;letter-spacing:.14em;padding:3px 10px;cursor:pointer;border:1px solid var(--hb);white-space:nowrap;clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
+#sitex>.head button.on{background:#5ff6ff;color:#011}#sitex>.head button:hover,#site-comm button:hover{box-shadow:0 0 10px #5ff6ff66}
+#site-views,#site-pages{display:flex;gap:4px}#site-views button{font-size:10px;padding:3px 14px}
+#site-url{flex:1;min-width:120px;background:#020b10;border:1px solid #0f3b46;color:#cfe2ea;font:inherit;font-size:10.5px;padding:3px 8px;outline:0}
+#site-url:focus{border-color:#5ff6ff88}
+#site-stat{color:var(--mut);white-space:nowrap;display:flex;align-items:center;gap:6px}#site-stat i{width:7px;height:7px;border-radius:50%;background:#1d3440;display:inline-block}
+#site-stat.ok i{background:#7dffb2;box-shadow:0 0 8px #7dffb2}#site-stat.chg i{background:#ffb347;box-shadow:0 0 10px #ffb347;animation:ledBlink .6s steps(1) 6}#site-stat.bad i{background:#ff4466;box-shadow:0 0 8px #ff4466}
+#site-watch.on{background:#7dffb2!important;color:#011!important;--hb:#7dffb2}
+#sitex #site-x{font-size:12px;padding:2px 10px}
+.site-v{display:none;min-height:0;gap:8px;padding:8px 10px 10px}.site-v.on{display:grid}
+#site-live{grid-template-columns:minmax(0,1fr) 390px}#site-build{grid-template-columns:400px minmax(0,1fr)}
+.sx{background:#010407;box-shadow:inset 0 0 0 1px #0f3b46;padding:12px 14px 10px;min-height:0;display:flex;flex-direction:column;position:relative}
+.sx h4{margin:0 0 8px;font-size:9px;letter-spacing:.2em;color:#5f8792;font-weight:500;display:flex;gap:8px;align-items:baseline}.sx h4 b{color:var(--hc,#5ff6ff);font-weight:600}
+.sx h4 .r{margin-left:auto;display:flex;gap:4px}
+.site-frame{padding:0;overflow:hidden}.site-frame iframe{flex:1;width:100%;border:0;background:#fff}
+.site-frame .bar{display:flex;gap:8px;align-items:center;padding:6px 10px;font-size:9.5px;letter-spacing:.14em;color:#5f8792;border-bottom:1px solid #0f3b46;background:#02080c}
+.site-frame .bar b{color:#5ff6ff;font-weight:600}.site-frame .bar span{color:#cfe2ea;letter-spacing:.04em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.site-block{position:absolute;inset:34px 0 0 0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:10px;background:#010407ee;color:#cfe2ea;font-size:11px;text-align:center;padding:30px}
+.site-block.on{display:flex}.site-block b{color:#ffb347;letter-spacing:.16em}
+#site-right{display:grid;grid-template-rows:auto minmax(0,1fr);gap:8px;min-height:0}
+#site-changes{--hc:#7dffb2;max-height:38vh;overflow:auto}
+.sch{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:2px 8px;align-items:center;padding:5px 0;border-top:1px solid #0f3b46;font-size:10.5px}
+.sch>i{width:7px;height:7px;border-radius:50%;background:#1d3440}.sch b{color:#e8fbff;font-weight:500}.sch span{font-size:8.5px;letter-spacing:.16em;color:#5f8792}
+.sch em{grid-column:2/4;font-style:normal;color:#7aa3ae;font-size:9.5px}
+.sch.idea>i{background:#3d6c78}.sch.planned>i{background:#5ff6ff}.sch.building>i{background:#ffb347;box-shadow:0 0 8px #ffb347;animation:ledPulse 1.1s infinite}.sch.live>i{background:#7dffb2;box-shadow:0 0 6px #7dffb2}
+#site-chlist:empty::before{content:'nothing yet: ask for a change in COMM below';color:#3d6c78;font-size:10px}
+#site-comm{--hc:#ffb347}
+#site-log{flex:1;min-height:0;overflow:auto;font-size:10.5px;line-height:1.45;display:flex;flex-direction:column;gap:6px;padding-right:4px}
+.sm{padding:6px 9px;border-left:2px solid #0f3b46;background:#020b10}.sm small{display:block;font-size:8.5px;letter-spacing:.14em;color:#5f8792;margin-bottom:2px}
+.sm.you{border-color:#ffb347;background:rgba(255,179,71,.05)}.sm.you small b{color:#ffb347}.sm.claude{border-color:#5ff6ff;background:rgba(95,246,255,.05)}.sm.claude small b{color:#5ff6ff}
+.sm.sys{border-color:#3d6c78;background:transparent;color:#7aa3ae;font-size:9.5px;padding:2px 9px}.sm .pg{color:#5f8792;font-size:9px}
+#site-log:empty::before{content:'Tell Claude what to change on the site. Messages are saved on this PC (tools/site_inbox.json); in the chat, say "check SITE".';color:#3d6c78;font-size:10px}
+#site-in{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;margin-top:8px;border-top:1px solid #0f3b46;padding-top:8px}
+#site-msg{grid-row:1/3;resize:none;height:58px;background:#020b10;border:1px solid #0f3b46;color:#e8fbff;font:inherit;font-size:10.5px;padding:6px 8px;outline:0}
+#site-msg:focus{border-color:#ffb34788}#site-send{--hb:#ffb347!important;background:#ffb347!important;color:#011!important}
+#site-in label{font-size:9px;color:#5f8792;letter-spacing:.08em;display:flex;gap:4px;align-items:center;cursor:pointer}
+/* BUILDER */
+#sb-left{display:grid;grid-template-rows:auto auto minmax(0,1fr) minmax(0,1.1fr);gap:8px;min-height:0}
+#sb-mode{--mc:61,108,120;padding:14px 16px;overflow:hidden}
+#sb-mode[data-mode=think]{--mc:95,246,255}#sb-mode[data-mode=build]{--mc:255,179,71}#sb-mode[data-mode=deploy]{--mc:125,255,178}
+#sb-mode::before{content:'';position:absolute;inset:0;pointer-events:none;background:radial-gradient(120% 140% at 0% 0%,rgba(var(--mc),.16),transparent 60%)}
+#sb-mode[data-mode=think]::before{animation:sbBreath 2.6s ease-in-out infinite}
+#sb-mode[data-mode=build]::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,transparent,rgba(var(--mc),.22),transparent);width:40%;animation:sbSweep 1.3s linear infinite}
+#sb-mode[data-mode=deploy]::before{animation:sbBreath 1s ease-in-out infinite}
+@keyframes sbBreath{0%,100%{opacity:.45}50%{opacity:1}}@keyframes sbSweep{0%{transform:translateX(-100%)}100%{transform:translateX(260%)}}
+#sb-mode{box-shadow:inset 0 0 0 1px rgba(var(--mc),.45),inset 0 0 24px rgba(var(--mc),.10)}
+#sb-word{font-size:22px;letter-spacing:.32em;font-weight:700;color:rgb(var(--mc));text-shadow:0 0 14px rgba(var(--mc),.6);position:relative}
+#sb-task{position:relative;margin-top:6px;color:#cfe2ea;font-size:11px}#sb-at{position:relative;margin-top:4px;color:#5f8792;font-size:9px;letter-spacing:.12em}
+#sb-now{--hc:#5ff6ff;font-size:10.5px;color:#cfe2ea}#sb-now .t{color:#e8fbff;font-size:11.5px}#sb-now .w{color:#7aa3ae;font-size:9.5px;margin-top:4px}
+#sb-plan{--hc:#7dffb2;overflow:auto}#sb-files{--hc:#ffb347}
+.sbp{display:grid;grid-template-columns:10px minmax(0,1fr);gap:2px 8px;align-items:center;padding:4px 0;font-size:10.5px;color:#cfe2ea}
+.sbp>i{width:7px;height:7px;border-radius:50%;background:#1d3440}.sbp.done>i{background:#00e5ff}.sbp.done{color:#7aa3ae}.sbp.now>i{background:#ffb347;box-shadow:0 0 8px #ffb347;animation:ledPulse 1.1s infinite}
+.sbp.now{color:#fff}.sbp.blocked>i{background:#ff4466}.sbp em{grid-column:2;font-style:normal;color:#5f8792;font-size:9px}
+#sb-flog{display:grid;grid-template-rows:auto minmax(0,1fr);gap:8px;min-height:0}
+#sb-filelist{overflow:auto;max-height:16vh}.sbf{display:flex;gap:8px;font:10px Consolas,'Cascadia Mono',monospace;padding:2px 0;color:#cfe2ea}
+.sbf .a{color:#7dffb2}.sbf .d{color:#ff4466}.sbf .n{color:#5f8792;margin-left:auto;font-family:inherit}
+#sb-log{flex:1;min-height:0;overflow:auto;font:10px/1.5 Consolas,'Cascadia Mono',monospace;color:#9fc7b4}
+#sb-log>div{position:static!important;display:block}#sb-log .lk-think{color:#5ff6ff}#sb-log .lk-do{color:#ffb347}#sb-log .lk-check{color:#7dffb2}#sb-log .lk-fix{color:#ff7a90}#sb-log .lk-ask{color:#e8fbff}#sb-log span.tm{color:#3d6c78;position:static}
+#sb-plan .l:empty::before,#sb-filelist:empty::before,#sb-log:empty::before{content:'-';color:#3d6c78}
+#sb-prev .bar button{font-size:8.5px;padding:2px 8px}#sb-prev .bar button.on{background:#5ff6ff;color:#011}
 #ps-prompt{color:#ffb347;white-space:nowrap}#ps-cmd{flex:1;background:transparent;border:0;outline:0;color:var(--tx);font:inherit;caret-color:#ffb347}
 </style>
 </head>
@@ -1218,6 +1284,7 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
   <button type="button" id="patch-btn" class="tab" title="Rack's live patch">PATCH MAP<b id="patch-n"></b></button>
   <button type="button" id="lib-btn" class="tab" title="Saved patches: patches/ and Rack's patches folder">PATCHES<b id="lib-n"></b></button>
   <button type="button" id="lab-btn" class="tab" title="How the BACKDROP themes and cases are being built (tools/backdrop_lab.json)">BACKDROP LAB<b id="lab-n"></b></button>
+  <button type="button" id="site-btn" class="tab" title="SITE: liquidnick.com live, a BUILDER view while Claude changes it, and COMM to ask for changes (tools/site*.json)">SITE</button>
   <button type="button" id="cln-btn" class="tab" title="The PC cleanup: what changed, what is next, and approvals (tools/cleaner.json)">CLEANER<b id="cln-n"></b></button>
   <button type="button" id="ps-btn" class="tab" title="POWERSHELL: run the queued scripts here, watch their output, and a PowerShell console">POWERSHELL</button>
   <button type="button" id="libre-btn" class="tab" title="LIBRE: every sensor LibreHardwareMonitor reads (tools/lhm.json)">LIBRE</button>
@@ -1279,6 +1346,33 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
       <div class="ob-pane" data-pane="log"><div id="t-entries"></div></div></div>
     </div>
   </div></div>
+<div id="sitex" role="dialog" aria-label="liquidnick.com"><div class="head"><b>SITE · LIQUIDNICK.COM</b>
+  <span id="site-views"><button type="button" data-v="live" class="on">LIVE</button><button type="button" data-v="build">BUILDER</button></span>
+  <span id="site-pages"><button type="button" data-u="https://www.liquidnick.com/" class="on">HOME</button><button type="button" data-u="https://app.liquidnick.com/patchgen/">PATCH GEN</button></span>
+  <input id="site-url" spellcheck="false" autocomplete="off" value="https://www.liquidnick.com/" title="any liquidnick.com page, Enter opens it" />
+  <button type="button" id="site-reload" title="reload the page">RELOAD</button><button type="button" id="site-watch" class="on" title="check the page for changes every minute">WATCH</button>
+  <button type="button" id="site-open" title="open it in your browser">OPEN ↗</button>
+  <span id="site-stat"><i></i><span id="site-st">not checked yet</span></span><button type="button" id="site-x" aria-label="Close">&times;</button></div>
+  <div class="site-v on" id="site-live">
+    <div class="sx site-frame"><div class="bar"><b>LIVE</b><span id="site-cur">www.liquidnick.com</span></div><iframe id="site-if" title="liquidnick.com" referrerpolicy="no-referrer"></iframe>
+      <div class="site-block" id="site-blk"><b>THE SITE WON'T SHOW INSIDE OTHER PAGES</b><div>liquidnick.com sends a "no framing" header, so the browser won't show it here.<br>WATCH still checks it for changes. Ask Claude in COMM to allow the workbench (127.0.0.1) to show it.</div><button type="button" class="sb" id="site-blk-open">OPEN IN BROWSER ↗</button></div></div>
+    <div id="site-right">
+      <div class="sx" id="site-changes"><h4><b>CHANGES</b> · what Claude is doing on the site</h4><div id="site-chlist"></div></div>
+      <div class="sx" id="site-comm"><h4><b>COMM</b> · you &harr; Claude about the site</h4><div id="site-log"></div>
+        <div id="site-in"><textarea id="site-msg" placeholder="what to change: &quot;make the hero darker&quot;, &quot;add the new module to downloads&quot;... (Ctrl+Enter sends)"></textarea><button type="button" id="site-send">SEND</button><label><input type="checkbox" id="site-att" checked />this page</label></div></div>
+    </div>
+  </div>
+  <div class="site-v" id="site-build">
+    <div id="sb-left">
+      <div class="sx" id="sb-mode" data-mode="idle"><div id="sb-word">IDLE</div><div id="sb-task">no site work running</div><div id="sb-at"></div></div>
+      <div class="sx" id="sb-now"><h4><b>NOW</b></h4><div class="t" id="sb-nt">-</div><div id="sb-nd"></div><div class="w" id="sb-nw"></div></div>
+      <div class="sx" id="sb-plan"><h4><b>PLAN</b></h4><div class="l" id="sb-pl"></div></div>
+      <div id="sb-flog"><div class="sx" id="sb-files"><h4><b>FILES</b> · changed in liquidnick_site_work</h4><div id="sb-filelist"></div></div>
+        <div class="sx" id="sb-logc"><h4><b>LOG</b></h4><div id="sb-log"></div></div></div>
+    </div>
+    <div class="sx site-frame" id="sb-prev"><div class="bar"><b>PREVIEW</b><button type="button" data-p="local" class="sb on" title="your local working copy (Desktop\liquidnick_site_work): changes show here before they go live">LOCAL COPY</button><button type="button" data-p="live" class="sb" title="the live site">LIVE SITE</button><span id="sb-purl"></span><button type="button" class="sb" id="sb-reload">RELOAD</button></div><iframe id="sb-if" title="site preview"></iframe></div>
+  </div>
+</div>
 <div id="psx" role="dialog" aria-label="PowerShell"><div class="head"><span><b>POWERSHELL · SCRIPTS + CONSOLE</b> &nbsp;<span id="ps-at">this PC only · admin scripts still ask Windows for your OK</span></span><button type="button" id="ps-x" aria-label="Close">&times;</button></div>
   <div id="ps-body">
     <div class="hud" id="ps-q"><h4><b>RUN QUEUE</b> · scripts waiting for you</h4><div id="ps-qlist"></div><h4 style="margin-top:12px"><b>RUNS</b> · this session</h4><div id="ps-runs"></div></div>
@@ -2214,7 +2308,7 @@ const popupMode = new URLSearchParams(location.search).get('patches');
 // ---- THE TABS: which page is up (the patches pop-up, THINKING, or the workbench itself) ----
 document.querySelectorAll('#wbtabs .tab').forEach(t => { if (!t.querySelector('.led')) t.insertAdjacentHTML('afterbegin', '<i class="led"></i>'); });
 const TabLight = (() => {
-  const ids = { wb: 'tab-wb', map: 'patch-btn', lib: 'lib-btn', think: 'think-btn', lab: 'lab-btn', cln: 'cln-btn', acid: 'acid-btn', libre: 'libre-btn', ps: 'ps-btn' };
+  const ids = { wb: 'tab-wb', map: 'patch-btn', lib: 'lib-btn', think: 'think-btn', lab: 'lab-btn', cln: 'cln-btn', acid: 'acid-btn', libre: 'libre-btn', ps: 'ps-btn', site: 'site-btn' };
   const el = k => document.getElementById(ids[k]);
   return {
     ping(k) {   // something happened on that page
@@ -2249,8 +2343,11 @@ function syncTabs() {
   const lbOn = document.getElementById('libre').classList.contains('on');
   document.getElementById('libre-btn').classList.toggle('on', lbOn);
   if (lbOn) { ['tab-wb', 'patch-btn', 'lib-btn', 'think-btn', 'lab-btn', 'cln-btn', 'acid-btn'].forEach(id => document.getElementById(id).classList.remove('on')); }
+  const sOn = document.getElementById('sitex').classList.contains('on');
+  document.getElementById('site-btn').classList.toggle('on', sOn);
+  if (sOn) { ['tab-wb', 'patch-btn', 'lib-btn', 'think-btn', 'lab-btn', 'cln-btn', 'acid-btn', 'libre-btn', 'ps-btn'].forEach(id => document.getElementById(id).classList.remove('on')); }
   TabLight.seen();
-  document.getElementById('wb-views').style.visibility = !pOn && !tOn && !lOn && !cOn && !aOn && !lbOn && !psOn ? 'visible' : 'hidden';
+  document.getElementById('wb-views').style.visibility = !pOn && !tOn && !lOn && !cOn && !aOn && !lbOn && !psOn && !sOn ? 'visible' : 'hidden';
   const h = document.getElementById('wbtabs').getBoundingClientRect().bottom;
   document.documentElement.style.setProperty('--tabs-h', h + 'px');
 }
@@ -4070,6 +4167,128 @@ document.getElementById('ps-cmd').addEventListener('keydown', e => {
 });
 document.getElementById('ps-clear').onclick = () => { document.getElementById('ps-term').textContent = ''; };
 psModeDraw();
+
+// ===== SITE tab: liquidnick.com =====
+// LIVE: the site in a frame, WATCH (the helper fetches the page every minute and compares a hash), CHANGES + COMM.
+// BUILDER: Claude's live work on the site from tools/site_build.json {updated, mode: idle|think|build|deploy, task, rev, page,
+//   now{title,detail,why}, plan[{title,state: done|now|next|later|blocked,note}], files[{path,add,del,note}], log[{t,kind,text}]}.
+// Claude's side of COMM + the CHANGES list: tools/site.json {messages[{t,text}], changes[{title,state: idea|planned|building|live,note}]}.
+// Yours: tools/site_inbox.json (POST /site on the helper).
+const SITE = { url: 'https://www.liquidnick.com/', watch: true, hash: {}, seen: [], build: null, rev: null, prev: 'local', claudeN: -1, lastCheck: 0 };
+try { const sv = JSON.parse(localStorage.getItem('wb-site') || '{}'); if (sv.url) SITE.url = sv.url; if (sv.watch === false) SITE.watch = false; SITE.hash = sv.hash || {}; SITE.seen = sv.seen || []; } catch (e) {}
+const siteSave = () => { try { localStorage.setItem('wb-site', JSON.stringify({ url: SITE.url, watch: SITE.watch, hash: SITE.hash, seen: SITE.seen.slice(-40) })); } catch (e) {} };
+const siteHelper = (path, body) => fetch('http://127.0.0.1:8767' + path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  .then(async r => ({ status: r.status, j: await r.json().catch(() => ({})) }));
+const siteOn = () => document.getElementById('sitex').classList.contains('on');
+function siteOpen(on) { document.getElementById('sitex').classList.toggle('on', on); syncTabs(); if (on) { siteGo(SITE.url, false); siteTick(); } }
+document.getElementById('site-btn').onclick = () => { closePatches(); try { thinkOpen(false); } catch (e) {} ['lab', 'cln', 'acid', 'libre'].forEach(id => document.getElementById(id).classList.remove('on')); try { psOpen(false); } catch (e) {} siteOpen(true); };
+document.getElementById('site-x').onclick = () => siteOpen(false);
+document.getElementById('wbtabs').addEventListener('click', e => { const t = e.target.closest('.tab'); if (t && t.id !== 'site-btn' && siteOn()) siteOpen(false); }, true);
+const siteHost = u => { try { return new URL(u).host + new URL(u).pathname.replace(/\/$/, ''); } catch (e) { return u; } };
+function siteGo(u, force) {
+  try { const x = new URL(u); if (!/(^|\.)liquidnick\.com$/i.test(x.hostname)) return; u = x.href; } catch (e) { return; }
+  const f = document.getElementById('site-if'); SITE.url = u; siteSave();
+  document.getElementById('site-url').value = u; document.getElementById('site-cur').textContent = siteHost(u);
+  document.querySelectorAll('#site-pages button').forEach(b => b.classList.toggle('on', b.dataset.u === u));
+  if (force || f.dataset.u !== u) { f.dataset.u = u; f.src = u + (force ? (u.includes('?') ? '&' : '?') + 'wb=' + Date.now() : ''); }
+  if (siteOn()) siteCheck(true);
+}
+document.getElementById('site-pages').addEventListener('click', e => { const b = e.target.closest('button'); if (b) siteGo(b.dataset.u); });
+document.getElementById('site-url').addEventListener('keydown', e => { if (e.key === 'Enter') { let v = e.target.value.trim(); if (!/^https?:/i.test(v)) v = 'https://' + v; siteGo(v, true); } });
+document.getElementById('site-reload').onclick = () => { siteGo(SITE.url, true); if (document.getElementById('site-build').classList.contains('on')) sbPreview(true); };
+document.getElementById('site-open').onclick = document.getElementById('site-blk-open').onclick = () => window.open(SITE.url, '_blank', 'noopener');
+const siteWatchBtn = () => document.getElementById('site-watch').classList.toggle('on', SITE.watch);
+document.getElementById('site-watch').onclick = () => { SITE.watch = !SITE.watch; siteSave(); siteWatchBtn(); if (SITE.watch) siteCheck(true); };
+siteWatchBtn();
+document.getElementById('site-views').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#site-views button').forEach(x => x.classList.toggle('on', x === b));
+  document.getElementById('site-live').classList.toggle('on', b.dataset.v === 'live'); document.getElementById('site-build').classList.toggle('on', b.dataset.v === 'build');
+  if (b.dataset.v === 'build') sbPreview(false); });
+// WATCH: the helper fetches the page (the browser can't read another site), a changed hash = the page changed
+async function siteCheck(now) {
+  if (!now && (!SITE.watch || Date.now() - SITE.lastCheck < 58000)) return; SITE.lastCheck = Date.now();
+  const st = document.getElementById('site-stat'), tx = document.getElementById('site-st'), u = SITE.url;
+  let r; try { r = await siteHelper('/site/check?url=' + encodeURIComponent(u)); } catch (e) { r = { status: 0, j: {} }; }
+  const tm = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (r.status === 404) { st.className = 'bad'; tx.textContent = 'the helper needs a restart to WATCH'; return; }
+  const j = r.j || {};
+  if (!j.ok) { st.className = 'bad'; tx.textContent = 'checked ' + tm + ' · ' + String(j.error || 'no answer').replace(/^<urlopen error |>$/g, '').slice(0, 70); TabLight.state('site', 'warn'); return; }
+  document.getElementById('site-blk').classList.toggle('on', !!j.frameBlocked);
+  const old = SITE.hash[u]; SITE.hash[u] = j.hash;
+  if (j.status >= 400) { st.className = 'bad'; tx.textContent = 'checked ' + tm + ' · ERROR ' + j.status; TabLight.state('site', 'warn'); siteSave(); return; }
+  TabLight.state('site', '');
+  if (old && old !== j.hash) {
+    st.className = 'chg'; tx.textContent = 'CHANGED ' + tm + ' · ' + j.status + ' · ' + (j.ms / 1000).toFixed(1) + ' s';
+    SITE.seen.push({ t: Date.now(), text: siteHost(u) + ' changed' }); TabLight.ping('site');
+    const f = document.getElementById('site-if'); if (f.dataset.u === u) f.src = u + (u.includes('?') ? '&' : '?') + 'wb=' + Date.now();
+    siteLogDraw(true);
+  } else { st.className = 'ok'; tx.textContent = 'checked ' + tm + ' · ' + j.status + ' · ' + (j.ms / 1000).toFixed(1) + ' s' + (old ? ' · no change' : ''); }
+  siteSave();
+}
+// CHANGES + COMM
+SITE.inbox = []; SITE.claude = { messages: [], changes: [] };
+async function siteData() {
+  try { const a = await getText('/tools/site_inbox.json'); SITE.inbox = a ? (JSON.parse(a.replace(/^﻿/, '')).messages || []) : []; } catch (e) {}
+  try { const b = await getText('/tools/site.json'); const j = b ? JSON.parse(b.replace(/^﻿/, '')) : {}; SITE.claude = { messages: j.messages || [], changes: j.changes || [] }; } catch (e) {}
+  const n = SITE.claude.messages.length; if (SITE.claudeN >= 0 && n > SITE.claudeN) TabLight.ping('site'); SITE.claudeN = n;
+  const lbl = { idea: 'IDEA', planned: 'PLANNED', building: 'BUILDING', live: 'LIVE' };
+  const ch = SITE.claude.changes, k = JSON.stringify(ch), el = document.getElementById('site-chlist');
+  if (el.dataset.k !== k) { el.dataset.k = k; el.innerHTML = ch.map(c => `<div class="sch ${escS(c.state || 'idea')}"><i></i><b>${escS(c.title || '')}</b><span>${lbl[c.state] || escS(c.state || '')}</span>${c.note ? `<em>${escS(c.note)}</em>` : ''}</div>`).join(''); }
+  siteLogDraw(false);
+}
+function siteLogDraw(force) {
+  const all = [...SITE.inbox.map(m => ({ t: m.t, who: 'you', text: m.text, page: m.page })), ...SITE.claude.messages.map(m => ({ t: m.t, who: 'claude', text: m.text })),
+    ...SITE.seen.map(m => ({ t: m.t, who: 'sys', text: m.text }))].sort((a, b) => a.t - b.t).slice(-80);
+  const el = document.getElementById('site-log'), k = all.length + ':' + (all.length ? all[all.length - 1].t : 0);
+  if (!force && el.dataset.k === k) return; el.dataset.k = k;
+  const end = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  const tm = t => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  el.innerHTML = all.map(m => m.who === 'sys' ? `<div class="sm sys">${tm(m.t)} · ${escS(m.text)}</div>`
+    : `<div class="sm ${m.who}"><small><b>${m.who === 'you' ? 'YOU' : 'CLAUDE'}</b> · ${tm(m.t)}${m.page ? ` · <span class="pg">${escS(siteHost(m.page))}</span>` : ''}</small>${escS(m.text)}</div>`).join('');
+  if (end || force) el.scrollTop = el.scrollHeight;
+}
+async function siteSend() {
+  const ta = document.getElementById('site-msg'), text = ta.value.trim(); if (!text) return;
+  const page = document.getElementById('site-att').checked ? SITE.url : '';
+  let r; try { r = await siteHelper('/site', { text, page }); } catch (e) { r = { status: 0, j: {} }; }
+  if (!r.j.ok) { SITE.seen.push({ t: Date.now(), text: r.status === 404 ? 'not sent: the helper needs a restart (Restart workbench helpers)' : 'not sent: ' + (r.j.error || 'the helper is not answering') }); siteLogDraw(true); return; }
+  ta.value = ''; await siteData(); siteLogDraw(true);
+}
+document.getElementById('site-send').onclick = siteSend;
+document.getElementById('site-msg').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); siteSend(); } });
+// BUILDER
+function sbPreview(force) {
+  const f = document.getElementById('sb-if'), b = SITE.build || {};
+  const page = (b.page || 'index.html').replace(/^\/+/, '');
+  const u = SITE.prev === 'local' ? 'http://127.0.0.1:8767/site/local/' + page : SITE.url;
+  document.getElementById('sb-purl').textContent = SITE.prev === 'local' ? 'liquidnick_site_work/' + page : siteHost(SITE.url);
+  if (force || f.dataset.u !== u) { f.dataset.u = u; f.src = u + (u.includes('?') ? '&' : '?') + 'wb=' + Date.now(); }
+}
+document.querySelector('#sb-prev .bar').addEventListener('click', e => { const b = e.target.closest('button[data-p]'); if (!b) return;
+  SITE.prev = b.dataset.p; document.querySelectorAll('#sb-prev .bar button[data-p]').forEach(x => x.classList.toggle('on', x === b)); sbPreview(true); });
+document.getElementById('sb-reload').onclick = () => sbPreview(true);
+async function sbTick() {
+  let b = null; try { const t = await getText('/tools/site_build.json'); b = t ? JSON.parse(t.replace(/^﻿/, '')) : null; } catch (e) {}
+  b = b || {}; const fresh = b.updated && Date.now() - b.updated < 20 * 60e3;
+  const mode = fresh && ['think', 'build', 'deploy'].includes(b.mode) ? b.mode : 'idle';
+  const word = { idle: 'IDLE', think: 'THINKING', build: 'BUILDING', deploy: 'DEPLOYING' }[mode];
+  const mEl = document.getElementById('sb-mode'); mEl.dataset.mode = mode; document.getElementById('sb-word').textContent = word;
+  document.getElementById('sb-task').textContent = (fresh && b.task) || (mode === 'idle' ? 'no site work running' : '');
+  document.getElementById('sb-at').textContent = b.updated ? 'updated ' + new Date(b.updated).toLocaleTimeString() : '';
+  const n = b.now || {};
+  document.getElementById('sb-nt').textContent = n.title || '-'; document.getElementById('sb-nd').textContent = n.detail || ''; document.getElementById('sb-nw').textContent = n.why ? 'why: ' + n.why : '';
+  document.getElementById('sb-pl').innerHTML = (b.plan || []).map(p => `<div class="sbp ${escS(p.state || 'next')}"><i></i>${escS(p.title || '')}${p.note ? `<em>${escS(p.note)}</em>` : ''}</div>`).join('');
+  document.getElementById('sb-filelist').innerHTML = (b.files || []).map(f => `<div class="sbf"><span>${escS(f.path || '')}</span>${f.add ? `<span class="a">+${f.add | 0}</span>` : ''}${f.del ? `<span class="d">-${f.del | 0}</span>` : ''}<span class="n">${escS(f.note || '')}</span></div>`).join('');
+  const lg = document.getElementById('sb-log'), lk = (b.log || []).length + ':' + b.updated;
+  if (lg.dataset.k !== lk) { lg.dataset.k = lk; lg.innerHTML = (b.log || []).slice(-60).map(l => `<div class="lk-${escS(l.kind || '')}"><span class="tm">${l.t ? new Date(l.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''}</span> ${escS(l.text || '')}</div>`).join(''); lg.scrollTop = lg.scrollHeight; }
+  const pageChanged = (SITE.build || {}).page !== b.page;
+  if (SITE.rev !== null && b.rev !== SITE.rev && SITE.prev === 'local') sbPreview(true); else if (pageChanged) sbPreview(false);
+  SITE.rev = b.rev === undefined ? 0 : b.rev; SITE.build = b;
+  try { TabLight.busy('site', mode !== 'idle'); } catch (e) {}
+}
+async function siteTick() { await siteData(); await sbTick(); siteCheck(false); }
+siteTick(); setInterval(siteTick, 3000);
+document.getElementById('site-url').value = SITE.url;
 
 // TELEMETRY banner: the newest event only, plus the readout's mode and clock
 setInterval(() => {
