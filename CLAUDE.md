@@ -90,6 +90,14 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   (Nick's Midjourney themes; local only), and COMM (`tools/backdrop_inbox.json` via the helper's POST /backdrop; "check BACKDROP").
   Art: `python3 tools/make_backdrop_art.py [names | psy]` renders res/backdrops/*.jpg; new looks/cases/themes go at the END of
   their lists (patches save looks, colours and side materials by number).
+  COMM read receipts: after reading the inbox set `read` in backdrop_build.json to the highest inbox id (the board then shows
+  READ BY CLAUDE; unread notes show a "say check BACKDROP" banner). PICKS: `tools/backdrop_picks.json` ({round, note, sent,
+  picks[{n,id,k,w,h,date,prompt}]}, Midjourney job id + image index) shows a KEEP/DROP grid; Nick's answer arrives as a COMM note.
+  Midjourney's API from the signed-in built-in browser: fetch('/api/imagine?user_id=<id>&page_size=10000', {headers:
+  {'x-csrf-protection':'1'}}); images at cdn.midjourney.com/<id>/0_<k>_384_N.webp (thumb) or 0_<k>.png.
+  Species woods: `python3 tools/make_wood_textures.py [slugs]` -> res/cases/wood_*.png (full colour, not overlays); the
+  SIDE MATERIAL entries with a `tex` use them, with WOOD FINISH (OILED/SATIN/GLOSS, json `sideFinish`).
+  OVERVIEW's BUILDER · LIVE card mirrors the BUILDER preview (CASE ROUNDS now live only in COMPARE).
 - `tools/build_and_reload.ps1`: build, close Rack cleanly, devinstall, screenshots, reopen Rack.
 - `tools/rack_shots.ps1`: module screenshots into `web-images/screenshots`. Its default Rack path is Rack2Pro; on a
   PC with Rack Free pass `-Rack 'C:\Program Files\VCV\Rack2Free\Rack.exe'`.

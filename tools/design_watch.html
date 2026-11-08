@@ -749,6 +749,11 @@ footer .nav:hover{border-color:var(--cy)}
 #lab-steps div.now{border-color:var(--ok);box-shadow:0 0 12px #3dff9a44}#lab-steps div.now b{color:var(--ok)}
 #lab-steps div.now b::after{content:' ●';animation:tpulse 1.2s infinite}
 #lab-rounds{grid-column:2;grid-row:2/4}
+#lab-rounds{display:flex;flex-direction:column}
+#ll-img{flex:1;min-height:0;width:100%;object-fit:contain;background:#000;border:1px solid #0f3b46;cursor:pointer}
+#ll-cap{font-size:9.5px;letter-spacing:.12em;color:var(--mut);margin:3px 0 6px}
+#ll-now b{display:block;color:var(--tx);font-weight:500;font-size:11px}#ll-now span{color:#9fb6c0}
+#ll-mode{letter-spacing:.16em!important}#lab-rounds[data-mode=think] #ll-mode{color:#5ff6ff!important}#lab-rounds[data-mode=build] #ll-mode,#lab-rounds[data-mode=compile] #ll-mode{color:#ffb347!important}
 #lab-rlist .rd{margin-bottom:12px}#lab-rlist .rd h5{margin:0 0 4px;font-size:11px;color:var(--tx);font-weight:500}
 #lab-rlist .rd p{margin:0 0 6px;color:#9fb6c0}
 #lab-rlist .rd img{width:100%;display:block;border:1px solid #0f3b46;cursor:zoom-in}
@@ -1297,7 +1302,20 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
 #lab-bld.on{display:grid!important;grid-template-columns:320px minmax(0,1fr) 360px;gap:8px;padding:8px 10px 10px;overflow:hidden}
 #lab-bld .sx{background:#010407}
 #bb-mid{display:grid;grid-template-rows:minmax(0,1fr) auto;gap:8px;min-height:0}
-#bb-prev{padding:0;overflow:hidden}#bb-prev img{flex:1;min-height:0;width:100%;object-fit:contain;background:#000;cursor:zoom-in}
+#bb-prev{padding:0;overflow:hidden;position:relative}
+#bb-picks{display:none;position:absolute;inset:31px 0 0 0;background:#010407;flex-direction:column;z-index:3}#bb-prev.picks #bb-picks{display:flex}
+#bb-pk-btn.want{animation:ledPulse 1.4s infinite;border-color:#ffb347;color:#ffb347}
+#bb-pk-head{display:flex;gap:10px;align-items:baseline;padding:6px 10px;font-size:9.5px;letter-spacing:.12em;color:#5f8792;border-bottom:1px solid #0f3b46}
+#bb-pk-head b{color:#ffb347}#bb-pk-head .r{margin-left:auto}#bb-pk-head i{font-style:normal}#bb-picks .y{color:#7dffb2}#bb-picks .n{color:#ff4466}
+#bb-pk-grid{flex:1;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;padding:8px 10px;align-content:start}
+.pk{position:relative;border:2px solid #0f3b46;cursor:pointer;background:#000}.pk img{width:100%;aspect-ratio:1;object-fit:cover;display:block}
+.pk b{position:absolute;top:0;left:0;background:#000c;color:#ffb347;font-size:10px;padding:1px 5px}
+.pk u{position:absolute;top:0;right:0;background:#000c;color:#ff7a90;font-size:8px;letter-spacing:.12em;padding:1px 4px;text-decoration:none}
+.pk em{display:block;font-style:normal;font-size:8.5px;color:#7aa3ae;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pk.y{border-color:#7dffb2;box-shadow:0 0 10px #7dffb255}.pk.n{border-color:#ff4466;opacity:.35}
+.pk.y::after,.pk.n::after{position:absolute;right:6px;bottom:22px;font-size:22px;font-weight:700;text-shadow:0 0 6px #000}.pk.y::after{content:'\2713';color:#7dffb2}.pk.n::after{content:'\2717';color:#ff4466}
+#bb-pk-foot{display:flex;gap:8px;align-items:center;padding:6px 10px;border-top:1px solid #0f3b46;font-size:10px;color:#cfe2ea}#bb-pk-foot span{margin-right:auto}
+#bb-pk-send{background:#ffb347;color:#011;border-color:#ffb347}#bb-prev img{flex:1;min-height:0;width:100%;object-fit:contain;background:#000;cursor:zoom-in}
 #bb-strip{display:flex;gap:6px;overflow-x:auto;padding:8px 10px}#bb-strip img{height:62px;aspect-ratio:16/10;object-fit:cover;border:1px solid #0f3b46;cursor:pointer;opacity:.75}
 #bb-strip img.on,#bb-strip img:hover{opacity:1;border-color:#5ff6ff}
 #bb-right{display:grid;grid-template-rows:minmax(0,1.25fr) minmax(0,1fr);gap:8px;min-height:0}
@@ -1310,6 +1328,9 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
 #bb-comm{--hc:#ffb347}
 #bb-send{font:inherit;font-size:9.5px;letter-spacing:.14em;padding:3px 14px;border:1px solid #ffb347;cursor:pointer;clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
 #bb-msgs{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:6px;font-size:10.5px;line-height:1.45}
+#bb-wait{display:none;margin-top:6px;padding:5px 8px;border:1px solid #ffb347;color:#ffb347;font-size:9.5px;letter-spacing:.06em;background:rgba(255,179,71,.07);animation:ledPulse 1.6s infinite}
+#bb-wait.on{display:block}#bb-wait b{color:#fff}
+.sm .st{display:block;margin-top:3px;font-size:8.5px;letter-spacing:.14em;color:#ffb347}.sm .st.ok{color:#7dffb2}
 #bb-msgs:empty::before{content:'Notes for Claude about the backdrops. Saved on this PC (tools/backdrop_inbox.json); in the chat, say "check BACKDROP".';color:#3d6c78;font-size:10px}
 
 /* header bars: WORKBENCH and BACKDROP LAB use the SITE head look (title, chamfered cyan buttons) */
@@ -1482,11 +1503,15 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
       <div id="bb-flog"><div class="sx" id="bb-files"><h4><b>FILES</b> · changed for BACKDROP</h4><div id="bb-filelist"></div></div>
         <div class="sx" id="bb-logc"><h4><b>LOG</b></h4><div id="bb-log"></div></div></div>
     </div>
-    <div id="bb-mid"><div class="sx site-frame" id="bb-prev"><div class="bar"><b>PREVIEW</b><span id="bb-pname">-</span></div><img id="bb-img" alt=""></div>
+    <div id="bb-mid"><div class="sx site-frame" id="bb-prev"><div class="bar"><b>PREVIEW</b><span id="bb-pname">-</span><button type="button" id="bb-pk-btn" class="sb" style="margin-left:auto;display:none">PICKS</button></div><img id="bb-img" alt="">
+      <div id="bb-picks"><div id="bb-pk-head"><b>YOUR PICKS</b><span id="bb-pk-sub"></span><span class="r">click a picture: <i class="y">&#10003; KEEP</i> &rarr; <i class="n">&#10007; DROP</i> &rarr; unset &middot; double-click to enlarge</span></div>
+        <div id="bb-pk-grid"></div>
+        <div id="bb-pk-foot"><span id="bb-pk-count"></span><button type="button" class="sb" id="bb-pk-all">KEEP THE REST</button><button type="button" class="sb" id="bb-pk-send">SEND TO CLAUDE</button></div></div></div>
       <div class="sx" id="bb-recent" style="padding:0"><div id="bb-strip"></div></div></div>
     <div id="bb-right">
       <div class="sx" id="bb-inf"><h4><b>INFLUENCES</b> · from your Midjourney art<span class="r" id="bb-src"></span></h4><div id="bb-ilist"></div></div>
       <div class="sx" id="bb-comm"><h4><b>COMM</b> · you &harr; Claude about BACKDROP</h4><div id="bb-msgs" class="bb-log2"></div>
+        <div id="bb-wait"></div>
         <div id="bb-in" style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;margin-top:8px;border-top:1px solid #0f3b46;padding-top:8px">
           <textarea id="bb-msg" style="resize:none;height:54px;background:#020b10;border:1px solid #0f3b46;color:#e8fbff;font:inherit;font-size:10.5px;padding:6px 8px;outline:0" placeholder="notes on the backdrops: &quot;wildstyle is too loud&quot;, &quot;more like my May 2025 faces&quot;... (Ctrl+Enter sends)"></textarea>
           <button type="button" id="bb-send" class="sb" style="--hb:#ffb347;background:#ffb347;color:#011">SEND</button></div></div>
@@ -1494,7 +1519,8 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
   </div>
   <div id="lab-body">
     <div class="card oled" id="lab-pipe"><div class="ob-head"><b>PIPELINE</b><span id="lab-stage"></span></div><div id="lab-steps"></div></div>
-    <div class="card oled" id="lab-rounds"><div class="ob-head"><b>CASE ROUNDS</b><span>click a sheet to enlarge</span></div><div id="lab-rlist"></div></div>
+    <div class="card oled" id="lab-rounds"><div class="ob-head"><b>BUILDER &middot; LIVE</b><span id="ll-mode">IDLE</span></div>
+      <img id="ll-img" alt=""><div id="ll-cap"></div><div id="ll-now"><b id="ll-nt">-</b><span id="ll-nd"></span></div></div>
     <div class="card oled" id="lab-art"><div class="ob-head"><b>ART BACKGROUNDS</b><span>res/backdrops</span></div><div class="lab-grid" id="lab-artg"></div>
       <div class="ob-head" style="margin-top:8px"><b>CASE TEXTURES</b><span>res/cases</span></div><div class="lab-grid tex" id="lab-texg"></div></div>
     <div class="card oled" id="lab-themes"><div class="ob-head"><b>THEMES</b><span id="lab-tn"></span></div><div id="lab-tlist"></div></div>
@@ -3180,7 +3206,7 @@ async function scanLab() {
   document.getElementById('lab-stage').textContent = d.stage || '';
   document.getElementById('lab-steps').innerHTML = (d.steps || []).map(st => `<div class="${E(st.state)}"><b>${E(st.name)}</b>${E(st.note || '')}</div>`).join('');
   const bust = '?v=' + (d.updated || 0);
-  document.getElementById('lab-rlist').innerHTML = (d.rounds || []).slice().reverse().map(r =>
+  const rlEl = document.getElementById('lab-rlist'); if (rlEl) rlEl.innerHTML = (d.rounds || []).slice().reverse().map(r =>
     `<div class="rd"><h5>ROUND ${E(r.n)} · ${E(r.title)}</h5><p>${E(r.notes || '')}</p>${r.sheet ? `<img src="${E(r.sheet)}${bust}" alt="">` : ''}</div>`).join('');
   document.getElementById('lab-artg').innerHTML = (d.art || []).map(a => `<figure><img src="/res/backdrops/${E(a)}.jpg${bust}" alt=""><figcaption>${E(a.toUpperCase())}</figcaption></figure>`).join('');
   document.getElementById('lab-texg').innerHTML = (d.textures || []).map(a => `<figure><img src="/res/cases/${E(a)}.png${bust}" alt=""><figcaption>${E(a.toUpperCase().replace('_', ' '))}</figcaption></figure>`).join('');
@@ -3200,7 +3226,7 @@ document.querySelectorAll('#lab-tabs button').forEach(b => b.onclick = () => {
   const v = b.dataset.v;
   document.getElementById('lab-body').classList.toggle('off', v !== 'over');
   ['asm', 'cmp', 'gal', 'bld'].forEach(k => document.getElementById('lab-' + k).classList.toggle('on', v === k));
-  if (v === 'bld') bbTick();
+  if (v === 'bld') { bbTick(); pkTick(); }
   if (v === 'asm') Asm.start(); else Asm.stop();
 });
 // ASSEMBLY: a case goes together on a canvas, step by step, with the same textures BACKDROP draws in Rack
@@ -3380,6 +3406,12 @@ async function bbTick() {
   const img = document.getElementById('bb-img');
   if (cur && img.dataset.src !== cur.src + b.updated) { img.dataset.src = cur.src + b.updated; img.src = cur.src + '?v=' + (b.updated || 0); document.getElementById('bb-pname').textContent = cur.name || cur.src; }
   document.querySelectorAll('#bb-strip img').forEach(im => im.classList.toggle('on', cur && im.getAttribute('src').startsWith(cur.src)));
+  // OVERVIEW mirror: BUILDER · LIVE card
+  const ll = document.getElementById('ll-img');
+  if (ll) { document.getElementById('lab-rounds').dataset.mode = mode; document.getElementById('ll-mode').textContent = document.getElementById('bb-word').textContent + (b.updated ? ' · ' + new Date(b.updated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+    if (cur && ll.dataset.src !== cur.src + b.updated) { ll.dataset.src = cur.src + b.updated; ll.src = cur.src + '?v=' + (b.updated || 0); }
+    document.getElementById('ll-cap').textContent = cur ? (cur.name || cur.src) : 'nothing to preview yet';
+    document.getElementById('ll-nt').textContent = n.title || ((fresh && b.task) || 'no backdrop work running'); document.getElementById('ll-nd').textContent = n.detail || ''; }
   // influences
   const L = inf.influences || [], ik = JSON.stringify(L);
   document.getElementById('bb-src').textContent = L.length ? L.length + ' themes' : '';
@@ -3388,16 +3420,56 @@ async function bbTick() {
     document.getElementById('bb-ilist').innerHTML = L.map(x => `<div class="bbi ${escS(x.state || 'idea')}" data-art="${escS(x.art || '')}" title="${escS(x.from || '')}"><i></i><b>${escS(x.name)}</b><span>${lbl[x.state] || escS(x.state || '')}</span>
       <div class="sw">${(x.palette || []).map(c => `<u style="background:${escS(c)}"></u>`).join('')}</div><em>${escS(x.motifs || '')}</em></div>`).join(''); }
   // COMM: your notes + Claude's replies
-  const all = [...BB.inbox.map(m => ({ t: m.t, who: 'you', text: m.text })), ...(b.messages || []).map(m => ({ t: m.t, who: 'claude', text: m.text }))].sort((p, q) => p.t - q.t).slice(-60);
-  const ml = document.getElementById('bb-msgs'), mk = all.length + ':' + (all.length ? all[all.length - 1].t : 0);
+  // Claude marks what it has read with b.read = the highest inbox id it has seen ("check BACKDROP" in the chat)
+  const rd = +b.read || 0, unread = BB.inbox.filter(m => (+m.id || 0) > rd);
+  const all = [...BB.inbox.map(m => ({ t: m.t, who: 'you', text: m.text, id: +m.id || 0 })), ...(b.messages || []).map(m => ({ t: m.t, who: 'claude', text: m.text }))].sort((p, q) => p.t - q.t).slice(-60);
+  const ml = document.getElementById('bb-msgs'), mk = all.length + ':' + (all.length ? all[all.length - 1].t : 0) + ':' + rd;
   if (ml.dataset.k !== mk) { ml.dataset.k = mk;
-    ml.innerHTML = all.map(m => `<div class="sm ${m.who}"><small><b>${m.who === 'you' ? 'YOU' : 'CLAUDE'}</b> · ${new Date(m.t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</small>${escS(m.text)}</div>`).join('');
+    ml.innerHTML = all.map(m => `<div class="sm ${m.who}"><small><b>${m.who === 'you' ? 'YOU' : 'CLAUDE'}</b> · ${new Date(m.t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</small>${escS(m.text)}${m.who === 'you' ? (m.id <= rd ? '<span class="st ok">&#10003; READ BY CLAUDE</span>' : '<span class="st">SAVED &middot; WAITING FOR CLAUDE</span>') : ''}</div>`).join('');
     ml.scrollTop = ml.scrollHeight; }
+  const bw = document.getElementById('bb-wait');
+  bw.classList.toggle('on', unread.length > 0);
+  bw.innerHTML = unread.length ? `<b>${unread.length} note${unread.length > 1 ? 's' : ''} waiting.</b> Claude can't see this board on its own: in the Claude chat, say <b>"check BACKDROP"</b>.` : '';
   try { TabLight.busy('lab', mode !== 'idle'); } catch (e) {}
 }
 document.getElementById('bb-strip').addEventListener('click', e => { const im = e.target.closest('img'); if (im) { BB.sel = im.dataset.i; bbTick(); } });
 document.getElementById('bb-img').onclick = e => labZoom(e.target.src);
 document.getElementById('bb-ilist').addEventListener('click', e => { const r = e.target.closest('[data-art]'); if (r && r.dataset.art) { const b = document.getElementById('bb-img'); b.dataset.src = ''; b.src = '/res/backdrops/' + r.dataset.art + '.jpg'; document.getElementById('bb-pname').textContent = r.querySelector('b').textContent; } });
+// PICKS: tools/backdrop_picks.json {round, note, picks:[{n,id,k,w,h,date,prompt}]} -> Nick marks keep/drop -> note to Claude
+const PK = { d: null, st: {}, key: '' };
+function pkLoad() { try { PK.st = JSON.parse(localStorage.getItem('bb-picks-' + PK.key) || '{}'); } catch (e) { PK.st = {}; } }
+function pkSave() { try { localStorage.setItem('bb-picks-' + PK.key, JSON.stringify(PK.st)); } catch (e) {} }
+function pkRender() {
+  const L = (PK.d && PK.d.picks) || [];
+  document.getElementById('bb-pk-grid').innerHTML = L.map(p => `<div class="pk ${PK.st[p.n] || ''}" data-n="${p.n}" title="${escS(p.prompt)} (${escS(p.date)})"><img src="https://cdn.midjourney.com/${escS(p.id)}/0_${p.k | 0}_384_N.webp" alt=""><b>${p.n}</b>${p.w < 1000 && p.h < 1000 ? '<u>LOW-RES</u>' : ''}<em>${escS(p.prompt)}</em></div>`).join('');
+  pkCount();
+}
+function pkCount() {
+  const L = (PK.d && PK.d.picks) || [], y = L.filter(p => PK.st[p.n] === 'y').length, n = L.filter(p => PK.st[p.n] === 'n').length;
+  document.getElementById('bb-pk-count').innerHTML = `<i class="y">${y} keep</i> &middot; <i class="n">${n} drop</i> &middot; ${L.length - y - n} unset of ${L.length}`;
+}
+async function pkTick() {
+  let d = null; try { const t = await getText('/tools/backdrop_picks.json'); d = t ? JSON.parse(t.replace(/^\uFEFF/, '')) : null; } catch (e) {}
+  const btn = document.getElementById('bb-pk-btn'), has = d && (d.picks || []).length;
+  btn.style.display = has ? '' : 'none'; if (!has) { document.getElementById('bb-prev').classList.remove('picks'); return; }
+  const key = (d.round || '') + ':' + d.picks.length;
+  btn.textContent = 'PICKS (' + d.picks.length + ')'; btn.classList.toggle('want', !d.sent && !document.getElementById('bb-prev').classList.contains('picks'));
+  if (key !== PK.key) { PK.key = key; PK.d = d; pkLoad(); document.getElementById('bb-pk-sub').textContent = d.note || ''; pkRender(); }
+}
+document.getElementById('bb-pk-btn').onclick = () => { document.getElementById('bb-prev').classList.toggle('picks'); pkTick(); };
+document.getElementById('bb-pk-grid').addEventListener('click', e => { const c = e.target.closest('.pk'); if (!c) return;
+  const n = c.dataset.n, nx = { '': 'y', y: 'n', n: '' }[PK.st[n] || '']; if (nx) PK.st[n] = nx; else delete PK.st[n];
+  c.className = 'pk ' + (PK.st[n] || ''); pkSave(); pkCount(); });
+document.getElementById('bb-pk-grid').addEventListener('dblclick', e => { const c = e.target.closest('.pk'); if (!c) return;
+  const p = PK.d.picks.find(x => x.n == c.dataset.n); labZoom(`https://cdn.midjourney.com/${p.id}/0_${p.k | 0}.png`); });
+document.getElementById('bb-pk-all').onclick = () => { (PK.d.picks || []).forEach(p => { if (!PK.st[p.n]) PK.st[p.n] = 'y'; }); pkSave(); pkRender(); };
+document.getElementById('bb-pk-send').onclick = async () => {
+  const L = PK.d.picks || [], y = L.filter(p => PK.st[p.n] === 'y').map(p => p.n), n = L.filter(p => PK.st[p.n] === 'n').map(p => p.n), u = L.filter(p => !PK.st[p.n]).map(p => p.n);
+  const text = `PICKS ${PK.d.round || ''}: KEEP ${y.join(', ') || 'none'} | DROP ${n.join(', ') || 'none'}${u.length ? ' | UNSET ' + u.join(', ') : ''}`;
+  const ta = document.getElementById('bb-msg'), old = ta.value; ta.value = text; await bbSend(); if (ta.value === '') ta.value = old;
+  document.getElementById('bb-prev').classList.remove('picks');
+};
+setInterval(() => { if (document.getElementById('lab-bld').classList.contains('on')) pkTick(); }, 4000);
 async function bbSend() {
   const ta = document.getElementById('bb-msg'), text = ta.value.trim(); if (!text) return;
   let r; try { r = await fetch('http://127.0.0.1:8767/backdrop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }).then(async x => ({ status: x.status, j: await x.json().catch(() => ({})) })); } catch (e) { r = { status: 0, j: {} }; }
@@ -3406,7 +3478,9 @@ async function bbSend() {
 }
 document.getElementById('bb-send').onclick = bbSend;
 document.getElementById('bb-msg').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); bbSend(); } });
-setInterval(() => { if (document.getElementById('lab-bld').classList.contains('on')) bbTick(); }, 3000);
+setInterval(() => { const lb = document.getElementById('lab-body'); if (document.getElementById('lab-bld').classList.contains('on') || (lb.offsetParent !== null && !lb.classList.contains('off'))) bbTick(); }, 3000);
+document.getElementById('ll-img').onclick = () => document.querySelector('#lab-tabs button[data-v="bld"]').click();
+setTimeout(() => { try { bbTick(); } catch (e) {} }, 800);
 // keep the LAB tab light busy while Claude works on BACKDROP, even when the tab is closed
 setInterval(async () => { if (document.getElementById('lab-bld').classList.contains('on')) return;
   try { const t = await getText('/tools/backdrop_build.json'); const b = t ? JSON.parse(t.replace(/^﻿/, '')) : {};

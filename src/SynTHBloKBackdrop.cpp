@@ -35,6 +35,7 @@ struct CaseStyle {
     int ends;      // Ends
     int extras;    // X_ flags
     int sideIdx;   // side panels in another material (kSideMat index; 0: the case's own)
+    int sideFinish;   // species woods: 0 OILED, 1 SATIN, 2 GLOSS (aggregate init leaves it 0)
 };
 static NVGcolor rgb(int r, int g, int b) { return nvgRGB(r, g, b); }
 static std::vector<CaseStyle> builtInCases() {
@@ -108,19 +109,37 @@ static std::vector<CaseStyle> builtInCases() {
     };
 }
 // SIDE PANELS: put any side panels on any case (shape, material, width, open frame); AUTO keeps the case's own
-struct SideMat { const char* name; int material; NVGcolor base; };
+struct SideMat { const char* name; int material; NVGcolor base; const char* tex; };   // tex: a full-colour species wood (res/cases/wood_*.png)
 static const SideMat kSideMat[] = {
     {"AUTO", M_NONE, {}}, {"WALNUT", M_WOOD, {}}, {"OAK", M_WOOD, {}}, {"CHERRY", M_WOOD, {}}, {"EBONY", M_WOOD, {}}, {"ASH", M_WOOD, {}},
     {"BIRCH PLY", M_PLY, {}}, {"BLACK PLY", M_PLY, {}}, {"BLACK STEEL", M_POWDER, {}}, {"BRUSHED", M_BRUSHED, {}}, {"CARBON", M_CARBON, {}},
     {"ORANGE PRINT", M_PRINTED, {}}, {"WHITE", M_POWDER, {}},
     {"NEON PINK", M_ACRYLIC, {}}, {"NEON CYAN", M_ACRYLIC, {}}, {"ACID LIME", M_PRINTED, {}}, {"UV VIOLET", M_PRINTED, {}}, {"BLACKLIGHT", M_ANODIZED, {}},
     {"FORGE RUST", M_POWDER, {}}, {"GOLD", M_BRUSHED, {}},
+    // species woods (tools/make_wood_textures.py), each with its own grain and figure; new ones go at the END
+    {"BLACK WALNUT", M_WOOD, {}, "wood_black_walnut"}, {"CLARO WALNUT", M_WOOD, {}, "wood_claro_walnut"},
+    {"QUARTERSAWN OAK", M_WOOD, {}, "wood_white_oak_qs"}, {"AMERICAN CHERRY", M_WOOD, {}, "wood_cherry"},
+    {"HARD MAPLE", M_WOOD, {}, "wood_hard_maple"}, {"BALTIC BIRCH PLY", M_PLY, {}, "wood_birch_ply"},
+    {"CURLY MAPLE", M_WOOD, {}, "wood_curly_maple"}, {"QUILTED MAPLE", M_WOOD, {}, "wood_quilted_maple"},
+    {"BIRDSEYE MAPLE", M_WOOD, {}, "wood_birdseye_maple"}, {"SPALTED MAPLE", M_WOOD, {}, "wood_spalted_maple"},
+    {"WATERFALL BUBINGA", M_WOOD, {}, "wood_waterfall_bubinga"}, {"RIBBON SAPELE", M_WOOD, {}, "wood_ribbon_sapele"},
+    {"ZEBRAWOOD", M_WOOD, {}, "wood_zebrawood"}, {"PADAUK", M_WOOD, {}, "wood_padauk"}, {"PURPLEHEART", M_WOOD, {}, "wood_purpleheart"},
+    {"COCOBOLO", M_WOOD, {}, "wood_cocobolo"}, {"WENGE", M_WOOD, {}, "wood_wenge"}, {"MACASSAR EBONY", M_WOOD, {}, "wood_macassar_ebony"},
+    {"ZIRICOTE", M_WOOD, {}, "wood_ziricote"}, {"BOCOTE", M_WOOD, {}, "wood_bocote"}, {"KOA", M_WOOD, {}, "wood_koa"},
+    {"LEOPARDWOOD", M_WOOD, {}, "wood_leopardwood"}, {"AMBOYNA BURL", M_WOOD, {}, "wood_amboyna_burl"},
+    {"SHOU SUGI BAN", M_WOOD, {}, "wood_shou_sugi_ban"},
 };
+static const char* const kSideFinish[] = {"OILED", "SATIN", "GLOSS"};
 static const int kSideMatN = (int) (sizeof(kSideMat) / sizeof(kSideMat[0]));
 static NVGcolor sideColor(int i) {
     static const int c[][3] = {{0, 0, 0}, {92, 58, 34}, {168, 124, 78}, {136, 60, 34}, {44, 30, 24}, {196, 170, 130}, {196, 162, 114}, {38, 33, 30},
                                {26, 26, 28}, {170, 172, 176}, {24, 24, 26}, {230, 110, 20}, {220, 218, 210},
-                               {255, 47, 168}, {25, 227, 255}, {182, 255, 42}, {138, 60, 255}, {70, 24, 130}, {150, 52, 14}, {196, 160, 70}};
+                               {255, 47, 168}, {25, 227, 255}, {182, 255, 42}, {138, 60, 255}, {70, 24, 130}, {150, 52, 14}, {196, 160, 70},
+                               // species woods: each texture's average (the edge, the depth, the joints)
+                               {81, 54, 36}, {90, 62, 35}, {189, 152, 100}, {158, 77, 40}, {231, 208, 166}, {225, 199, 155}, {221, 205, 165}, {219, 204, 166},
+                               {231, 209, 166}, {179, 161, 128}, {140, 65, 43}, {124, 61, 32}, {179, 156, 115}, {200, 57, 23}, {112, 39, 101}, {155, 71, 24},
+                               {55, 40, 29}, {41, 28, 16}, {56, 43, 30}, {137, 103, 52}, {160, 106, 48}, {163, 96, 55}, {176, 97, 40}, {37, 32, 27}};
+    static_assert(sizeof(c) / sizeof(c[0]) == sizeof(kSideMat) / sizeof(kSideMat[0]), "one colour per side material");
     i = clamp(i, 0, kSideMatN - 1);
     return nvgRGB(c[i][0], c[i][1], c[i][2]);
 }
@@ -224,6 +243,7 @@ struct SynTHBloKBackdrop : Module {
     int themeIdx = 0;  // the theme last picked (-1: changed by hand since)
     float depthMm = 65.f;   // the case depth, mm, as real builds come
     int sideShape = 0, sideMat = 0, sideWidth = 0, openMode = 0;   // side panels (0: the case's own)
+    int sideFinish = 0;   // species woods: OILED / SATIN / GLOSS
     bool shadow = true, rails = true;
     bool showTitle = false;   // the name above the case: optional, off unless turned on (NAME page or menu)
     std::string title;   // empty: the patch's file name
@@ -269,6 +289,7 @@ struct SynTHBloKBackdrop : Module {
         json_object_set_new(r, "infoMode", json_integer(infoMode));
         json_object_set_new(r, "sideMat", json_integer(sideMat));
         json_object_set_new(r, "sideWidth", json_integer(sideWidth));
+        json_object_set_new(r, "sideFinish", json_integer(sideFinish));
         json_object_set_new(r, "openMode", json_integer(openMode));
         json_object_set_new(r, "shadow", json_boolean(shadow));
         json_object_set_new(r, "rails", json_boolean(rails));
@@ -300,6 +321,7 @@ struct SynTHBloKBackdrop : Module {
         if (json_t* v = json_object_get(r, "sideShape")) sideShape = clamp((int) json_integer_value(v), 0, kSideShapeN - 1);
         if (json_t* v = json_object_get(r, "sideMat")) sideMat = clamp((int) json_integer_value(v), 0, kSideMatN - 1);
         if (json_t* v = json_object_get(r, "sideWidth")) sideWidth = clamp((int) json_integer_value(v), 0, 4);
+        if (json_t* v = json_object_get(r, "sideFinish")) sideFinish = clamp((int) json_integer_value(v), 0, 2);
         if (json_t* v = json_object_get(r, "openMode")) openMode = clamp((int) json_integer_value(v), 0, 2);
         if (json_t* v = json_object_get(r, "shadow")) shadow = json_boolean_value(v);
         if (json_t* v = json_object_get(r, "rails")) rails = json_boolean_value(v);
@@ -678,6 +700,21 @@ struct BackdropLayer : widget::TransparentWidget {
     }
     static NVGcolor cheekBase(const CaseStyle& cs) { return cs.sideIdx > 0 ? sideColor(cs.sideIdx) : cs.base; }
     static int cheekMat(const CaseStyle& cs) { return cs.sideIdx > 0 ? kSideMat[clamp(cs.sideIdx, 0, kSideMatN - 1)].material : cs.material; }
+    static const char* cheekTex(const CaseStyle& cs) { return cs.sideIdx > 0 ? kSideMat[clamp(cs.sideIdx, 0, kSideMatN - 1)].tex : NULL; }
+    // over the current path: a species wood face, lit from above, then its finish (oil: none; satin: soft sheen; gloss: a
+    // bright vertical highlight and a clear-coat edge)
+    void woodFace(NVGcontext* vg, const CaseStyle& cs, const char* t, float x, float y, float w, float h) {
+        int img = tex(vg, t);
+        if (img >= 0) { nvgFillPaint(vg, nvgImagePattern(vg, x, y, 260.f, 260.f, (float) M_PI * 0.5f, img, 1.f)); nvgFill(vg); }
+        nvgFillPaint(vg, nvgLinearGradient(vg, 0, y, 0, y + h, nvgRGBA(255, 255, 255, 18), nvgRGBA(0, 0, 0, 70))); nvgFill(vg);
+        if (cs.sideFinish >= 1) {
+            float k = cs.sideFinish == 2 ? 1.f : 0.45f, cx = x + w * 0.38f, bw = std::max(2.f, std::fabs(w) * 0.22f);
+            nvgFillPaint(vg, nvgLinearGradient(vg, cx - bw, 0, cx, 0, nvgRGBA(255, 255, 255, 0), nvgRGBA(255, 255, 255, (int) (60 * k)))); nvgFill(vg);
+            nvgFillPaint(vg, nvgLinearGradient(vg, cx, 0, cx + bw, 0, nvgRGBA(255, 255, 255, (int) (60 * k)), nvgRGBA(255, 255, 255, 0))); nvgFill(vg);
+            nvgFillPaint(vg, nvgLinearGradient(vg, 0, y, 0, y + h * 0.18f, nvgRGBA(255, 255, 255, (int) (40 * k)), nvgRGBA(255, 255, 255, 0))); nvgFill(vg);
+            if (cs.sideFinish == 2) { nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 46)); nvgStrokeWidth(vg, 0.7f); nvgStroke(vg); }
+        }
+    }
     static const char* matTex(int mat) {
         switch (mat) {
             case M_WOOD: case M_PLY: return "wood";
@@ -700,7 +737,8 @@ struct BackdropLayer : widget::TransparentWidget {
             nvgBeginPath(vg); nvgRoundedRect(vg, x, y, w, h, rad);
             nvgFillPaint(vg, nvgLinearGradient(vg, x, y, x, y + h, nvgLerpRGBA(b, nvgRGB(255, 255, 255), 0.08f), nvgLerpRGBA(b, nvgRGB(0, 0, 0), 0.15f)));
             nvgFill(vg);
-            if (const char* t = matTex(mat)) texRect(vg, cx, y, s, h, 0.f, t, 0.85f, true, t[0] == 'w' ? 240.f : 180.f);
+            if (const char* wt = cheekTex(cs)) { nvgBeginPath(vg); nvgRoundedRect(vg, x, y, w, h, rad); woodFace(vg, cs, wt, cx, y, s, h); }
+            else if (const char* t = matTex(mat)) texRect(vg, cx, y, s, h, 0.f, t, 0.85f, true, t[0] == 'w' ? 240.f : 180.f);
             if (mat == M_PLY) {
                 float e = std::min(5.f, s * 0.25f), ex = side ? cx + s - e : cx;
                 nvgBeginPath(vg); nvgRect(vg, ex, y, e, h);
@@ -919,8 +957,10 @@ struct BackdropLayer : widget::TransparentWidget {
             cheekPath(vg, cs, xin, in.pos.y, in.size.y, dir, rows, true);
             nvgFillPaint(vg, nvgLinearGradient(vg, 0, in.pos.y, 0, in.pos.y + in.size.y, nvgLerpRGBA(cheekBase(cs), nvgRGB(255, 255, 255), 0.08f), nvgLerpRGBA(cheekBase(cs), nvgRGB(0, 0, 0), 0.15f)));
             nvgFill(vg);
-            const char* t = matTex(cheekMat(cs));
+            const char* wt = cheekTex(cs);
+            const char* t = wt ? NULL : matTex(cheekMat(cs));
             int img = t ? tex(vg, t) : -1;
+            if (wt) woodFace(vg, cs, wt, xin, in.pos.y, dir * cs.side, in.size.y);
             if (img >= 0) {
                 nvgFillPaint(vg, nvgImagePattern(vg, xin, in.pos.y, 240.f, 240.f, (float) M_PI * 0.5f, img, 0.85f));
                 nvgFill(vg);
@@ -1273,6 +1313,7 @@ struct BackdropLayer : widget::TransparentWidget {
             if (m->openMode == 1) cs.extras |= X_OPEN;
             if (m->openMode == 2) cs.extras &= ~X_OPEN;
             cs.sideIdx = m->sideMat;
+            cs.sideFinish = m->sideFinish;
             if (m->infoMode == 1) cs.extras |= X_1U;
             if (m->infoMode == 2) cs.extras &= ~X_1U;
         }
@@ -1600,6 +1641,7 @@ struct BackdropOled : widget::OpaqueWidget {
             r.push_back({"SIDES", kSideShape[clamp(m->sideShape, 0, kSideShapeN - 1)], [=](int d) { m->sideShape = wrap(m->sideShape, d, kSideShapeN); hand(); }, false});
             r.push_back({"SIDE MATERIAL", kSideMat[clamp(m->sideMat, 0, kSideMatN - 1)].name, [=](int d) { m->sideMat = wrap(m->sideMat, d, kSideMatN); hand(); }, false});
             r.push_back({"SIDE WIDTH", kSideWidth[clamp(m->sideWidth, 0, 4)], [=](int d) { m->sideWidth = wrap(m->sideWidth, d, 5); hand(); }, false});
+            r.push_back({"WOOD FINISH", kSideFinish[clamp(m->sideFinish, 0, 2)], [=](int d) { m->sideFinish = wrap(m->sideFinish, d, 3); }, false});
             r.push_back({"OPEN FRAME", kOpenName[clamp(m->openMode, 0, 2)], [=](int d) { m->openMode = wrap(m->openMode, d, 3); hand(); }, false});
             r.push_back({"INFO STRIP", kOpenName[clamp(m->infoMode, 0, 2)], [=](int d) { m->infoMode = wrap(m->infoMode, d, 3); }, false});
             r.push_back({"BG MATCHES CASE", m->look == LOOK_CASE_GRADIENT ? "ON" : "OFF", [=](int) { m->look = m->look == LOOK_CASE_GRADIENT ? LOOK_GRADIENT : LOOK_CASE_GRADIENT; hand(); }, true});
@@ -1955,8 +1997,13 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         menu->addChild(createIndexSubmenuItem("Side panels", std::vector<std::string>(kSideShape, kSideShape + kSideShapeN),
             [=]() { return (size_t) m->sideShape; }, [=](size_t i) { m->sideShape = (int) i; m->themeIdx = -1; }));
         menu->addChild(createSubmenuItem("Side material", kSideMat[clamp(m->sideMat, 0, kSideMatN - 1)].name, [=](Menu* sub) {
-            for (int i = 0; i < kSideMatN; i++) sub->addChild(createCheckMenuItem(kSideMat[i].name, "", [=]() { return m->sideMat == i; }, [=]() { m->sideMat = i; m->themeIdx = -1; }));
+            for (int i = 0; i < kSideMatN; i++) {
+                if (i && kSideMat[i].tex && !kSideMat[i - 1].tex) { sub->addChild(new MenuSeparator); sub->addChild(createMenuLabel("Species woods")); }
+                sub->addChild(createCheckMenuItem(kSideMat[i].name, "", [=]() { return m->sideMat == i; }, [=]() { m->sideMat = i; m->themeIdx = -1; }));
+            }
         }));
+        menu->addChild(createIndexSubmenuItem("Wood finish (species woods)", std::vector<std::string>(kSideFinish, kSideFinish + 3),
+            [=]() { return (size_t) m->sideFinish; }, [=](size_t i) { m->sideFinish = (int) i; }));
         menu->addChild(createIndexSubmenuItem("Side width", std::vector<std::string>(kSideWidth, kSideWidth + 5),
             [=]() { return (size_t) m->sideWidth; }, [=](size_t i) { m->sideWidth = (int) i; }));
         menu->addChild(createIndexSubmenuItem("Info strip (readouts + level meter)", std::vector<std::string>(kOpenName, kOpenName + 3),
