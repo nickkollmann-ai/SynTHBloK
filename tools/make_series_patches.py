@@ -25,6 +25,7 @@ tools/patch_parts.json (local only)."""
 import copy, json, math, os, random, subprocess, sys
 from make_patches import BASE, OUT, RACK_PATCHES, save_vcv, setp, HERE
 import patch_genres as PG
+from convert_slugs import SINGLES, RENAMED   # the split: which plugin each SynTHBloK module now lives in
 import shutil
 
 PLUGINS = os.path.join(os.environ['LOCALAPPDATA'], 'Rack2', 'plugins-win-x64')
@@ -51,7 +52,8 @@ def part(plugin, model):
         json.dump(parts, open(PARTS, 'w', encoding='utf-8'))
     return parts[k]
 
-DONORS = {m['model']: m for m in BASE['modules'] if m['plugin'] == 'SynTHBloK'}
+# your saved module states (patches_base.json), under today's module slugs (the base predates the rename)
+DONORS = {RENAMED.get(m['model'], m['model']): m for m in BASE['modules'] if m['plugin'] == 'SynTHBloK'}
 COLORS = ['#ff9300', '#ffb437', '#00b56e', '#3695ef', '#9437ff', '#ff2b2b', '#ffe14a', '#00e5ff', '#ff4fd8']
 ROW_HP = 190
 
@@ -60,13 +62,15 @@ class Patch:
         self.rng, self.modules, self.cables, self.used = rng, [], [], set()
         self.x, self.row, self.names = 0, 0, []
     def add(self, plugin, model, params=None, data=None, newrow=False):
+        series = plugin == 'SynTHBloK'
+        if series: plugin = SINGLES.get(model, 'SynTHBloK')   # a single lives in its own plugin since the split
         info = part(plugin, model)
         if not info: return None
         if newrow and self.x: self.x, self.row = 0, self.row + 1
         if self.x + info['hp'] > ROW_HP: self.x, self.row = 0, self.row + 1
         m = {'id': self.rng.randrange(1 << 50, 1 << 52), 'plugin': plugin, 'model': model, 'version': info['version'],
              'params': [], 'pos': [self.x, self.row]}
-        d = DONORS.get(model) if plugin == 'SynTHBloK' else None
+        d = DONORS.get(model) if series else None
         if d:   # your saved state of this module
             m['params'] = copy.deepcopy(d.get('params', []))
             if 'data' in d: m['data'] = copy.deepcopy(d['data'])
