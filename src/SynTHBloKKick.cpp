@@ -192,8 +192,8 @@ struct SynTHBloKKickWidget : ModuleWidget {
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKKick.svg")));
         using namespace rack::componentlibrary;
 
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(KKL::PANEL_W - 3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(KKL::PANEL_W - 3.5f, 3.5f))));
         addChild(createLightCentered<MicroLight<RedLight>>(mm2px(Vec(KKL::PANEL_W - 9.f, 4.6f)), module, SynTHBloKKick::TRIG_LIGHT));
 
         for (int r = 0; r < 4; r++)

@@ -761,8 +761,8 @@ struct SynTHBloKJamWidget : ModuleWidget {
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKJam.svg")));
         using namespace rack::componentlibrary;
         const float PW = 127.0f;
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(PW - 3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(PW - 3.5f, 3.5f))));
 
         auto label = [&](float cx, float cy, const char* text) {
             JLabel* l = createWidget<JLabel>(mm2px(Vec(cx - 12.f, cy - 2.f)));

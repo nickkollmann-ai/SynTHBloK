@@ -775,10 +775,10 @@ struct SynTHBloKMix8Widget : ModuleWidget {
         using namespace rack::componentlibrary;
         auto mm = [](float x, float y) { return mm2px(Vec(x, y)); };
 
-        addChild(createWidgetCentered<ScrewSilver>(mm(3.5f, 3.5f)));
-        addChild(createWidgetCentered<ScrewSilver>(mm(M8L::PANEL_W - 3.5f, 3.5f)));
-        addChild(createWidgetCentered<ScrewSilver>(mm(3.5f, 125.0f)));
-        addChild(createWidgetCentered<ScrewSilver>(mm(M8L::PANEL_W - 3.5f, 125.0f)));
+        addChild(createWidgetCentered<SocketScrew>(mm(3.5f, 3.5f)));
+        addChild(createWidgetCentered<SocketScrew>(mm(M8L::PANEL_W - 3.5f, 3.5f)));
+        addChild(createWidgetCentered<SocketScrew>(mm(3.5f, 125.0f)));
+        addChild(createWidgetCentered<SocketScrew>(mm(M8L::PANEL_W - 3.5f, 125.0f)));
 
         M8PanelText* t = createWidget<M8PanelText>(Vec(0.f, 0.f));
         t->box.size = mm(M8L::PANEL_W, 128.5f);

@@ -978,10 +978,10 @@ struct SynTHBloKStereoWidget : ModuleWidget {
 
         using namespace rack::componentlibrary;
 
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(57.46f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 125.0f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(57.46f, 125.0f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(57.46f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.0f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(57.46f, 125.0f))));
 
 addParam(createParamCentered<Trimpot>(mm2px(Vec(47.f, 99.0f)), module, SynTHBloKStereo::MIX_PARAM));
 addInput(createInputCentered<BlackJack>(mm2px(Vec(9.004f, 18.770f)), module, SynTHBloKStereo::MAIN_IN_INPUT));

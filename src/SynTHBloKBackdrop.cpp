@@ -725,14 +725,7 @@ struct BackdropLayer : widget::TransparentWidget {
             texRect(vg, x, y, w, h, rad, "brushed", 0.9f, false, 300.f);
             return;
         }
-        if (cs.material == M_CARBON) {   // the twill weave under a glossy clear coat
-            base(x, y, w, h, rad);
-            texRect(vg, x, y, w, h, rad, "carbon", 0.95f, false, 128.f);
-            nvgBeginPath(vg); nvgRoundedRect(vg, x, y, w, h, rad);
-            nvgFillPaint(vg, nvgLinearGradient(vg, x, y, x + w * 0.35f, y + h, nvgRGBA(255, 255, 255, 28), nvgRGBA(255, 255, 255, 0)));
-            nvgFill(vg);
-            return;
-        }
+        // carbon: the original fine woven check (drawFrameOld) - the user preferred it to the big twill texture
         if (cs.material == M_TOLEX) {
             base(x, y, w, h, rad); texRect(vg, x, y, w, h, rad, "tolex", 0.9f, false, 160.f);
             nvgBeginPath(vg); nvgRect(vg, x + 1.5f, y + 1.5f, w - 3.f, h - 3.f);   // the aluminium edge trim
@@ -1804,8 +1797,8 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         nb->box.size = mm2px(Vec(7.6f, 7.0f));   // nearly square
         nb->box.pos = Vec(box.size.x * 0.5f - nb->box.size.x * 0.5f, mm2px(97.3f));
         addChild(nb);
-        addChild(createWidget<ThemedScrew>(Vec(RACK_GRID_WIDTH * 0.5f, 0)));
-        addChild(createWidget<ThemedScrew>(Vec(box.size.x - RACK_GRID_WIDTH * 1.5f, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
+        addChild(createWidget<SocketScrew>(Vec(RACK_GRID_WIDTH * 0.5f, 0)));
+        addChild(createWidget<SocketScrew>(Vec(box.size.x - RACK_GRID_WIDTH * 1.5f, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
     }
     // CASE SNAPSHOTS (a dev aid): if Rack's user folder holds SynTHBloK/snap_cases.txt when this BACKDROP opens, it
     // steps through every case and saves a picture of the Rack window for each to SynTHBloK/case_shots/

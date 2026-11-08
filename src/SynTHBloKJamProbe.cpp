@@ -428,8 +428,8 @@ struct SynTHBloKJamProbeWidget : ModuleWidget {
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKJamProbe.svg")));
         using namespace rack::componentlibrary;
 
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(96.52f - 3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(96.52f - 3.5f, 3.5f))));
 
         ProbePortDisplay* di = createWidget<ProbePortDisplay>(mm2px(Vec(4.f, 14.f)));
         di->box.size = mm2px(Vec(43.52f, 8.f)); di->port = module ? &module->midiIn : NULL;

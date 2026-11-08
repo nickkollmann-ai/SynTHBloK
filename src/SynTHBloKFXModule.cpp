@@ -331,10 +331,10 @@ struct SynTHBloKFXWidget : ModuleWidget {
 
         using namespace rack::componentlibrary;
 
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(57.46f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 125.0f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(57.46f, 125.0f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(57.46f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.0f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(57.46f, 125.0f))));
 
         DelayDisplay* oledW = new DelayDisplay;
         oledW->module = module;

@@ -15,8 +15,8 @@ struct SynTHBloKGrainForgeWidget : ModuleWidget {
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKGrainForge.svg")));
         using namespace rack::componentlibrary;
         const float PW = 203.2f;   // 40 HP
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(PW - 3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(PW - 3.5f, 3.5f))));
         GFTitle* title = createWidget<GFTitle>(mm2px(Vec(8.5f, 0.f)));
         title->box.size = mm2px(Vec(60.f, 7.f));
         addChild(title);

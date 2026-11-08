@@ -577,10 +577,10 @@ struct SynTHBloKPlayerViewWidget : ModuleWidget {
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKPlayerView.svg")));
         using namespace rack::componentlibrary;
 
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(PVL::PANEL_W - 3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 125.f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(PVL::PANEL_W - 3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(PVL::PANEL_W - 3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(PVL::PANEL_W - 3.5f, 125.f))));
 
         auto* roll = new PlayerViewDisplay();
         roll->module = module; roll->isRoll = true;

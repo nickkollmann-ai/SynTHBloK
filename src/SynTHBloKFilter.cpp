@@ -564,10 +564,10 @@ struct SynTHBloKFILTERWidget : ModuleWidget {
         using namespace rack::componentlibrary;
 
         // Screws
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(62.54f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 125.f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(62.54f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(62.54f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(62.54f, 125.f))));
 
         const float x0 = 11.25f;
         const float x1 = 26.25f;

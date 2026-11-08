@@ -1474,8 +1474,8 @@ struct SynTHBloKDuoWidget : ModuleWidget {
         addChild(songlink::RowBadge::create(box.size, module));   // the Composer row conducting it
         using namespace rack::componentlibrary;
         const float PW = 335.28f;   // 66 HP
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(PW - 3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(PW - 3.5f, 3.5f))));
         DUTitle* title = createWidget<DUTitle>(mm2px(Vec(8.5f, 0.f)));
         title->box.size = mm2px(Vec(60.f, 7.f));
         addChild(title);

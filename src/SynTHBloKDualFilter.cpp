@@ -465,10 +465,10 @@ struct SynTHBloKDualFilterWidget : ModuleWidget {
         setPanel(createPanel(asset::plugin(pluginInstance, "res/SynTHBloKDualFilter.svg")));
         // screws in the corners, like the other SynTHBloK panels, so the header title sits right of the left one
         const float PW = 223.52f;
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(PW - 3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 125.f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(PW - 3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(PW - 3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(PW - 3.5f, 125.f))));
 
         // the two filter sections (mm, from the panel layout)
         for (int f = 0; f < 2; f++) {

@@ -35,3 +35,7 @@ tools/claude_inbox.json
 tools/case_shots/
 # BACKDROP lab feed (local)
 tools/backdrop_lab.json
+# PC cleanup survey + probes: details of this PC, never public
+tools/pc_survey.txt
+tools/pc_probe.txt
+tools/pc_stats_test.txt

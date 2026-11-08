@@ -541,10 +541,10 @@ struct SynTHBloKMtxQuadWidget : ModuleWidget {
         addChild(songlink::RowBadge::create(box.size, module));   // the Composer row conducting it
         using namespace rack::componentlibrary;
         const float PW = 208.28f, MX = 81.28f;   // 41 HP: the grid section (16 HP), then the QUAD with its essential jacks (25 HP)
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(PW - 3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 125.f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(PW - 3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(PW - 3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(PW - 3.5f, 125.f))));
 
         // ---------------- the grid section ----------------
         auto colX = [](int c) { return 4.9f + 7.4f * c; };

@@ -8,6 +8,11 @@ using namespace rack;
 
 extern Plugin* pluginInstance;
 
+// the panel screw on every SynTHBloK module: a black-oxide socket head cap screw (knurled rim, hex socket)
+struct SocketScrew : app::SvgScrew {
+    SocketScrew() { setSvg(Svg::load(asset::plugin(pluginInstance, "res/SocketScrewBlack.svg"))); }
+};
+
 extern Model* modelSynTHBloK;
 extern Model* modelSynTHBloKBackdrop;
 extern Model* modelSynTHBloKPoly;

@@ -972,10 +972,10 @@ struct SynTHBloKPlayerWidget : ModuleWidget {
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKPlayer.svg")));
         using namespace rack::componentlibrary;
 
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(138.74f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 125.0f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(138.74f, 125.0f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(138.74f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.0f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(138.74f, 125.0f))));
 
         auto* disp = new PlayerDisplay();
         disp->module = module;

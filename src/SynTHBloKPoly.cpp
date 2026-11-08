@@ -905,10 +905,10 @@ struct SynTHBloKPolyWidget : ModuleWidget {
         auto mm = [](float x, float y) { return mm2px(Vec(x, y)); };
 
         // Screws
-        addChild(createWidgetCentered<ScrewSilver>(mm(3.5f, 3.5f)));
-        addChild(createWidgetCentered<ScrewSilver>(mm(42.22f, 3.5f)));
-        addChild(createWidgetCentered<ScrewSilver>(mm(3.5f, 125.0f)));
-        addChild(createWidgetCentered<ScrewSilver>(mm(42.22f, 125.0f)));
+        addChild(createWidgetCentered<SocketScrew>(mm(3.5f, 3.5f)));
+        addChild(createWidgetCentered<SocketScrew>(mm(42.22f, 3.5f)));
+        addChild(createWidgetCentered<SocketScrew>(mm(3.5f, 125.0f)));
+        addChild(createWidgetCentered<SocketScrew>(mm(42.22f, 125.0f)));
 
         {   // tiny RGB LEDs
             int nn; const SynTHBloKPoly::LedK* kk = SynTHBloKPoly::kLeds(nn);

@@ -1211,10 +1211,10 @@ struct BlokMasterWidget : ModuleWidget {
         using namespace rack::componentlibrary;
         const float W = BML::PANEL_W;
 
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(W - 3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 125.f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(W - 3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(W - 3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(W - 3.5f, 125.f))));
 
         auto knob = [&](int col, int row, int id) {
             addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(BML::KX[col], BML::KY[row])), module, id));

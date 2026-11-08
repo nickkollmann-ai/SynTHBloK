@@ -191,8 +191,8 @@ struct SynTHBloKSnareHatWidget : ModuleWidget {
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKSnareHat.svg")));
         using namespace rack::componentlibrary;
 
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(SHL::PANEL_W - 3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(SHL::PANEL_W - 3.5f, 3.5f))));
         addChild(createLightCentered<MicroLightSH<RedLight>>(mm2px(Vec(SHL::PANEL_W - 9.f, 4.6f)), module, SynTHBloKSnareHat::TRIG_LIGHT));
 
         for (int r = 0; r < 4; r++)

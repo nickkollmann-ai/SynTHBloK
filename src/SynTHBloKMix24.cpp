@@ -1269,10 +1269,10 @@ SynTHBloKMix24Widget::SynTHBloKMix24Widget(SynTHBloKMix24* module) {
     using namespace rack::componentlibrary;
     auto mm = [](float x, float y) { return mm2px(Vec(x, y)); };
 
-    addChild(createWidgetCentered<ScrewSilver>(mm(3.5f, 3.5f)));
-    addChild(createWidgetCentered<ScrewSilver>(mm(MXL::PANEL_W - 3.5f, 3.5f)));
-    addChild(createWidgetCentered<ScrewSilver>(mm(3.5f, 125.0f)));
-    addChild(createWidgetCentered<ScrewSilver>(mm(MXL::PANEL_W - 3.5f, 125.0f)));
+    addChild(createWidgetCentered<SocketScrew>(mm(3.5f, 3.5f)));
+    addChild(createWidgetCentered<SocketScrew>(mm(MXL::PANEL_W - 3.5f, 3.5f)));
+    addChild(createWidgetCentered<SocketScrew>(mm(3.5f, 125.0f)));
+    addChild(createWidgetCentered<SocketScrew>(mm(MXL::PANEL_W - 3.5f, 125.0f)));
 
     MixPanelText* t = createWidget<MixPanelText>(Vec(0.f, 0.f));
     t->box.size = mm(MXL::PANEL_W, 128.5f);
