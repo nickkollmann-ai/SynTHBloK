@@ -21,7 +21,9 @@
 #   POWERSHELL tab (all token-protected, this computer only):
 #   POST /ps        {"cmd": "..."}  one PowerShell command at a time in the SynTHBloK folder (cd carries over)
 #   GET  /ps/out?from=k            its output;  POST /ps/kill stops it
-#   POST /ps/task   {"id": "..."}  runs a RUN THESE item's script (tools\*.ps1 named in tools/run_queue.json) with its
+#   POST /ps/task   {"id": "..."}  runs a RUN THESE item's script (tools\*.ps1 named in tools/run_queue.json, or the
+#        item's .bat from the Desktop / SynTHBloK, hidden: the tab's CMD LIVE panel shows it and takes its input) with its
+#   POST /ps/task/in {"run", "text"}  types a line into a running .bat (Enter included);  POST /ps/task/stop {"run"}  stops it
 #        output captured to tools/ps_runs/<run>.log; items marked "admin" start through the normal Windows admin prompt
 #        (Nick clicks Yes) - nothing here gets around that prompt
 #   GET  /ps/tasks                 the runs (state, exit code);  GET /ps/task/out?run=..&from=k  a run's output
@@ -220,18 +222,26 @@ def ps_task(rid):
     try: items = json.load(open(os.path.join(HERE, 'run_queue.json'), encoding='utf-8-sig')).get('items', [])
     except Exception: return None, 'no run queue'
     it = next((x for x in items if x.get('id') == rid), None)
-    if not it or not it.get('script'): return None, 'this item has no script to run here'
-    sc = os.path.abspath(os.path.join(REPO, it['script']))
-    if not sc.lower().startswith(os.path.join(REPO, 'tools').lower() + os.sep) or not sc.lower().endswith('.ps1') or not os.path.isfile(sc):
-        return None, 'only .ps1 scripts in SynTHBloK\\tools can run here'
-    if any(r['item'] == rid and r['state'] in ('waiting', 'running') for r in RUNS.values()): return None, 'already running'
+    if not it: return None, 'not in the run queue'
+    if it.get('script'):
+        kind = 'ps1'; sc = os.path.abspath(os.path.join(REPO, it['script']))
+        if not sc.lower().startswith(os.path.join(REPO, 'tools').lower() + os.sep) or not sc.lower().endswith('.ps1') or not os.path.isfile(sc):
+            return None, 'only .ps1 scripts in SynTHBloK\\tools can run here'
+    else:   # a .bat from the queue: runs hidden with its output captured (CMD LIVE in the tab); "pause" just continues
+        kind = 'bat'; sc = os.path.abspath(os.path.expandvars(it.get('path', '')))
+        roots = [os.path.abspath(os.path.join(os.environ.get('USERPROFILE', ''), 'Desktop')), os.path.abspath(REPO)]
+        if not sc.lower().endswith('.bat') or not os.path.isfile(sc) or not any(os.path.dirname(sc).lower().startswith(r.lower()) for r in roots):
+            return None, 'only .bat files on the Desktop or in SynTHBloK'
+    if any(r['item'] == rid and r['state'] in ('waiting', 'running', 'input') for r in RUNS.values()): return None, 'already running'
     os.makedirs(RUNS_DIR, exist_ok=True)
     run = _t.strftime('%Y%m%d-%H%M%S') + '-' + re.sub(r'[^\w-]', '', rid)[:30]
     log = os.path.join(RUNS_DIR, run + '.log'); wrap = os.path.join(RUNS_DIR, run + '.ps1')
+    if kind == 'bat' and not it.get('admin'): return bat_start(run, rid, it, sc, log)
     with open(wrap, 'w', encoding='utf-8-sig') as f:
         f.write("$ErrorActionPreference = 'Continue'\n$log = '%s'\n" % log.replace("'", "''") +
-                "'##START ' + (Get-Date -Format s) | Out-File -LiteralPath $log -Encoding utf8\n"
-                "try { & '%s' *>&1 | ForEach-Object { \"$_\" | Out-File -LiteralPath $log -Append -Encoding utf8 } ; $c = if ($?) { 0 } else { 1 } }\n" % sc.replace("'", "''") +
+                "'##START ' + (Get-Date -Format s) | Out-File -LiteralPath $log -Encoding utf8\n" +
+                ("try { & '%s' *>&1 | ForEach-Object { \"$_\" | Out-File -LiteralPath $log -Append -Encoding utf8 } ; $c = if ($?) { 0 } else { 1 } }\n" % sc.replace("'", "''") if kind == 'ps1' else
+                 "try { $null | & cmd.exe /d /c '%s' 2>&1 | ForEach-Object { \"$_\" | Out-File -LiteralPath $log -Append -Encoding utf8 } ; $c = [int]$LASTEXITCODE }\n" % sc.replace("'", "''")) +
                 "catch { \"$_\" | Out-File -LiteralPath $log -Append -Encoding utf8; $c = 1 }\n"
                 "'##END ' + $c | Out-File -LiteralPath $log -Append -Encoding utf8\n")
     open(log, 'w').close()
@@ -242,13 +252,46 @@ def ps_task(rid):
         subprocess.Popen([PSX, '-NoProfile', '-Command', q], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     else:
         subprocess.Popen([PSX] + args, cwd=REPO, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    RUNS[run] = {'id': run, 'item': rid, 'name': it.get('name', rid), 'admin': bool(it.get('admin')), 'started': int(_t.time() * 1000), 'log': log, 'state': 'waiting'}
+    RUNS[run] = {'id': run, 'item': rid, 'kind': kind, 'name': it.get('name', rid), 'admin': bool(it.get('admin')), 'started': int(_t.time() * 1000), 'log': log, 'state': 'waiting'}
     try:
         done = json.load(open(RUND, encoding='utf-8'))
     except Exception: done = {}
     done[rid] = int(_t.time() * 1000)
     with open(RUND, 'w', encoding='utf-8') as f: json.dump(done, f)
     return run, None
+# ---- CMD LIVE: a non-admin .bat runs hidden with its input and output connected to the tab, so Nick can answer
+# "Press any key", Y/N questions and typed prompts right there (POST /ps/task/in), or stop it (POST /ps/task/stop).
+BATP = {}   # run id -> {'proc', 'last' (time of the last output), 'lock'}
+def bat_start(run, rid, it, sc, log):
+    import time as _t
+    p = subprocess.Popen(['cmd.exe', '/d', '/c', sc], cwd=os.path.dirname(sc), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    with open(log, 'w', encoding='utf-8') as f: f.write('##START ' + _t.strftime('%Y-%m-%dT%H:%M:%S') + '\n')
+    BATP[run] = {'proc': p, 'last': _t.time(), 'lock': threading.Lock()}
+    def pump():
+        for raw in iter(lambda: p.stdout.read1(4096) if hasattr(p.stdout, 'read1') else p.stdout.read(1), b''):
+            BATP[run]['last'] = _t.time()
+            with open(log, 'a', encoding='utf-8', newline='') as f: f.write(raw.decode('utf-8', 'replace').replace('\r\n', '\n'))
+        code = p.wait()
+        with open(log, 'a', encoding='utf-8') as f: f.write('\n##END %d\n' % code)
+    threading.Thread(target=pump, daemon=True).start()
+    RUNS[run] = {'id': run, 'item': rid, 'kind': 'bat', 'live': True, 'name': it.get('name', rid), 'admin': False,
+                 'started': int(_t.time() * 1000), 'log': log, 'state': 'running'}
+    try: done = json.load(open(RUND, encoding='utf-8'))
+    except Exception: done = {}
+    done[rid] = int(_t.time() * 1000)
+    with open(RUND, 'w', encoding='utf-8') as f: json.dump(done, f)
+    return run, None
+def bat_input(run, text):
+    b = BATP.get(run)
+    if not b or b['proc'].poll() is not None: return 'that .bat is not running'
+    try:
+        with b['lock']: b['proc'].stdin.write((text + '\r\n').encode('utf-8')); b['proc'].stdin.flush()
+    except Exception as e: return 'could not send it: %s' % e
+    return None
+def bat_stop(run):
+    b = BATP.get(run)
+    if b and b['proc'].poll() is None: subprocess.run(['taskkill', '/T', '/F', '/PID', str(b['proc'].pid)], capture_output=True)
 def ps_runs():
     out = []
     for r in sorted(RUNS.values(), key=lambda r: -r['started']):
@@ -257,7 +300,10 @@ def ps_runs():
         except Exception: tail = ''
         m = re.search(r'##END (\d+)', tail)
         if m: r['state'] = 'done' if m.group(1) == '0' else 'failed'; r['code'] = int(m.group(1))
-        elif os.path.exists(r['log']) and os.path.getsize(r['log']) > 0: r['state'] = 'running'
+        elif os.path.exists(r['log']) and os.path.getsize(r['log']) > 0:
+            r['state'] = 'running'
+            b = BATP.get(r['id'])
+            if b and b['proc'].poll() is None and __import__('time').time() - b['last'] > 1.0 and tail and not tail.endswith('\n'): r['state'] = 'input'
         elif r['admin'] and r['state'] == 'waiting': r['state'] = 'needs-ok'
         out.append({k: v for k, v in r.items() if k != 'log'})
     return out
@@ -420,7 +466,7 @@ class H(BaseHTTPRequestHandler):
             except Exception as e: return self.reply(500, {'ok': False, 'error': str(e)})
         self.reply(404, {'ok': False})
     def do_POST(self):
-        if self.path not in ('/open', '/gen', '/sh', '/sh/kill', '/cleaner', '/cleaner/uninstall', '/cleaner/settings', '/runq/open', '/ps', '/ps/kill', '/ps/task', '/cmd', '/cmd/kill', '/admin', '/admin/kill', '/admin/start', '/admin/stop'): return self.reply(404, {'ok': False})
+        if self.path not in ('/open', '/gen', '/sh', '/sh/kill', '/cleaner', '/cleaner/uninstall', '/cleaner/settings', '/runq/open', '/ps', '/ps/kill', '/ps/task', '/ps/task/in', '/ps/task/stop', '/cmd', '/cmd/kill', '/admin', '/admin/kill', '/admin/start', '/admin/stop'): return self.reply(404, {'ok': False})
         # pages from other sites can't use it: only the workbench's own origin
         if self.headers.get('Origin') not in ORIGINS: return self.reply(403, {'ok': False, 'error': 'not the workbench'})
         if self.path.startswith('/sh'):
@@ -440,7 +486,7 @@ class H(BaseHTTPRequestHandler):
             return self.reply(200, {'ok': True, 'id': i, 'cwd': SH['cwd']})
         if self.path == '/gen': return self.gen()
         if self.path == '/cleaner': return self.cleaner()
-        if self.path in ('/ps', '/ps/kill', '/ps/task'):
+        if self.path in ('/ps', '/ps/kill', '/ps/task', '/ps/task/in', '/ps/task/stop'):
             if self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False, 'error': 'no token'})
             if self.path == '/ps/kill':
                 p = PS['proc']
@@ -448,6 +494,11 @@ class H(BaseHTTPRequestHandler):
                 return self.reply(200, {'ok': True})
             try: req = json.loads(self.rfile.read(min(int(self.headers.get('Content-Length') or 0), 8000)) or b'{}')
             except Exception: return self.reply(400, {'ok': False, 'error': 'bad request'})
+            if self.path == '/ps/task/in':
+                err = bat_input(str(req.get('run') or ''), str(req.get('text') or '')[:2000])
+                return self.reply(200 if not err else 409, {'ok': not err, 'error': err})
+            if self.path == '/ps/task/stop':
+                bat_stop(str(req.get('run') or '')); return self.reply(200, {'ok': True})
             if self.path == '/ps/task':
                 run, err = ps_task(str(req.get('id') or ''))
                 return self.reply(200 if run else 409, {'ok': bool(run), 'run': run, 'error': err})
