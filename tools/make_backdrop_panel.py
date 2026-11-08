@@ -36,7 +36,7 @@ def well(x, y, w, h):
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 W, H = 30.48, 128.5        # 6 HP
-LED_Y = 112.0              # the status light (drawn by the module: amber = dressing the rack)
+LED_Y = 108.8              # the status light (drawn by the module: amber = dressing the rack)
 
 p = ['<?xml version="1.0" encoding="UTF-8"?>',
      '<svg xmlns="http://www.w3.org/2000/svg" width="%gmm" height="%gmm" viewBox="0 0 %g %g">' % (W, H, W, H),
@@ -53,6 +53,9 @@ p.append(well(5.0, 12.0, W - 10.0, 93.5))   # the OLED menu + the NAME key (the 
 # the status light's ring and label
 p.append('<circle cx="%g" cy="%g" r="2.6" fill="#0c0c0c" stroke="#2c2c2c" stroke-width="0.25"/>' % (W / 2, LED_Y))
 p.append(text_path('NoiZee ToyZ', W / 2, 127.9, 1.944, REG, fill='#808080'))   # the same footer as the MTX modules
+# the meter inputs' rings (L, R)
+for jx in (10.2, 20.28):
+    p.append('<circle cx="%g" cy="117.6" r="4.2" fill="#0c0c0c" stroke="#2c2c2c" stroke-width="0.25"/>' % jx)
 p.append('</svg>')
 open(os.path.join(ROOT, 'res', 'SynTHBloKBackdrop.svg'), 'w', encoding='utf-8').write('\n'.join(p) + '\n')
 print('wrote res/SynTHBloKBackdrop.svg')

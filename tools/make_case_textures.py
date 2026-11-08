@@ -75,15 +75,22 @@ def tolex():
 
 
 def carbon():
-    # 2x2 twill weave: tows alternating direction, each with a sheen across it
+    # 2x2 twill: tows crossing over two, under two, stepping one each row (the diagonal you see in real carbon).
+    # Each tow shows its fibres along its own direction and a rounded sheen across it, so the weave catches light.
     y, x = np.mgrid[0:N, 0:N].astype(float)
     cell = 32
     cx, cy = (x // cell).astype(int), (y // cell).astype(int)
-    horiz = ((cx + cy) // 2) % 2 == 0
-    u = np.where(horiz, (y % cell) / cell, (x % cell) / cell)
-    sheen = np.sin(u * np.pi) ** 2
-    v = np.where(horiz, sheen * 0.9 - 0.35, sheen * 0.5 - 0.45) + pnoise(13, 0.7) * 0.05
-    overlay('carbon', v, 0.55)
+    warp_on_top = ((cx + cy) % 4) < 2
+    u = (x % cell) / cell
+    v = (y % cell) / cell
+    across = np.where(warp_on_top, u, v)                    # across the tow: the rounded sheen
+    along = np.where(warp_on_top, y, x)                     # along the tow: the fibre lines
+    sheen = np.sin(across * np.pi) ** 1.5
+    fibres = np.sin(along * 2.2 + pnoise(14, 6) * 1.5) * 0.04 + pnoise(13, 0.8) * 0.03
+    edge = -np.exp(-((across - 0.0) / 0.06) ** 2) * 0.5 - np.exp(-((across - 1.0) / 0.06) ** 2) * 0.5   # dark gaps between tows
+    tone = np.where(warp_on_top, 0.15, -0.15)              # warp and weft lit differently
+    v = sheen * 0.75 - 0.35 + tone + fibres + edge
+    overlay('carbon', v, 0.6)
 
 
 if __name__ == '__main__':

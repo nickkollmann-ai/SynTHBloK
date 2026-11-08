@@ -13,6 +13,8 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <ctime>
+#include <algorithm>
 #include <functional>
 
 namespace {
@@ -53,15 +55,15 @@ static std::vector<CaseStyle> builtInCases() {
         // our own takes on the classic case shapes (our names; no maker's look copied badge for badge)
         {"STALKER 6U", M_POWDER, rgb(24, 24, 26), rgb(14, 14, 15), rgb(40, 40, 42), 18.f, E_SLANT, X_LEGS, 0},
         {"STALKER 6U SILVER", M_BRUSHED, rgb(170, 172, 176), rgb(120, 122, 126), rgb(60, 60, 62), 18.f, E_SLANT, X_LEGS, 0},
-        {"PERFORMER 7U", M_ANODIZED, rgb(20, 20, 22), rgb(44, 44, 48), rgb(36, 36, 38), 14.f, E_ROUND, X_1U | X_HANDLE, 0},
-        {"PERFORMER 7U SILVER", M_BRUSHED, rgb(176, 180, 184), rgb(130, 134, 138), rgb(70, 70, 72), 14.f, E_ROUND, X_1U | X_HANDLE, 0},
+        {"PERFORMER 7U", M_ANODIZED, rgb(20, 20, 22), rgb(44, 44, 48), rgb(36, 36, 38), 14.f, E_ROUND, X_1U, 0},
+        {"PERFORMER 7U SILVER", M_BRUSHED, rgb(176, 180, 184), rgb(130, 134, 138), rgb(70, 70, 72), 14.f, E_ROUND, X_1U, 0},
         {"BUS STEEL 7U", M_POWDER, rgb(30, 30, 32), rgb(18, 18, 20), rgb(44, 44, 46), 12.f, E_SQUARE, X_1U, 0},
         {"FLATBOAT", M_POWDER, rgb(34, 34, 36), rgb(22, 22, 24), rgb(44, 44, 46), 8.f, E_ROUND, X_NONE, 0},
         {"FLATBOAT WHITE", M_POWDER, rgb(226, 224, 218), rgb(180, 178, 172), rgb(80, 80, 82), 8.f, E_ROUND, X_NONE, 0},
         {"LAB EXTRUSION", M_BRUSHED, rgb(186, 188, 190), rgb(24, 24, 26), rgb(120, 122, 124), 16.f, E_CAPS, X_NONE, 0},
         {"LAB EXTRUSION GREY", M_BRUSHED, rgb(120, 124, 128), rgb(20, 20, 22), rgb(90, 92, 96), 16.f, E_CAPS, X_NONE, 0},
-        {"SUITCASE 9U", M_TOLEX, rgb(40, 40, 42), rgb(160, 162, 166), rgb(40, 40, 42), 18.f, E_SQUARE, X_HANDLE | X_LATCHES, 0},
-        {"SUITCASE 9U BLUE", M_TOLEX, rgb(22, 34, 60), rgb(160, 162, 166), rgb(36, 40, 50), 18.f, E_SQUARE, X_HANDLE | X_LATCHES, 0},
+        {"SUITCASE 9U", M_TOLEX, rgb(40, 40, 42), rgb(160, 162, 166), rgb(40, 40, 42), 18.f, E_SQUARE, X_LATCHES, 0},
+        {"SUITCASE 9U BLUE", M_TOLEX, rgb(22, 34, 60), rgb(160, 162, 166), rgb(36, 40, 50), 18.f, E_SQUARE, X_LATCHES, 0},
         {"TIERED WALNUT", M_WOOD, rgb(98, 62, 36), rgb(62, 38, 22), rgb(30, 30, 32), 20.f, E_SLANT, X_NONE, 0},
         {"TIERED ASH", M_WOOD, rgb(196, 170, 130), rgb(150, 124, 88), rgb(40, 40, 42), 20.f, E_SLANT, X_NONE, 0},
         {"WEST COAST BOAT", M_WOOD, rgb(150, 96, 52), rgb(104, 62, 30), rgb(26, 26, 28), 22.f, E_ROUND, X_NONE, 0},
@@ -203,7 +205,26 @@ struct SynTHBloKBackdrop : Module {
     bool showTitle = false;   // the name above the case: optional, off unless turned on (NAME page or menu)
     std::string title;   // empty: the patch's file name
 
-    SynTHBloKBackdrop() { config(0, 0, 0, 0); }
+    // the info strip's level meter: patch your mix into L / R
+    enum InputIds { IN_L, IN_R, NUM_INPUTS };
+    float peak[2] = {0.f, 0.f}, hold[2] = {0.f, 0.f}, level[2] = {0.f, 0.f};
+    int infoMode = 0;   // the info strip on the case's top: 0 auto (cases with a 1U row), 1 on, 2 off
+    SynTHBloKBackdrop() {
+        config(0, NUM_INPUTS, 0, 0);
+        configInput(IN_L, "Meter L (the info strip's level meter)");
+        configInput(IN_R, "Meter R (normalled to L)");
+    }
+    void process(const ProcessArgs& args) override {
+        if (!inputs[IN_L].isConnected() && !inputs[IN_R].isConnected()) { peak[0] = peak[1] = level[0] = level[1] = 0.f; return; }
+        float l = inputs[IN_L].getVoltageSum() / 5.f, r = inputs[IN_R].isConnected() ? inputs[IN_R].getVoltageSum() / 5.f : l;
+        float in[2] = {std::fabs(l), std::fabs(r)};
+        float fall = std::exp(-args.sampleTime / 0.25f), slow = 1.f - std::exp(-args.sampleTime / 0.3f), hfall = std::exp(-args.sampleTime / 1.5f);
+        for (int c = 0; c < 2; c++) {
+            peak[c] = std::max(in[c], peak[c] * fall);
+            level[c] += (in[c] * in[c] - level[c]) * slow;   // mean square
+            hold[c] = std::max(peak[c], hold[c] * hfall);
+        }
+    }
 
     json_t* dataToJson() override {
         json_t* r = json_object();
@@ -222,6 +243,7 @@ struct SynTHBloKBackdrop : Module {
         json_object_set_new(r, "case", json_string(caseLibrary()[clamp(caseIdx, 0, (int) caseLibrary().size() - 1)].name.c_str()));
         json_object_set_new(r, "depthMm", json_real(depthMm));
         json_object_set_new(r, "sideShape", json_integer(sideShape));
+        json_object_set_new(r, "infoMode", json_integer(infoMode));
         json_object_set_new(r, "sideMat", json_integer(sideMat));
         json_object_set_new(r, "sideWidth", json_integer(sideWidth));
         json_object_set_new(r, "openMode", json_integer(openMode));
@@ -251,6 +273,7 @@ struct SynTHBloKBackdrop : Module {
         }
         if (json_t* v = json_object_get(r, "depth")) depthMm = clamp((float) json_number_value(v), 0.f, 1.f) * 120.f;   // older patches: a share
         if (json_t* v = json_object_get(r, "depthMm")) depthMm = clamp((float) json_number_value(v), 0.f, 200.f);
+        if (json_t* v = json_object_get(r, "infoMode")) infoMode = clamp((int) json_integer_value(v), 0, 2);
         if (json_t* v = json_object_get(r, "sideShape")) sideShape = clamp((int) json_integer_value(v), 0, kSideShapeN - 1);
         if (json_t* v = json_object_get(r, "sideMat")) sideMat = clamp((int) json_integer_value(v), 0, kSideMatN - 1);
         if (json_t* v = json_object_get(r, "sideWidth")) sideWidth = clamp((int) json_integer_value(v), 0, 4);
@@ -650,7 +673,7 @@ struct BackdropLayer : widget::TransparentWidget {
         int mat = cheekMat(cs);
         for (int side = 0; side < 2; side++) {
             float cx = side ? x + w - s : x;
-            nvgSave(vg); nvgScissor(vg, cx, y - 2.f, s, h + 4.f);
+            nvgSave(vg); nvgIntersectScissor(vg, cx, y - 2.f, s, h + 4.f);
             nvgBeginPath(vg); nvgRoundedRect(vg, x, y, w, h, rad);
             nvgFillPaint(vg, nvgLinearGradient(vg, x, y, x, y + h, nvgLerpRGBA(b, nvgRGB(255, 255, 255), 0.08f), nvgLerpRGBA(b, nvgRGB(0, 0, 0), 0.15f)));
             nvgFill(vg);
@@ -678,7 +701,7 @@ struct BackdropLayer : widget::TransparentWidget {
             texRect(vg, x, y, w, h, rad, "wood", 0.85f, false, 240.f);   // grain along the lips
             for (int side = 0; side < 2; side++) {   // and up the cheeks
                 float cx = side ? x + w - s : x;
-                nvgSave(vg); nvgScissor(vg, cx, y, s, h);
+                nvgSave(vg); nvgIntersectScissor(vg, cx, y, s, h);
                 base(x, y, w, h, rad);
                 texRect(vg, cx, y, s, h, 0.f, "wood", 0.85f, true, 240.f);
                 if (cs.material == M_PLY) {   // the layered cut edge round the outside of the cheek
@@ -702,7 +725,14 @@ struct BackdropLayer : widget::TransparentWidget {
             texRect(vg, x, y, w, h, rad, "brushed", 0.9f, false, 300.f);
             return;
         }
-        if (cs.material == M_CARBON) { base(x, y, w, h, rad); texRect(vg, x, y, w, h, rad, "carbon", 0.8f, false, 120.f); return; }
+        if (cs.material == M_CARBON) {   // the twill weave under a glossy clear coat
+            base(x, y, w, h, rad);
+            texRect(vg, x, y, w, h, rad, "carbon", 0.95f, false, 128.f);
+            nvgBeginPath(vg); nvgRoundedRect(vg, x, y, w, h, rad);
+            nvgFillPaint(vg, nvgLinearGradient(vg, x, y, x + w * 0.35f, y + h, nvgRGBA(255, 255, 255, 28), nvgRGBA(255, 255, 255, 0)));
+            nvgFill(vg);
+            return;
+        }
         if (cs.material == M_TOLEX) {
             base(x, y, w, h, rad); texRect(vg, x, y, w, h, rad, "tolex", 0.9f, false, 160.f);
             nvgBeginPath(vg); nvgRect(vg, x + 1.5f, y + 1.5f, w - 3.f, h - 3.f);   // the aluminium edge trim
@@ -723,7 +753,7 @@ struct BackdropLayer : widget::TransparentWidget {
                 nvgBeginPath(vg); nvgRoundedRect(vg, x, y, w, h, rad); nvgFillColor(vg, nvgTransRGBA(cs.base, 70)); nvgFill(vg);
                 nvgStrokeColor(vg, nvgTransRGBA(cs.accent, 120)); nvgStrokeWidth(vg, 1.5f); nvgStroke(vg);
                 nvgSave(vg);
-                nvgScissor(vg, x, y, w, h);
+                nvgIntersectScissor(vg, x, y, w, h);
                 nvgBeginPath(vg);
                 for (float g = x - h; g < x + w; g += 260.f) { nvgMoveTo(vg, g, y + h); nvgLineTo(vg, g + 40.f, y + h); nvgLineTo(vg, g + 40.f + h, y); nvgLineTo(vg, g + h, y); nvgClosePath(vg); }
                 nvgFillColor(vg, nvgRGBA(255, 255, 255, 14));
@@ -735,7 +765,7 @@ struct BackdropLayer : widget::TransparentWidget {
                 NVGpaint p = nvgLinearGradient(vg, x, y, x, y + h, nvgLerpRGBA(cs.base, nvgRGB(255, 255, 255), 0.1f), cs.base);
                 nvgBeginPath(vg); nvgRoundedRect(vg, x, y, w, h, rad); nvgFillPaint(vg, p); nvgFill(vg);
                 nvgSave(vg);
-                nvgScissor(vg, x, y, w, h);
+                nvgIntersectScissor(vg, x, y, w, h);
                 nvgBeginPath(vg);
                 for (float k = y + 1.f; k < y + h; k += 1.4f) { nvgMoveTo(vg, x, k); nvgLineTo(vg, x + w, k); }
                 nvgStrokeColor(vg, nvgTransRGBA(cs.accent, 60));
@@ -748,7 +778,7 @@ struct BackdropLayer : widget::TransparentWidget {
                 NVGpaint p = nvgLinearGradient(vg, x, y, x + w, y + h, nvgLerpRGBA(cs.base, nvgRGB(255, 230, 200), 0.08f), cs.base);
                 nvgBeginPath(vg); nvgRoundedRect(vg, x, y, w, h, rad); nvgFillPaint(vg, p); nvgFill(vg);
                 nvgSave(vg);
-                nvgScissor(vg, x + rad, y, w - 2.f * rad, h);   // the grain stays off the rounded corners
+                nvgIntersectScissor(vg, x + rad, y, w - 2.f * rad, h);   // the grain stays off the rounded corners
                 nvgBeginPath(vg);
                 bool vertical = h > w;
                 float len = vertical ? h : w, span = vertical ? w : h;
@@ -771,7 +801,7 @@ struct BackdropLayer : widget::TransparentWidget {
                 NVGpaint p = nvgLinearGradient(vg, x, y, x, y + h, nvgLerpRGBA(cs.base, nvgRGB(255, 255, 255), 0.06f), nvgLerpRGBA(lo, cs.base, 0.4f));
                 nvgBeginPath(vg); nvgRoundedRect(vg, x, y, w, h, rad); nvgFillPaint(vg, p); nvgFill(vg);
                 nvgSave(vg);
-                nvgScissor(vg, x, y, w, h);
+                nvgIntersectScissor(vg, x, y, w, h);
                 nvgBeginPath(vg);
                 for (float k = y + 1.f; k < y + h; k += 1.7f) { nvgMoveTo(vg, x, k); nvgLineTo(vg, x + w, k); }
                 nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 10));
@@ -783,7 +813,7 @@ struct BackdropLayer : widget::TransparentWidget {
             case M_CARBON: {   // the woven check
                 nvgBeginPath(vg); nvgRect(vg, x, y, w, h); nvgFillColor(vg, cs.base); nvgFill(vg);
                 nvgSave(vg);
-                nvgScissor(vg, x, y, w, h);
+                nvgIntersectScissor(vg, x, y, w, h);
                 nvgBeginPath(vg);
                 float s = 5.f;
                 for (float yy = y; yy < y + h; yy += s)
@@ -887,11 +917,6 @@ struct BackdropLayer : widget::TransparentWidget {
                     nvgFillColor(vg, nvgRGB(16, 16, 18)); nvgFill(vg);
                 }
         }
-        if (doRails)
-            for (float rt : rowTops) {
-                drawRail(vg, in.pos.x, in.pos.x + in.size.x, rt, cs.rail);
-                drawRail(vg, in.pos.x, in.pos.x + in.size.x, rt + RACK_GRID_HEIGHT - 15.f, cs.rail);
-            }
     }
     void drawCase(NVGcontext* vg, const CaseStyle& cs, math::Rect in, float depthMm, bool doShadow, bool doRails, const std::vector<float>& rowTops) {
         if (cs.extras & X_OPEN) { drawOpenFrame(vg, cs, in, depthMm, doShadow, doRails, rowTops); return; }
@@ -936,11 +961,14 @@ struct BackdropLayer : widget::TransparentWidget {
         // the frame: the ends and lips, then the dark well the modules sit in
         drawFrameFill(vg, cs, x, y, w, h);
         drawCheeks(vg, cs, x, y, w, h);
+        bool woodish = cs.material == M_WOOD || cs.material == M_PLY;
         if (rr > 0.f && cs.material != M_ACRYLIC) {   // contoured: rounded cheeks and a rounded top, lit from above
-            nvgBeginPath(vg);
-            nvgRoundedRect(vg, x, y, w, h, rr);
-            nvgFillPaint(vg, nvgBoxGradient(vg, x + s * 0.5f, y + tt * 0.5f, w - s, h - tt * 0.5f - t * 0.5f, rr, std::max(s, 8.f), nvgRGBA(0, 0, 0, 0), nvgRGBA(0, 0, 0, 110)));
-            nvgFill(vg);
+            if (!woodish) {   // (not on wood: the dark ring read as a black border round the grain)
+                nvgBeginPath(vg);
+                nvgRoundedRect(vg, x, y, w, h, rr);
+                nvgFillPaint(vg, nvgBoxGradient(vg, x + s * 0.5f, y + tt * 0.5f, w - s, h - tt * 0.5f - t * 0.5f, rr, std::max(s, 8.f), nvgRGBA(0, 0, 0, 0), nvgRGBA(0, 0, 0, 110)));
+                nvgFill(vg);
+            }
             nvgBeginPath(vg);   // the highlight running round the top edge
             nvgRoundedRect(vg, x + 1.5f, y + 1.f, w - 3.f, tt + rr, rr);
             nvgFillPaint(vg, nvgLinearGradient(vg, x, y, x, y + tt + rr * 0.5f, nvgRGBA(255, 255, 255, 46), nvgRGBA(255, 255, 255, 0)));
@@ -948,13 +976,8 @@ struct BackdropLayer : widget::TransparentWidget {
         }
         nvgBeginPath(vg);
         nvgRect(vg, in.pos.x, in.pos.y, in.size.x, in.size.y);
-        nvgFillColor(vg, nvgRGB(10, 10, 11));
+        nvgFillColor(vg, nvgRGB(10, 10, 11));   // the empty part of the case (the module rows stay open: Rack's own rails)
         nvgFill(vg);
-        if (doRails)
-            for (float rt : rowTops) {
-                drawRail(vg, in.pos.x, in.pos.x + in.size.x, rt, cs.rail);
-                drawRail(vg, in.pos.x, in.pos.x + in.size.x, rt + RACK_GRID_HEIGHT - 15.f, cs.rail);
-            }
         // finishing touches
         if (cs.material == M_TOLEX) {   // corner caps: small, dark metal, a thin lit edge (not big grey blocks)
             float c = std::min(12.f, s * 0.75f);
@@ -1015,24 +1038,79 @@ struct BackdropLayer : widget::TransparentWidget {
                 }
             }
         }
-        if (cs.extras & X_1U) {   // the 1U utility row on the top lip: jacks and a couple of LEDs
-            float ry = y + 3.f, rh = tt - 6.f;
-            nvgBeginPath(vg);
-            nvgRect(vg, in.pos.x, ry, in.size.x, rh);
-            nvgFillColor(vg, nvgRGB(14, 14, 15));
-            nvgFill(vg);
-            nvgBeginPath(vg);
-            for (float jx = in.pos.x + 14.f; jx < in.pos.x + std::min(in.size.x, 260.f); jx += 18.f) nvgCircle(vg, jx, ry + rh * 0.5f, 3.6f);
-            nvgFillColor(vg, nvgRGB(150, 152, 156));
-            nvgFill(vg);
-            nvgBeginPath(vg);
-            for (float jx = in.pos.x + 14.f; jx < in.pos.x + std::min(in.size.x, 260.f); jx += 18.f) nvgCircle(vg, jx, ry + rh * 0.5f, 1.7f);
-            nvgFillColor(vg, nvgRGB(10, 10, 10));
-            nvgFill(vg);
-            nvgBeginPath(vg);
-            nvgCircle(vg, in.pos.x + std::min(in.size.x, 260.f) + 8.f, ry + rh * 0.5f, 2.f);
-            nvgFillColor(vg, nvgRGB(255, 140, 30));
-            nvgFill(vg);
+        if (cs.extras & X_1U) {   // the INFO STRIP on the top lip: live readouts from the rack + a stereo level meter
+            float ry = y + 3.f, rh = tt - 6.f, sx = in.pos.x, sw = in.size.x;
+            nvgBeginPath(vg); nvgRoundedRect(vg, sx, ry, sw, rh, 2.f);
+            nvgFillColor(vg, nvgRGB(8, 6, 3)); nvgFill(vg);
+            nvgStrokeColor(vg, nvgRGBA(255, 180, 90, 50)); nvgStrokeWidth(vg, 0.8f); nvgStroke(vg);
+            std::shared_ptr<window::Font> font = APP->window->uiFont;
+            // right end, out to in: 4 dummy jacks (IN L/R, OUT L/R), then a column of LEDs, then the meter
+            float jr = clamp(rh * 0.36f, 3.f, 7.f), jp = jr * 2.f + 5.f, jw = sw > 260.f ? 4.f * jp + 4.f : 0.f;
+            float lw = sw > 220.f ? 4.f * 9.f + 6.f : 0.f;
+            float mid = ry + rh * 0.5f, mw = std::min(160.f, sw * 0.26f), mx = sx + sw - jw - lw - mw - 8.f;
+            if (font && sw > 140.f) {
+                std::string name = module && !module->title.empty() ? module->title : (APP->patch->path.empty() ? std::string("UNTITLED") : system::getStem(APP->patch->path));
+                char clock[16] = ""; std::time_t now = std::time(NULL); std::strftime(clock, sizeof(clock), "%H:%M", std::localtime(&now));
+                std::string info = string::f("CPU %d%%   %.1f kHz   %d MODULES   %s", (int) std::round(APP->engine->getMeterAverage() * 100.f),
+                                             APP->engine->getSampleRate() / 1000.f, (int) APP->engine->getNumModules(), clock);
+                nvgSave(vg);
+                nvgIntersectScissor(vg, sx + 4.f, ry, mx - sx - 10.f, rh);
+                nvgFontFaceId(vg, font->handle);
+                nvgFontSize(vg, 9.f);
+                nvgTextLetterSpacing(vg, 1.f);
+                nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+                nvgBeginPath(vg); nvgCircle(vg, sx + 9.f, mid, 2.2f); nvgFillColor(vg, nvgRGB(255, 140, 30)); nvgFill(vg);
+                nvgFillColor(vg, nvgRGB(255, 190, 90));
+                float tx = nvgText(vg, sx + 16.f, mid + 0.5f, string::uppercase(name).c_str(), NULL);
+                nvgFillColor(vg, nvgRGBA(255, 190, 90, 140));
+                nvgText(vg, tx + 14.f, mid + 0.5f, info.c_str(), NULL);
+                nvgTextLetterSpacing(vg, 0.f);
+                nvgRestore(vg);
+            }
+            // the meter: two bars, green to amber to red, with a peak hold tick
+            for (int c = 0; c < 2; c++) {
+                float by = ry + 3.f + c * (rh - 6.f) * 0.5f + 0.5f, bh = (rh - 6.f) * 0.5f - 1.5f;
+                nvgBeginPath(vg); nvgRect(vg, mx, by, mw, bh); nvgFillColor(vg, nvgRGB(20, 16, 10)); nvgFill(vg);
+                float pk = module ? clamp(module->peak[c], 0.f, 1.2f) / 1.2f : 0.f, hd = module ? clamp(module->hold[c], 0.f, 1.2f) / 1.2f : 0.f;
+                if (pk > 0.002f) {
+                    nvgBeginPath(vg); nvgRect(vg, mx, by, mw * pk, bh);
+                    NVGpaint gp = nvgLinearGradient(vg, mx, 0, mx + mw, 0, nvgRGB(90, 220, 110), nvgRGB(255, 60, 40));
+                    nvgFillPaint(vg, gp); nvgFill(vg);
+                }
+                if (hd > 0.002f) { nvgBeginPath(vg); nvgRect(vg, mx + mw * hd - 1.f, by, 1.5f, bh); nvgFillColor(vg, nvgRGB(255, 220, 160)); nvgFill(vg); }
+            }
+            // LEDs: POWER (always on), L and R signal (glow with level), CLIP (lights when either side hits the top)
+            if (lw > 0.f) {
+                float pkL = module ? clamp(module->peak[0], 0.f, 1.f) : 0.f, pkR = module ? clamp(module->peak[1], 0.f, 1.f) : 0.f;
+                bool clip = module && (module->hold[0] >= 1.f || module->hold[1] >= 1.f);
+                float lv[4] = {1.f, pkL, pkR, clip ? 1.f : 0.f};
+                NVGcolor lc[4] = {nvgRGB(255, 140, 30), nvgRGB(90, 230, 110), nvgRGB(90, 230, 110), nvgRGB(255, 50, 35)};
+                for (int k = 0; k < 4; k++) {
+                    float lx = mx + mw + 10.f + k * 9.f, a = 0.18f + 0.82f * std::sqrt(lv[k]);
+                    if (lv[k] > 0.05f) {   // a soft halo when lit
+                        nvgBeginPath(vg); nvgCircle(vg, lx, mid, 5.5f);
+                        nvgFillPaint(vg, nvgRadialGradient(vg, lx, mid, 1.f, 5.5f, nvgTransRGBAf(lc[k], 0.45f * a), nvgTransRGBAf(lc[k], 0.f))); nvgFill(vg);
+                    }
+                    nvgBeginPath(vg); nvgCircle(vg, lx, mid, 2.3f);
+                    nvgFillColor(vg, nvgLerpRGBA(nvgRGB(30, 24, 18), lc[k], a)); nvgFill(vg);
+                    nvgStrokeColor(vg, nvgRGBA(0, 0, 0, 160)); nvgStrokeWidth(vg, 0.6f); nvgStroke(vg);
+                }
+            }
+            // dummy jacks: knurled nut, metal ring, dark hole (decoration only: a case can't own real ports)
+            if (jw > 0.f) {
+                for (int k = 0; k < 4; k++) {
+                    float jx = sx + sw - jw + 2.f + jp * (k + 0.5f) + (k >= 2 ? 2.f : 0.f);
+                    nvgBeginPath(vg); nvgCircle(vg, jx, mid + 0.6f, jr + 0.6f); nvgFillColor(vg, nvgRGBA(0, 0, 0, 120)); nvgFill(vg);
+                    nvgBeginPath(vg); nvgCircle(vg, jx, mid, jr);
+                    nvgFillPaint(vg, nvgLinearGradient(vg, jx, mid - jr, jx, mid + jr, nvgRGB(200, 202, 206), nvgRGB(90, 92, 98))); nvgFill(vg);
+                    nvgBeginPath(vg); nvgCircle(vg, jx, mid, jr * 0.68f);
+                    nvgFillPaint(vg, nvgLinearGradient(vg, jx, mid - jr, jx, mid + jr, nvgRGB(70, 72, 76), nvgRGB(170, 172, 176))); nvgFill(vg);
+                    nvgBeginPath(vg); nvgCircle(vg, jx, mid, jr * 0.42f); nvgFillColor(vg, nvgRGB(6, 6, 7)); nvgFill(vg);
+                }
+                // a hairline between the IN pair and the OUT pair
+                float dx = sx + sw - jw + 2.f + jp * 2.f + 1.f;
+                nvgBeginPath(vg); nvgRect(vg, dx, ry + 3.f, 0.8f, rh - 6.f); nvgFillColor(vg, nvgRGBA(255, 180, 90, 50)); nvgFill(vg);
+            }
         }
         if (cs.extras & X_HANDLE) {   // a carry handle above the top lip, in the middle
             float hw = std::min(120.f, w * 0.3f), hx = x + (w - hw) * 0.5f;
@@ -1061,17 +1139,17 @@ struct BackdropLayer : widget::TransparentWidget {
                 nvgFill(vg);
             }
         }
-        if (cs.extras & X_LEGS) {   // folding legs under the bottom corners
+        if (cs.extras & X_LEGS) {   // round rubber feet under the bottom corners
             for (int side = 0; side < 2; side++) {
-                float lx = side ? x + w - s * 0.8f - 6.f : x + s * 0.8f;
+                float fw = 18.f, fh = 7.f, fx = side ? x + w - s * 0.5f - fw * 0.5f : x + s * 0.5f - fw * 0.5f, fy = y + h - 1.f;
                 nvgBeginPath(vg);
-                nvgRoundedRect(vg, lx, y + h, 6.f, 14.f, 2.f);
-                nvgFillColor(vg, nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.4f));
-                nvgFill(vg);
+                nvgEllipse(vg, fx + fw * 0.5f + 2.f, fy + fh + 2.f, fw * 0.6f, 2.5f);   // its little shadow
+                nvgFillColor(vg, nvgRGBA(0, 0, 0, 90)); nvgFill(vg);
                 nvgBeginPath(vg);
-                nvgRoundedRect(vg, lx - 3.f, y + h + 12.f, 12.f, 4.f, 2.f);
-                nvgFillColor(vg, nvgRGB(12, 12, 12));
+                nvgRoundedRect(vg, fx, fy, fw, fh, fh * 0.5f);   // the rubber pad, seen from the front: a soft dome
+                nvgFillPaint(vg, nvgLinearGradient(vg, 0, fy, 0, fy + fh, nvgRGB(46, 46, 48), nvgRGB(10, 10, 11)));
                 nvgFill(vg);
+                nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 18)); nvgStrokeWidth(vg, 0.8f); nvgStroke(vg);
             }
         }
         if (cs.material != M_ACRYLIC) {   // a fine lit edge along the top, like light catching a bevel
@@ -1079,15 +1157,67 @@ struct BackdropLayer : widget::TransparentWidget {
             nvgMoveTo(vg, x + caseRadius(cs) + 1.f, y + 1.f); nvgLineTo(vg, x + w - caseRadius(cs) - 1.f, y + 1.f);
             nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 34)); nvgStrokeWidth(vg, 1.f); nvgStroke(vg);
         }
-        nvgBeginPath(vg);   // a fine edge so the case reads against any background
-        nvgRoundedRect(vg, x + 0.5f, y + 0.5f, w - 1.f, h - 1.f, cs.ends == E_ROUND ? 9.f : 0.f);
-        nvgStrokeColor(vg, nvgRGBA(0, 0, 0, 160));
-        nvgStrokeWidth(vg, 1.f);
-        nvgStroke(vg);
+        if (!woodish) {   // a fine edge so the case reads (not on wood: it looked like a black border)
+            nvgBeginPath(vg);
+            nvgRoundedRect(vg, x + 0.5f, y + 0.5f, w - 1.f, h - 1.f, caseRadius(cs));
+            nvgStrokeColor(vg, nvgRGBA(0, 0, 0, 160));
+            nvgStrokeWidth(vg, 1.f);
+            nvgStroke(vg);
+        }
     }
 
     // the blocks of modules: rows that hold modules, joined when they touch and overlap
-    struct Block { math::Rect r; std::vector<float> rows; };
+    struct Block { math::Rect r; std::vector<float> rows; std::vector<math::Rect> rowRects; };
+    // HOLES: everything BACKDROP draws stays off the module rows, so Rack's own rails always show there.
+    // The visible area minus the rows, as rectangles: slabs between the rows' top/bottom edges, and in each the gaps.
+    static void outsideRects(math::Rect v, const std::vector<math::Rect>& holes, std::vector<math::Rect>& out) {
+        float vx0 = v.pos.x, vx1 = v.pos.x + v.size.x, vy0 = v.pos.y, vy1 = v.pos.y + v.size.y;
+        std::vector<float> ys = {vy0, vy1};
+        for (const math::Rect& h : holes) {
+            float t = h.pos.y, b = h.pos.y + h.size.y;
+            if (b <= vy0 || t >= vy1) continue;
+            ys.push_back(clamp(t, vy0, vy1)); ys.push_back(clamp(b, vy0, vy1));
+        }
+        std::sort(ys.begin(), ys.end());
+        ys.erase(std::unique(ys.begin(), ys.end()), ys.end());
+        for (size_t i = 0; i + 1 < ys.size(); i++) {
+            float y0 = ys[i], y1 = ys[i + 1];
+            if (y1 - y0 < 0.01f) continue;
+            std::vector<std::pair<float, float>> xs;
+            for (const math::Rect& h : holes)
+                if (h.pos.y <= y0 + 0.01f && h.pos.y + h.size.y >= y1 - 0.01f) xs.push_back({h.pos.x, h.pos.x + h.size.x});
+            std::sort(xs.begin(), xs.end());
+            float x = vx0;
+            for (auto& iv : xs) {
+                if (iv.first > x) out.push_back(math::Rect(Vec(x, y0), Vec(std::min(iv.first, vx1) - x, y1 - y0)));
+                x = std::max(x, iv.second);
+                if (x >= vx1) break;
+            }
+            if (x < vx1) out.push_back(math::Rect(Vec(x, y0), Vec(vx1 - x, y1 - y0)));
+        }
+    }
+    template <class F> void outside(NVGcontext* vg, math::Rect v, const std::vector<math::Rect>& holes, F fn) {
+        // snap the band edges to whole screen pixels: where two bands met at a fractional pixel, each half-painted
+        // that row and the rail behind showed through as a thin line
+        float t[6]; nvgCurrentTransform(vg, t);
+        float pr = APP->window ? std::max(APP->window->pixelRatio, 1.f) : 1.f;
+        auto sy = [&](float y) { return (t[3] != 0.f) ? (std::round((t[3] * y + t[5]) * pr) / pr - t[5]) / t[3] : y; };
+        auto sx = [&](float x) { return (t[0] != 0.f) ? (std::round((t[0] * x + t[4]) * pr) / pr - t[4]) / t[0] : x; };
+        std::vector<math::Rect> hs;
+        for (const math::Rect& h : holes) {
+            float x0 = sx(h.pos.x), x1 = sx(h.pos.x + h.size.x), y0 = sy(h.pos.y), y1 = sy(h.pos.y + h.size.y);
+            hs.push_back(math::Rect(Vec(x0, y0), Vec(x1 - x0, y1 - y0)));
+        }
+        std::vector<math::Rect> rs;
+        outsideRects(v, hs, rs);
+        for (const math::Rect& r : rs) {
+            if (r.size.x < 0.5f || r.size.y < 0.5f) continue;
+            nvgSave(vg);
+            nvgScissor(vg, r.pos.x, r.pos.y, r.size.x, r.size.y);
+            fn();
+            nvgRestore(vg);
+        }
+    }
     std::vector<Block> blocks() {
         std::map<int, std::pair<float, float>> rows;   // row index -> x range
         for (app::ModuleWidget* mw : APP->scene->rack->getModules()) {
@@ -1107,8 +1237,9 @@ struct BackdropLayer : widget::TransparentWidget {
                 float x0 = std::min(bl.r.pos.x, a), x1 = std::max(bl.r.pos.x + bl.r.size.x, b);
                 bl.r = math::Rect(Vec(x0, bl.r.pos.y), Vec(x1 - x0, top + RACK_GRID_HEIGHT - bl.r.pos.y));
                 bl.rows.push_back(top);
+                bl.rowRects.push_back(math::Rect(Vec(a, top), Vec(b - a, RACK_GRID_HEIGHT)));
             }
-            else out.push_back({math::Rect(Vec(a, top), Vec(b - a, RACK_GRID_HEIGHT)), {top}});
+            else out.push_back({math::Rect(Vec(a, top), Vec(b - a, RACK_GRID_HEIGHT)), {top}, {math::Rect(Vec(a, top), Vec(b - a, RACK_GRID_HEIGHT))}});
             last = kv.first;
         }
         return out;
@@ -1126,21 +1257,22 @@ struct BackdropLayer : widget::TransparentWidget {
             if (m->openMode == 1) cs.extras |= X_OPEN;
             if (m->openMode == 2) cs.extras &= ~X_OPEN;
             cs.sideIdx = m->sideMat;
+            if (m->infoMode == 1) cs.extras |= X_1U;
+            if (m->infoMode == 2) cs.extras &= ~X_1U;
         }
         NVGcolor col = kColor[clamp(m->colorIdx, 0, kColorN - 1)];
-        if (m->showBg) {
-            drawLook(args.vg, v, m->look, col, cs.material == M_NONE ? col : cs.base);
-            drawImage(args, v);
-        }
         std::vector<Block> bl = blocks();
+        std::vector<math::Rect> holes;   // the module rows: left open, so Rack's own rails show (BACKDROP never redraws them)
+        for (const Block& b : bl) holes.insert(holes.end(), b.rowRects.begin(), b.rowRects.end());
+        if (m->showBg)
+            outside(args.vg, v, holes, [&]() {
+                drawLook(args.vg, v, m->look, col, cs.material == M_NONE ? col : cs.base);
+                drawImage(args, v);
+            });
         if (cs.material != M_NONE)
-            for (const Block& b : bl) drawCase(args.vg, cs, b.r, m->depthMm, m->shadow, m->rails, b.rows);
-        else if (m->showBg && m->rails)   // no case: the rails still show under the modules
-            for (const Block& b : bl)
-                for (float rt : b.rows) {
-                    drawRail(args.vg, b.r.pos.x, b.r.pos.x + b.r.size.x, rt, nvgRGB(46, 46, 48));
-                    drawRail(args.vg, b.r.pos.x, b.r.pos.x + b.r.size.x, rt + RACK_GRID_HEIGHT - 15.f, nvgRGB(46, 46, 48));
-                }
+            outside(args.vg, v, holes, [&]() {
+                for (const Block& b : bl) drawCase(args.vg, cs, b.r, m->depthMm, m->shadow, false, b.rows);
+            });
         // the patch title, above the first block
         if (m->showTitle && !bl.empty()) {
             std::string t = m->title;
@@ -1182,7 +1314,7 @@ struct BackdropPanel : widget::Widget {
         if (layer != 1) return;
         // the status light: amber while this BACKDROP dresses the rack, dim red if another one does
         bool mine = module && gOwner == widget;
-        float cx = box.size.x * 0.5f, cy = mm2px(112.f);
+        float cx = box.size.x * 0.5f, cy = mm2px(108.8f);
         nvgBeginPath(args.vg);
         nvgCircle(args.vg, cx, cy, 6.f);
         nvgFillPaint(args.vg, nvgRadialGradient(args.vg, cx, cy, 1.f, 6.f, mine ? nvgRGBA(255, 160, 40, 200) : nvgRGBA(200, 40, 30, 120), nvgRGBA(0, 0, 0, 0)));
@@ -1425,9 +1557,10 @@ struct BackdropOled : widget::OpaqueWidget {
             r.push_back({"SIDE MATERIAL", kSideMat[clamp(m->sideMat, 0, kSideMatN - 1)].name, [=](int d) { m->sideMat = wrap(m->sideMat, d, kSideMatN); hand(); }, false});
             r.push_back({"SIDE WIDTH", kSideWidth[clamp(m->sideWidth, 0, 4)], [=](int d) { m->sideWidth = wrap(m->sideWidth, d, 5); hand(); }, false});
             r.push_back({"OPEN FRAME", kOpenName[clamp(m->openMode, 0, 2)], [=](int d) { m->openMode = wrap(m->openMode, d, 3); hand(); }, false});
+            r.push_back({"INFO STRIP", kOpenName[clamp(m->infoMode, 0, 2)], [=](int d) { m->infoMode = wrap(m->infoMode, d, 3); }, false});
             r.push_back({"BG MATCHES CASE", m->look == LOOK_CASE_GRADIENT ? "ON" : "OFF", [=](int) { m->look = m->look == LOOK_CASE_GRADIENT ? LOOK_GRADIENT : LOOK_CASE_GRADIENT; hand(); }, true});
             r.push_back({"SHADOW", m->shadow ? "ON" : "OFF", [=](int) { m->shadow = !m->shadow; }, true});
-            r.push_back({"RAILS", m->rails ? "ON" : "OFF", [=](int) { m->rails = !m->rails; }, true});
+            r.push_back({"RESET CASE", "TO ITS OWN", [=](int) { m->sideShape = m->sideMat = m->sideWidth = m->openMode = m->infoMode = 0; m->depthMm = 65.f; m->shadow = true; }, true});
         }
         else {
             r.push_back({"PATCH NAME", "", nullptr, false});   // the name field sits in this row
@@ -1653,6 +1786,8 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         p->widget = this;
         addChild(p);
         addChild(createWidget<BackdropTitle>(mm2px(Vec(8.5f, 0.f))));
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(10.2f, 117.6f)), module, SynTHBloKBackdrop::IN_L));   // the meter
+        addInput(createInputCentered<BlackJack>(mm2px(Vec(20.28f, 117.6f)), module, SynTHBloKBackdrop::IN_R));
         BackdropOled* om = new BackdropOled;   // the OLED menu fills the well; the name field rides in its NAME page
         om->module = module;
         om->box.pos = mm2px(Vec(5.6f, 13.6f));
@@ -1780,6 +1915,8 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         }));
         menu->addChild(createIndexSubmenuItem("Side width", std::vector<std::string>(kSideWidth, kSideWidth + 5),
             [=]() { return (size_t) m->sideWidth; }, [=](size_t i) { m->sideWidth = (int) i; }));
+        menu->addChild(createIndexSubmenuItem("Info strip (readouts + level meter)", std::vector<std::string>(kOpenName, kOpenName + 3),
+            [=]() { return (size_t) m->infoMode; }, [=](size_t i) { m->infoMode = (int) i; }));
         menu->addChild(createIndexSubmenuItem("Open frame", std::vector<std::string>(kOpenName, kOpenName + 3),
             [=]() { return (size_t) m->openMode; }, [=](size_t i) { m->openMode = (int) i; }));
         menu->addChild(createSubmenuItem("Case depth", m->depthMm < 1.f ? "flat" : string::f("%d mm", (int) std::round(m->depthMm)), [=](Menu* sub) {
@@ -1793,7 +1930,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
             }
         }));
         menu->addChild(createBoolPtrMenuItem("Drop shadow", "", &m->shadow));
-        menu->addChild(createBoolPtrMenuItem("Rails", "", &m->rails));
+        menu->addChild(createMenuItem("Reset the case options", "sides, depth, shadow", [=]() { m->sideShape = m->sideMat = m->sideWidth = m->openMode = 0; m->depthMm = 65.f; m->shadow = true; }));
         menu->addChild(createMenuItem("Open the case library folder", "add your own cases in cases.json", [=]() {
             std::string dir = asset::user("SynTHBloK");
             system::createDirectories(dir);
