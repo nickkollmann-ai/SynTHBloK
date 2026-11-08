@@ -33,3 +33,5 @@ tools/.wb-app/
 tools/claude_inbox.json
 # BACKDROP case snapshots for review (local only)
 tools/case_shots/
+# BACKDROP lab feed (local)
+tools/backdrop_lab.json

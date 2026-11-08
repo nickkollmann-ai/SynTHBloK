@@ -484,6 +484,61 @@ footer .nav:hover{border-color:var(--cy)}
 #t-inbox .il a.f{background:transparent;color:var(--mg);border:1px solid var(--mg)}
 #t-inbox .ok{margin-top:8px;background:none;border:1px solid #ff3fa466;color:var(--mut);font:inherit;font-size:9.5px;letter-spacing:.16em;padding:1px 8px;cursor:pointer;border-radius:2px}
 #t-inbox .st{color:var(--mut);font-size:10px;margin-top:4px}
+/* BACKDROP LAB: the build process for the themes and cases (tools/backdrop_lab.json), in the THINKING look */
+#lab{position:fixed;inset:0;top:var(--tabs-h,80px);z-index:10;display:none;grid-template-rows:auto minmax(0,1fr);background:var(--bg)}
+#lab.on{display:grid}
+#lab>.head{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);background:#070b10}
+#lab>.head b{color:var(--ok);letter-spacing:.16em;font-weight:600}#lab>.head span{color:var(--mut)}
+#lab-x{background:none;border:1px solid var(--line);color:var(--tx);font:inherit;font-size:16px;line-height:1;padding:2px 9px;cursor:pointer}
+#lab-body{display:grid;grid-template-columns:minmax(260px,.9fr) minmax(0,1.6fr) minmax(280px,1fr);grid-template-rows:auto minmax(0,1fr) minmax(0,.8fr);min-height:0}
+#lab-body .card{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:8px 10px;min-height:0;overflow:auto;font-size:11px;line-height:1.4;
+  background:radial-gradient(120% 90% at 50% 0%,#04161c 0%,#010407 70%);box-shadow:inset 0 0 0 1px #0f3b46,inset 0 0 24px #00e5ff10;position:relative}
+#lab-body .ob-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;font-size:10px;letter-spacing:.16em}
+#lab-body .ob-head b{color:var(--cy);font-weight:600}#lab-body .ob-head span{color:var(--mut);letter-spacing:.06em}
+#lab-pipe{grid-column:1/-1;grid-row:1}
+#lab-steps{display:flex;gap:6px;flex-wrap:wrap}
+#lab-steps div{flex:1;min-width:110px;border:1px solid #0f3b46;padding:5px 8px;border-radius:2px;color:var(--mut)}
+#lab-steps div b{display:block;font-size:9.5px;letter-spacing:.16em;color:var(--mut);font-weight:600}
+#lab-steps div.done{border-color:#1d6b4a}#lab-steps div.done b{color:var(--ok)}
+#lab-steps div.now{border-color:var(--ok);box-shadow:0 0 12px #3dff9a44}#lab-steps div.now b{color:var(--ok)}
+#lab-steps div.now b::after{content:' ●';animation:tpulse 1.2s infinite}
+#lab-rounds{grid-column:2;grid-row:2/4}
+#lab-rlist .rd{margin-bottom:12px}#lab-rlist .rd h5{margin:0 0 4px;font-size:11px;color:var(--tx);font-weight:500}
+#lab-rlist .rd p{margin:0 0 6px;color:#9fb6c0}
+#lab-rlist .rd img{width:100%;display:block;border:1px solid #0f3b46;cursor:zoom-in}
+#lab-art{grid-column:1;grid-row:2/4}
+.lab-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+.lab-grid figure{margin:0}.lab-grid img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;border:1px solid #0f3b46;cursor:zoom-in}
+.lab-grid figcaption{font-size:9.5px;letter-spacing:.12em;color:var(--mut);margin-top:2px}
+.lab-grid.tex{grid-template-columns:repeat(3,1fr)}.lab-grid.tex img{aspect-ratio:1/1;background:#6b4a30}
+#lab-themes{grid-column:3;grid-row:2}
+#lab-tlist div{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:6px;padding:2px 0;border-bottom:1px solid #0b2a33}
+#lab-tlist div b{color:var(--am,#ffbe5a);font-weight:500}#lab-tlist div span{color:#9fb6c0;font-size:10px}
+#lab-log{grid-column:3;grid-row:3}
+#lab-entries div{padding:3px 0;border-bottom:1px solid #0b2a33;color:#cfe2ea}#lab-entries div i{font-style:normal;color:var(--mut);margin-right:6px}
+#lab *{scrollbar-color:rgba(61,255,154,.5) rgba(61,255,154,.05)}
+#lab-zoom{position:fixed;inset:0;z-index:30;display:none;background:#000d;align-items:center;justify-content:center;cursor:zoom-out}
+#lab-zoom.on{display:flex}#lab-zoom img{max-width:96vw;max-height:94vh;box-shadow:0 0 40px #000}
+#lab-btn::after{background:var(--ok);box-shadow:0 0 7px var(--ok)}
+#lab{grid-template-rows:auto auto minmax(0,1fr)!important}
+#lab-tabs{display:flex;gap:4px;padding:6px 14px;border-bottom:1px solid var(--line);background:#050a0e}
+#lab-tabs button{background:#03111a;border:1px solid #0f3b46;color:var(--mut);font:inherit;font-size:10px;letter-spacing:.16em;padding:3px 12px;cursor:pointer;border-radius:2px}
+#lab-tabs button.on{color:#011;background:var(--ok);border-color:var(--ok);box-shadow:0 0 10px #3dff9a55}
+#lab .lab-view{display:none;min-height:0;overflow:auto;padding:10px 14px;background:radial-gradient(120% 90% at 50% 0%,#04161c 0%,#010407 70%)}
+#lab .lab-view.on{display:block}#lab #lab-body.off{display:none}
+#lab .lab-view .ob-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;font-size:10px;letter-spacing:.16em}
+#lab .lab-view .ob-head b{color:var(--cy);font-weight:600}#lab .lab-view .ob-head span{color:var(--mut);letter-spacing:.06em}
+#lab-asm.on{display:grid!important;grid-template-columns:280px minmax(0,1fr);gap:14px}
+#asm-side select,#lab-cmp select{width:100%;background:#03111a;color:var(--tx);border:1px solid #0f3b46;font:inherit;font-size:11px;padding:4px;margin-bottom:8px}
+#asm-ctl{display:flex;gap:4px;margin-bottom:10px}#asm-ctl button{flex:1;background:#03111a;border:1px solid #0f3b46;color:var(--ok);font:inherit;font-size:11px;letter-spacing:.14em;padding:4px;cursor:pointer}
+#asm-steps{margin:0;padding-left:20px;font-size:11px;line-height:1.5;color:var(--mut)}
+#asm-steps li{padding:2px 0}#asm-steps li.done{color:#9fd9b8}#asm-steps li.now{color:var(--ok);text-shadow:0 0 8px #3dff9a88}
+#asm-steps li b{letter-spacing:.12em;font-weight:600}#asm-note{margin-top:10px;color:#cfe2ea;font-size:11px;border-left:2px solid var(--ok);padding:4px 8px;min-height:40px}
+#asm-stage{min-width:0;display:flex;align-items:center;justify-content:center}#asm-cv{max-width:100%;max-height:calc(100vh - var(--tabs-h,80px) - 110px);border:1px solid #0f3b46;background:#000}
+#cmp-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px}
+#cmp-row figure{margin:0}#cmp-row img{width:100%;border:1px solid #0f3b46;cursor:zoom-in;display:block}#cmp-row figcaption{font-size:10px;letter-spacing:.14em;color:var(--ok);margin:3px 0 0}
+#cmp-row .none{border:1px dashed #0f3b46;color:var(--mut);padding:40px 10px;text-align:center;font-size:11px}
+.lab-grid.big{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}.lab-grid.tex.big{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}
 /* TAB LIGHTS: a dot on a tab when something happened there since you last looked (news); a pulsing ring while
    something is going on there right now (busy); a quick glow the moment it happens (flash) */
 #wbtabs .tab{position:relative}
@@ -653,6 +708,7 @@ header::after{background:linear-gradient(90deg,transparent,var(--cy),var(--ok),t
   <button type="button" id="patch-btn" class="tab" title="Rack's live patch">PATCH MAP<b id="patch-n"></b></button>
   <button type="button" id="lib-btn" class="tab" title="Saved patches: patches/ and Rack's patches folder">PATCHES<b id="lib-n"></b></button>
   <button type="button" id="think-btn" class="tab idle" title="What Claude is doing and why (tools/claude_thinking.json)"><i></i>THINKING<b id="think-now">-</b></button>
+  <button type="button" id="lab-btn" class="tab" title="How the BACKDROP themes and cases are being built (tools/backdrop_lab.json)">BACKDROP LAB<b id="lab-n"></b></button>
   <span class="sp"></span>
   <div class="views" id="wb-views" title="What the WORKBENCH page shows"><i>VIEW</i><button type="button" data-v="all" class="on">ALL</button><button type="button" data-v="design">DESIGN</button><button type="button" data-v="code">CODE</button><button type="button" data-v="feeds">FEEDS + CHAT</button></div>
 </nav>
@@ -701,6 +757,24 @@ header::after{background:linear-gradient(90deg,transparent,var(--cy),var(--ok),t
     <div class="card oled" id="t-term"><div class="ob-head"><b>MSYS2</b><span id="term-st">MINGW64</span><button type="button" id="term-clear" title="Clear the screen">CLEAR</button></div>
       <pre id="term-out"></pre><div id="term-in"><span id="term-ps"></span><input id="term-cmd" autocomplete="off" spellcheck="false" placeholder="a command: make, git status, ls ..." /></div></div>
   </div></div>
+<div id="lab" role="dialog" aria-label="BACKDROP lab"><div class="head"><span><b>BACKDROP · LAB</b> &nbsp;<span id="lab-at"></span></span><button type="button" id="lab-x" aria-label="Close">&times;</button></div>
+  <div id="lab-tabs"><button type="button" data-v="over" class="on">OVERVIEW</button><button type="button" data-v="asm">ASSEMBLY</button><button type="button" data-v="cmp">COMPARE</button><button type="button" data-v="gal">GALLERY</button></div>
+  <div id="lab-asm" class="lab-view"><div id="asm-side"><div class="ob-head"><b>ASSEMBLY</b><span>how a case goes together</span></div>
+      <select id="asm-case"></select><div id="asm-ctl"><button type="button" id="asm-play">PLAY</button><button type="button" id="asm-prev">&lsaquo;</button><button type="button" id="asm-next">&rsaquo;</button></div>
+      <ol id="asm-steps"></ol><div id="asm-note"></div></div>
+    <div id="asm-stage"><canvas id="asm-cv" width="1100" height="700"></canvas></div></div>
+  <div id="lab-cmp" class="lab-view"><div class="ob-head"><b>COMPARE</b><span>one case, every round</span></div><select id="cmp-case"></select><div id="cmp-row"></div></div>
+  <div id="lab-gal" class="lab-view"><div class="ob-head"><b>ART BACKGROUNDS</b><span>pre-rendered: no CPU cost</span></div><div class="lab-grid big" id="gal-art"></div>
+    <div class="ob-head" style="margin-top:10px"><b>CASE TEXTURES</b><span>tinted by each case's colour</span></div><div class="lab-grid tex big" id="gal-tex"></div></div>
+  <div id="lab-body">
+    <div class="card oled" id="lab-pipe"><div class="ob-head"><b>PIPELINE</b><span id="lab-stage"></span></div><div id="lab-steps"></div></div>
+    <div class="card oled" id="lab-rounds"><div class="ob-head"><b>CASE ROUNDS</b><span>click a sheet to enlarge</span></div><div id="lab-rlist"></div></div>
+    <div class="card oled" id="lab-art"><div class="ob-head"><b>ART BACKGROUNDS</b><span>res/backdrops</span></div><div class="lab-grid" id="lab-artg"></div>
+      <div class="ob-head" style="margin-top:8px"><b>CASE TEXTURES</b><span>res/cases</span></div><div class="lab-grid tex" id="lab-texg"></div></div>
+    <div class="card oled" id="lab-themes"><div class="ob-head"><b>THEMES</b><span id="lab-tn"></span></div><div id="lab-tlist"></div></div>
+    <div class="card oled" id="lab-log"><div class="ob-head"><b>PROCESS LOG</b><span>what changed and why</span></div><div id="lab-entries"></div></div>
+  </div></div>
+<div id="lab-zoom"><img alt=""></div>
 <div id="csig" role="status" aria-live="polite" title="Click for CLAUDE · THINKING"><i></i><b id="csig-k">CLAUDE</b><span id="csig-t"></span><u id="csig-x" title="Hide until it changes">&times;</u></div>
 <div id="zoom"><img alt=""><span id="zoom-cap">click the image for actual size · click outside or press Esc to close</span></div>
 <script>
@@ -1581,7 +1655,7 @@ function closePatches() {
 const popupMode = new URLSearchParams(location.search).get('patches');
 // ---- THE TABS: which page is up (the patches pop-up, THINKING, or the workbench itself) ----
 const TabLight = (() => {
-  const ids = { wb: 'tab-wb', map: 'patch-btn', lib: 'lib-btn', think: 'think-btn' };
+  const ids = { wb: 'tab-wb', map: 'patch-btn', lib: 'lib-btn', think: 'think-btn', lab: 'lab-btn' };
   const el = k => document.getElementById(ids[k]);
   return {
     ping(k) {   // something happened on that page
@@ -1599,9 +1673,12 @@ function syncTabs() {
   document.getElementById('tab-wb').classList.toggle('on', !pOn && !tOn);
   document.getElementById('patch-btn').classList.toggle('on', pOn && !tOn && !!live);
   document.getElementById('lib-btn').classList.toggle('on', pOn && !tOn && !live);
-  document.getElementById('think-btn').classList.toggle('on', tOn);
+  const lOn = document.getElementById('lab').classList.contains('on');
+  document.getElementById('think-btn').classList.toggle('on', tOn && !lOn);
+  document.getElementById('lab-btn').classList.toggle('on', lOn);
+  if (lOn) { ['tab-wb', 'patch-btn', 'lib-btn'].forEach(id => document.getElementById(id).classList.remove('on')); }
   TabLight.seen();
-  document.getElementById('wb-views').style.visibility = !pOn && !tOn ? 'visible' : 'hidden';
+  document.getElementById('wb-views').style.visibility = !pOn && !tOn && !lOn ? 'visible' : 'hidden';
   const h = document.getElementById('wbtabs').getBoundingClientRect().bottom;
   document.documentElement.style.setProperty('--tabs-h', h + 'px');
 }
@@ -2366,6 +2443,194 @@ async function scanInbox() {
   try { TabLight.ping('think'); } catch (e) {}
 }
 scanInbox(); setInterval(scanInbox, 4000);
+// BACKDROP LAB: tools/backdrop_lab.json -> pipeline, case rounds, art, textures, themes, log
+const labOpen = on => { document.getElementById('lab').classList.toggle('on', on); syncTabs(); };
+document.getElementById('lab-btn').onclick = () => { closePatches(); try { thinkOpen(false); } catch (e) {} labOpen(true); };
+document.getElementById('lab-x').onclick = () => labOpen(false);
+['tab-wb', 'patch-btn', 'lib-btn', 'think-btn'].forEach(id => document.getElementById(id).addEventListener('click', () => document.getElementById('lab').classList.remove('on'), true));
+const labZoom = src => { const z = document.getElementById('lab-zoom'); z.querySelector('img').src = src; z.classList.add('on'); };
+document.getElementById('lab-zoom').onclick = () => document.getElementById('lab-zoom').classList.remove('on');
+let labSeen = '';
+async function scanLab() {
+  const txt = await getText('/tools/backdrop_lab.json');
+  if (txt === null || txt === labSeen) return;
+  const first = !labSeen; labSeen = txt;
+  let d; try { d = JSON.parse(txt); } catch (e) { return; }
+  const E = v => escS(v);
+  document.getElementById('lab-at').textContent = d.updated ? 'updated ' + time(d.updated) : '';
+  document.getElementById('lab-stage').textContent = d.stage || '';
+  document.getElementById('lab-steps').innerHTML = (d.steps || []).map(st => `<div class="${E(st.state)}"><b>${E(st.name)}</b>${E(st.note || '')}</div>`).join('');
+  const bust = '?v=' + (d.updated || 0);
+  document.getElementById('lab-rlist').innerHTML = (d.rounds || []).slice().reverse().map(r =>
+    `<div class="rd"><h5>ROUND ${E(r.n)} · ${E(r.title)}</h5><p>${E(r.notes || '')}</p>${r.sheet ? `<img src="${E(r.sheet)}${bust}" alt="">` : ''}</div>`).join('');
+  document.getElementById('lab-artg').innerHTML = (d.art || []).map(a => `<figure><img src="/res/backdrops/${E(a)}.jpg${bust}" alt=""><figcaption>${E(a.toUpperCase())}</figcaption></figure>`).join('');
+  document.getElementById('lab-texg').innerHTML = (d.textures || []).map(a => `<figure><img src="/res/cases/${E(a)}.png${bust}" alt=""><figcaption>${E(a.toUpperCase().replace('_', ' '))}</figcaption></figure>`).join('');
+  document.getElementById('lab-tn').textContent = (d.themes || []).length + ' themes';
+  document.getElementById('lab-tlist').innerHTML = (d.themes || []).map(t => `<div><b>${E(t.name)}</b><span>${E(t.look)} · ${E(t.case)}</span></div>`).join('');
+  document.getElementById('lab-entries').innerHTML = (d.log || []).slice().reverse().map(l => `<div><i>${E(time(l.t))}</i>${E(l.text)}</div>`).join('');
+  document.getElementById('lab-n').textContent = (d.rounds || []).length ? ' R' + d.rounds[d.rounds.length - 1].n : '';
+  document.querySelectorAll('#lab-body img').forEach(i => i.onclick = () => labZoom(i.src));
+  try { labViews(d); } catch (e) { console.log(e); }
+  if (!first) try { TabLight.ping('lab'); } catch (e) {}
+}
+
+// ---- BACKDROP LAB views (tabs) ----
+let labData = null;
+document.querySelectorAll('#lab-tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#lab-tabs button').forEach(x => x.classList.toggle('on', x === b));
+  const v = b.dataset.v;
+  document.getElementById('lab-body').classList.toggle('off', v !== 'over');
+  ['asm', 'cmp', 'gal'].forEach(k => document.getElementById('lab-' + k).classList.toggle('on', v === k));
+  if (v === 'asm') Asm.start(); else Asm.stop();
+});
+// ASSEMBLY: a case goes together on a canvas, step by step, with the same textures BACKDROP draws in Rack
+const Asm = (() => {
+  const STEPS = [
+    ['CUT', 'Cut the side cheeks and the top and bottom lips to the size of the module rows.'],
+    ['FINISH', 'Lay down the colour, lit from above: lighter at the top, darker toward the foot.'],
+    ['TEXTURE', 'Tile the texture over it: grain along the lips and up the cheeks, brushed, powder, tolex or carbon.'],
+    ['EDGES', 'Bevel highlight along the top, the ply edge, corner caps or end caps, the cheek bolts.'],
+    ['RAILS', 'Fit the Eurorack rails across each row, edge to edge, with their mounting holes.'],
+    ['DEPTH', 'The case’s real depth, seen at a slant: the side and bottom faces, shaded toward the back.'],
+    ['SHADOW', 'Two shadows: a wide soft one, and a tight contact one where the case meets the surface.'],
+    ['MODULES', 'Slide the modules in.'],
+  ];
+  const cv = document.getElementById('asm-cv'), ctx = cv.getContext('2d');
+  const imgs = {}; const img = n => { if (!imgs[n]) { imgs[n] = new Image(); imgs[n].src = '/res/cases/' + n + '.png'; } return imgs[n]; };
+  let cs = null, step = 0, t0 = 0, playing = false, raf = 0;
+  const rgb = (c, a = 1) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+  const mix = (c, d, k) => [0, 1, 2].map(i => Math.round(c[i] * (1 - k) + d[i] * k));
+  const texName = m => m === 'wood' || m === 'ply' ? 'wood' : m === 'brushed' || m === 'ears' ? 'brushed' : m === 'carbon' ? 'carbon' : m === 'tolex' ? 'tolex' : m === 'acrylic' ? null : 'powder';
+  function pattern(name, vertical, size) {
+    const im = img(name); if (!im.complete || !im.naturalWidth) return null;
+    const p = ctx.createPattern(im, 'repeat'); const k = size / im.naturalWidth;
+    p.setTransform(vertical ? new DOMMatrix().rotate(90).scale(k) : new DOMMatrix().scale(k)); return p;
+  }
+  function geo() {
+    const W = cv.width, H = cv.height, rowH = 230, rows = 2, inW = 640;
+    const inX = (W - inW) / 2 - 30, inY = (H - rows * rowH) / 2 - 10;
+    return { inX, inY, inW, inH: rows * rowH, rowH, rows };
+  }
+  function framePath(g, s, tt, t, rad) {
+    const x = g.inX - s, y = g.inY - tt, w = g.inW + 2 * s, h = g.inH + t + tt;
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, rad) : ctx.rect(x, y, w, h); return { x, y, w, h };
+  }
+  function cheekPath(g, side) {   // open frames
+    const s = cs.side, dir = side ? 1 : -1, xin = side ? g.inX + g.inW : g.inX, top = g.inY - 8, bot = g.inY + g.inH + 8;
+    ctx.beginPath(); ctx.moveTo(xin, top);
+    if (cs.ends === 'step') { const st = s * 0.55; for (let k = 0; k < g.rows; k++) { const ox = xin + dir * (s + k * st), ry = g.inY + k * g.rowH; ctx.lineTo(ox, k ? ry : top); ctx.lineTo(ox, k === g.rows - 1 ? bot : ry + g.rowH); } }
+    else if (cs.ends === 'curve') { const o0 = xin + dir * s * 0.7, o1 = xin + dir * s * 1.9; ctx.lineTo(o0, top); ctx.bezierCurveTo(o0 + dir * s * 0.2, top + (bot - top) * 0.45, o1, top + (bot - top) * 0.55, o1, bot); }
+    else { ctx.lineTo(xin + dir * s, top); ctx.lineTo(xin + dir * s, bot); }
+    ctx.lineTo(xin, bot); ctx.closePath();
+    if (cs.ends === 'truss') { const w = s * 0.62, cx = xin + dir * s * 0.5, hh = w * 1.15; let i = 0;
+      for (let ty = top + 10; ty + hh < bot - 8; ty += hh * 0.62, i++) { ctx.moveTo(cx - w / 2, i & 1 ? ty : ty + hh); ctx.lineTo(cx, i & 1 ? ty + hh : ty); ctx.lineTo(cx + w / 2, i & 1 ? ty : ty + hh); ctx.closePath(); } }
+  }
+  function rails(g, a) {
+    ctx.globalAlpha = a;
+    for (let r = 0; r < g.rows; r++) for (const yy of [g.inY + r * g.rowH, g.inY + r * g.rowH + g.rowH - 18]) {
+      const gr = ctx.createLinearGradient(0, yy, 0, yy + 18); gr.addColorStop(0, rgb(mix(cs.rail, [255, 255, 255], 0.35))); gr.addColorStop(1, rgb(mix(cs.rail, [0, 0, 0], 0.35)));
+      ctx.fillStyle = gr; ctx.fillRect(g.inX, yy, g.inW, 18);
+      ctx.fillStyle = 'rgba(0,0,0,.55)'; for (let hx = g.inX + 9; hx < g.inX + g.inW; hx += 18) { ctx.beginPath(); ctx.arc(hx, yy + 9, 2, 0, 7); ctx.fill(); }
+    }
+    ctx.globalAlpha = 1;
+  }
+  function modules(g, k) {   // slide in from above
+    const cols = ['#1a1a1a', '#202020', '#1c1c1c', '#232323'], widths = [0.16, 0.34, 0.22, 0.28];
+    for (let r = 0; r < g.rows; r++) { let x = g.inX;
+      widths.forEach((wf, i) => { const w = g.inW * wf, e = Math.min(1, Math.max(0, k * 1.6 - (r * 4 + i) * 0.12)), ease = 1 - Math.pow(1 - e, 3);
+        const y = g.inY + r * g.rowH - (1 - ease) * 260; ctx.globalAlpha = ease;
+        ctx.fillStyle = cols[(i + r) % 4]; ctx.fillRect(x + 1, y + 1, w - 2, g.rowH - 2);
+        ctx.fillStyle = '#080808'; ctx.fillRect(x + 1, y + 1, w - 2, 16); ctx.fillStyle = '#ff7a00'; ctx.fillRect(x + 1, y + 17, w - 2, 1);
+        ctx.fillStyle = '#ffbe5a'; ctx.font = '600 9px monospace'; ctx.fillText('SynTHBloK', x + 8, y + 12);
+        ctx.strokeStyle = '#3a3a3a'; for (let kx = x + 20; kx < x + w - 14; kx += 34) for (let ky = y + 50; ky < y + g.rowH - 30; ky += 46) { ctx.beginPath(); ctx.arc(kx, ky, 10, 0, 7); ctx.stroke(); }
+        x += w; }); }
+    ctx.globalAlpha = 1;
+  }
+  function draw(now) {
+    if (!cs) return;
+    const g = geo(), W = cv.width, H = cv.height;
+    const k = Math.min(1, (now - t0) / 900);   // the current step's progress
+    const on = i => i < step || (i === step);
+    const amt = i => i < step ? 1 : i === step ? k : 0;
+    // background: the SynTHBloK black gradient
+    const bg = ctx.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#1c1c1e'); bg.addColorStop(1, '#050506'); ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    const open = (cs.extras || []).includes('open'), s = cs.side * 1.4, tt = (cs.extras || []).includes('1u') ? 30 : 9, t = 9;
+    const rad = cs.ends === 'round' ? Math.max(8, Math.min(s * 0.8, 22)) : 0, d = 26 * amt(5);
+    const fp = () => open ? null : framePath(g, s, tt, t, rad);
+    // SHADOW (step 6), behind everything
+    if (on(6)) { ctx.save(); ctx.globalAlpha = amt(6); ctx.filter = 'blur(26px)'; ctx.fillStyle = 'rgba(0,0,0,.75)';
+      const x = g.inX - s, y = g.inY - tt; ctx.fillRect(x + d * 0.4 + 10, y + d * 0.6 + 20, g.inW + 2 * s, g.inH + t + tt); ctx.filter = 'blur(6px)';
+      ctx.fillRect(x + d * 0.8 + 2, y + d * 0.9 + 4, g.inW + 2 * s, g.inH + t + tt); ctx.restore(); }
+    // DEPTH (step 5)
+    if (on(5) && d > 0.5) { const n = 10; for (let i = n; i >= 1; i--) { ctx.save(); ctx.translate(d * i / n, d * i / n);
+      ctx.fillStyle = rgb(mix(cs.base, [0, 0, 0], 0.55 + 0.25 * i / n));
+      if (open) { cheekPath(g, 0); ctx.fill('evenodd'); cheekPath(g, 1); ctx.fill('evenodd'); } else { fp(); ctx.fill(); } ctx.restore(); } }
+    // CUT (0): outline; FINISH (1): colour; TEXTURE (2)
+    const shapes = open ? [() => cheekPath(g, 0), () => cheekPath(g, 1)] : [fp];
+    shapes.forEach((sh, si) => {
+      if (on(1)) { sh(); const gr = ctx.createLinearGradient(0, g.inY - 20, 0, g.inY + g.inH + 20); gr.addColorStop(0, rgb(mix(cs.base, [255, 255, 255], 0.08), amt(1))); gr.addColorStop(1, rgb(mix(cs.base, [0, 0, 0], 0.15), amt(1))); ctx.fillStyle = gr; ctx.fill('evenodd'); }
+      if (on(2) && texName(cs.mat)) { const tn = texName(cs.mat), vert = open || false; const p = pattern(tn, vert, tn === 'wood' ? 240 : tn === 'carbon' ? 120 : 180);
+        if (p) { ctx.save(); ctx.globalAlpha = 0.85 * amt(2); sh(); ctx.fillStyle = p; ctx.fill('evenodd');
+          if (!open && tn === 'wood') { const f = framePath(g, s, tt, t, rad); for (const cx of [f.x, f.x + f.w - s]) { ctx.save(); ctx.beginPath(); ctx.rect(cx, f.y, s, f.h); ctx.clip();
+            const gr = ctx.createLinearGradient(0, f.y, 0, f.y + f.h); gr.addColorStop(0, rgb(mix(cs.base, [255, 255, 255], 0.08))); gr.addColorStop(1, rgb(mix(cs.base, [0, 0, 0], 0.15)));
+            ctx.globalAlpha = amt(2); ctx.fillStyle = gr; ctx.fillRect(cx, f.y, s, f.h); ctx.globalAlpha = 0.85 * amt(2); ctx.fillStyle = pattern('wood', true, 240); ctx.fillRect(cx, f.y, s, f.h); ctx.restore(); } }
+          ctx.restore(); } }
+      if (on(0)) { sh(); ctx.setLineDash(step === 0 ? [6, 5] : []); ctx.lineDashOffset = -now / 40; ctx.strokeStyle = step === 0 ? '#3dff9a' : 'rgba(0,0,0,.6)'; ctx.lineWidth = step === 0 ? 1.5 : 1; ctx.stroke(); ctx.setLineDash([]); }
+    });
+    if (!open && on(1)) { ctx.fillStyle = '#0a0a0b'; ctx.fillRect(g.inX, g.inY, g.inW, g.inH); }   // the well
+    // EDGES (3)
+    if (on(3)) { ctx.globalAlpha = amt(3);
+      if (!open) { const f = framePath(g, s, tt, t, rad); ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.beginPath(); ctx.moveTo(f.x + rad + 2, f.y + 1.5); ctx.lineTo(f.x + f.w - rad - 2, f.y + 1.5); ctx.stroke();
+        if (cs.mat === 'ply') { ctx.fillStyle = 'rgba(214,186,140,.8)'; ctx.fillRect(f.x, f.y, 5, f.h); ctx.fillRect(f.x + f.w - 5, f.y, 5, f.h); ctx.fillStyle = pattern('ply_edge', true, 64) || '#000'; ctx.fillRect(f.x, f.y, 5, f.h); ctx.fillRect(f.x + f.w - 5, f.y, 5, f.h); }
+        if (cs.mat === 'tolex') for (const [cx, cy] of [[f.x, f.y], [f.x + f.w - 14, f.y], [f.x, f.y + f.h - 14], [f.x + f.w - 14, f.y + f.h - 14]]) { ctx.fillStyle = rgb(mix(cs.accent, [0, 0, 0], 0.5)); ctx.fillRect(cx, cy, 14, 14); }
+        if (cs.ends === 'caps') for (const cx of [f.x - 2, f.x + f.w - s]) { ctx.fillStyle = rgb(cs.accent); ctx.fillRect(cx, f.y - 2, s + 2, f.h + 4); } }
+      ctx.fillStyle = '#121214'; const xs = open ? [g.inX - cs.side * 0.7, g.inX + g.inW + cs.side * 0.7] : [g.inX - s / 2, g.inX + g.inW + s / 2];
+      for (const bx of xs) for (let r = 0; r < g.rows; r++) for (const by of [g.inY + r * g.rowH + 9, g.inY + r * g.rowH + g.rowH - 9]) { ctx.beginPath(); ctx.arc(bx, by, 3, 0, 7); ctx.fill(); }
+      ctx.globalAlpha = 1; }
+    if (on(4)) rails(g, amt(4));
+    if (on(7)) modules(g, amt(7));
+    // caption
+    ctx.fillStyle = 'rgba(61,255,154,.9)'; ctx.font = '600 13px monospace'; ctx.fillText(`${cs.name}  ·  STEP ${step + 1}/${STEPS.length}  ${STEPS[step][0]}`, 18, 26);
+    if (playing && k >= 1 && now - t0 > 1500) { if (step < STEPS.length - 1) go(step + 1); else playing = false, document.getElementById('asm-play').textContent = 'REPLAY'; }
+    raf = requestAnimationFrame(draw);
+  }
+  function list() {
+    document.getElementById('asm-steps').innerHTML = STEPS.map((st, i) => `<li class="${i < step ? 'done' : i === step ? 'now' : ''}"><b>${st[0]}</b></li>`).join('');
+    document.getElementById('asm-note').textContent = STEPS[step][1];
+  }
+  function go(i) { step = Math.max(0, Math.min(STEPS.length - 1, i)); t0 = performance.now(); list(); }
+  function setCase(i) { cs = (labData && labData.cases || [])[i]; ['wood', 'brushed', 'powder', 'tolex', 'carbon', 'ply_edge'].forEach(img); go(0); playing = true; document.getElementById('asm-play').textContent = 'PAUSE'; }
+  document.getElementById('asm-case').onchange = e => setCase(+e.target.value);
+  document.getElementById('asm-play').onclick = () => { if (!playing && step === STEPS.length - 1) go(0); playing = !playing; document.getElementById('asm-play').textContent = playing ? 'PAUSE' : 'PLAY'; t0 = performance.now(); };
+  document.getElementById('asm-prev').onclick = () => { playing = false; document.getElementById('asm-play').textContent = 'PLAY'; go(step - 1); };
+  document.getElementById('asm-next').onclick = () => { playing = false; document.getElementById('asm-play').textContent = 'PLAY'; go(step + 1); };
+  return {
+    fill(cases) { const sel = document.getElementById('asm-case'), cur = sel.value; sel.innerHTML = cases.map((c, i) => `<option value="${i}">${String(i).padStart(2, '0')}  ${escS(c.name)}</option>`).join(''); if (cur) sel.value = cur; else { const k = cases.findIndex(c => c.name === 'BIRCH PLY STUDIO'); sel.value = k >= 0 ? k : 1; } },
+    start() { if (!cs) setCase(+document.getElementById('asm-case').value || 0); cancelAnimationFrame(raf); raf = requestAnimationFrame(draw); },
+    stop() { cancelAnimationFrame(raf); },
+  };
+})();
+function labViews(d) {
+  labData = d;
+  const cases = d.cases || [];
+  Asm.fill(cases);
+  const cs = document.getElementById('cmp-case'), cur = cs.value;
+  cs.innerHTML = cases.map((c, i) => `<option value="${i}">${String(i).padStart(2, '0')}  ${escS(c.name)}</option>`).join('');
+  cs.value = cur || 1;
+  const drawCmp = () => {
+    const i = +cs.value, c = cases[i]; if (!c) return;
+    const file = String(i).padStart(2, '0') + '_' + c.name.replace(/ /g, '_') + '.jpg';
+    document.getElementById('cmp-row').innerHTML = (d.rounds || []).map(r => r.dir
+      ? `<figure><img src="${escS(r.dir + file)}?v=${d.updated}" alt="" onerror="this.parentNode.innerHTML='<div class=none>not in round ${r.n}</div>'"><figcaption>ROUND ${escS(r.n)} · ${escS(r.title)}</figcaption></figure>` : '').join('');
+    document.querySelectorAll('#cmp-row img').forEach(im => im.onclick = () => labZoom(im.src));
+  };
+  cs.onchange = drawCmp; drawCmp();
+  const bust = '?v=' + (d.updated || 0);
+  document.getElementById('gal-art').innerHTML = (d.art || []).map(a => `<figure><img src="/res/backdrops/${escS(a)}.jpg${bust}" alt=""><figcaption>${escS(a.toUpperCase())}</figcaption></figure>`).join('');
+  document.getElementById('gal-tex').innerHTML = (d.textures || []).map(a => `<figure><img src="/res/cases/${escS(a)}.png${bust}" alt=""><figcaption>${escS(a.toUpperCase().replace('_', ' '))}</figcaption></figure>`).join('');
+  document.querySelectorAll('#lab-gal img').forEach(im => im.onclick = () => labZoom(im.src));
+}
+scanLab(); setInterval(scanLab, 4000);
 // SELF-UPDATE: when design_watch.html changes on disk the page reloads itself (same tab), so a new layout or look
 // shows without pressing F5.
 (() => {

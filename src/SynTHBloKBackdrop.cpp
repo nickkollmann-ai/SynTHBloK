@@ -20,11 +20,11 @@ namespace {
 // ---------------------------------------------------------------------------------------------------------
 // THE CASE LIBRARY. A material decides how the frame is drawn; the colours make it this case.
 // ---------------------------------------------------------------------------------------------------------
-enum Material { M_NONE, M_WOOD, M_ANODIZED, M_BRUSHED, M_POWDER, M_TOLEX, M_CARBON, M_EARS, M_ACRYLIC, M_PRINTED, M_NUM };
+enum Material { M_NONE, M_WOOD, M_ANODIZED, M_BRUSHED, M_POWDER, M_TOLEX, M_CARBON, M_EARS, M_ACRYLIC, M_PRINTED, M_PLY, M_NUM };
 // the end shapes: square, slanted cheeks (a case on legs or a tiered cabinet), rounded corners, plastic end caps
-enum Ends { E_SQUARE, E_SLANT, E_ROUND, E_CAPS };
+enum Ends { E_SQUARE, E_SLANT, E_ROUND, E_CAPS, E_STEP, E_CURVE, E_TRUSS, E_ENDS };
 // extras on the top lip
-enum { X_NONE = 0, X_1U = 1, X_HANDLE = 2, X_LATCHES = 4, X_LEGS = 8 };
+enum { X_NONE = 0, X_1U = 1, X_HANDLE = 2, X_LATCHES = 4, X_LEGS = 8, X_OPEN = 16 };   // X_OPEN: just two side panels and the rails
 struct CaseStyle {
     std::string name;
     int material;
@@ -32,51 +32,85 @@ struct CaseStyle {
     float side;    // frame thickness at the ends, px
     int ends;      // Ends
     int extras;    // X_ flags
+    int sideIdx;   // side panels in another material (kSideMat index; 0: the case's own)
 };
 static NVGcolor rgb(int r, int g, int b) { return nvgRGB(r, g, b); }
 static std::vector<CaseStyle> builtInCases() {
     return {
-        {"NO CASE", M_NONE, rgb(0, 0, 0), rgb(0, 0, 0), rgb(0, 0, 0), 0.f, E_SQUARE, X_NONE},
-        {"WALNUT SKIFF", M_WOOD, rgb(92, 58, 34), rgb(60, 36, 20), rgb(46, 46, 48), 16.f, E_SQUARE, X_NONE},
-        {"OAK SKIFF", M_WOOD, rgb(168, 124, 78), rgb(128, 90, 52), rgb(52, 52, 54), 16.f, E_SQUARE, X_NONE},
-        {"EBONY SKIFF", M_WOOD, rgb(44, 30, 24), rgb(26, 18, 14), rgb(40, 40, 42), 16.f, E_SQUARE, X_NONE},
-        {"BLACK ANODIZED", M_ANODIZED, rgb(22, 22, 24), rgb(40, 40, 44), rgb(34, 34, 36), 12.f, E_SQUARE, X_NONE},
-        {"BRUSHED ALUMINUM", M_BRUSHED, rgb(160, 165, 170), rgb(120, 125, 130), rgb(110, 112, 116), 12.f, E_SQUARE, X_NONE},
-        {"POWDER COAT AMBER", M_POWDER, rgb(176, 88, 16), rgb(120, 56, 8), rgb(36, 30, 26), 12.f, E_SQUARE, X_NONE},
-        {"POWDER COAT RED", M_POWDER, rgb(150, 28, 20), rgb(100, 16, 12), rgb(36, 30, 30), 12.f, E_SQUARE, X_NONE},
-        {"POWDER COAT TEAL", M_POWDER, rgb(24, 92, 108), rgb(14, 60, 72), rgb(30, 36, 38), 12.f, E_SQUARE, X_NONE},
-        {"POWDER COAT WHITE", M_POWDER, rgb(214, 210, 200), rgb(170, 166, 158), rgb(70, 70, 72), 12.f, E_SQUARE, X_NONE},
-        {"ROAD CASE", M_TOLEX, rgb(26, 26, 28), rgb(150, 152, 156), rgb(36, 36, 38), 18.f, E_SQUARE, X_NONE},
-        {"CARBON FIBER", M_CARBON, rgb(24, 24, 26), rgb(44, 44, 48), rgb(30, 30, 32), 12.f, E_SQUARE, X_NONE},
-        {"RACK EARS", M_EARS, rgb(150, 154, 158), rgb(100, 104, 108), rgb(50, 50, 52), 22.f, E_SQUARE, X_NONE},
+        {"NO CASE", M_NONE, rgb(0, 0, 0), rgb(0, 0, 0), rgb(0, 0, 0), 0.f, E_SQUARE, X_NONE, 0},
+        {"WALNUT SKIFF", M_WOOD, rgb(92, 58, 34), rgb(60, 36, 20), rgb(46, 46, 48), 16.f, E_SQUARE, X_NONE, 0},
+        {"OAK SKIFF", M_WOOD, rgb(168, 124, 78), rgb(128, 90, 52), rgb(52, 52, 54), 16.f, E_SQUARE, X_NONE, 0},
+        {"EBONY SKIFF", M_WOOD, rgb(44, 30, 24), rgb(26, 18, 14), rgb(40, 40, 42), 16.f, E_SQUARE, X_NONE, 0},
+        {"BLACK ANODIZED", M_ANODIZED, rgb(22, 22, 24), rgb(40, 40, 44), rgb(34, 34, 36), 12.f, E_SQUARE, X_NONE, 0},
+        {"BRUSHED ALUMINUM", M_BRUSHED, rgb(160, 165, 170), rgb(120, 125, 130), rgb(110, 112, 116), 12.f, E_SQUARE, X_NONE, 0},
+        {"POWDER COAT AMBER", M_POWDER, rgb(176, 88, 16), rgb(120, 56, 8), rgb(36, 30, 26), 12.f, E_SQUARE, X_NONE, 0},
+        {"POWDER COAT RED", M_POWDER, rgb(150, 28, 20), rgb(100, 16, 12), rgb(36, 30, 30), 12.f, E_SQUARE, X_NONE, 0},
+        {"POWDER COAT TEAL", M_POWDER, rgb(24, 92, 108), rgb(14, 60, 72), rgb(30, 36, 38), 12.f, E_SQUARE, X_NONE, 0},
+        {"POWDER COAT WHITE", M_POWDER, rgb(214, 210, 200), rgb(170, 166, 158), rgb(70, 70, 72), 12.f, E_SQUARE, X_NONE, 0},
+        {"ROAD CASE", M_TOLEX, rgb(26, 26, 28), rgb(150, 152, 156), rgb(36, 36, 38), 18.f, E_SQUARE, X_NONE, 0},
+        {"CARBON FIBER", M_CARBON, rgb(24, 24, 26), rgb(44, 44, 48), rgb(30, 30, 32), 12.f, E_SQUARE, X_NONE, 0},
+        {"RACK EARS", M_EARS, rgb(150, 154, 158), rgb(100, 104, 108), rgb(50, 50, 52), 22.f, E_SQUARE, X_NONE, 0},
         // our own takes on the classic case shapes (our names; no maker's look copied badge for badge)
-        {"STALKER 6U", M_POWDER, rgb(24, 24, 26), rgb(14, 14, 15), rgb(40, 40, 42), 18.f, E_SLANT, X_LEGS},
-        {"STALKER 6U SILVER", M_BRUSHED, rgb(170, 172, 176), rgb(120, 122, 126), rgb(60, 60, 62), 18.f, E_SLANT, X_LEGS},
-        {"PERFORMER 7U", M_ANODIZED, rgb(20, 20, 22), rgb(44, 44, 48), rgb(36, 36, 38), 14.f, E_ROUND, X_1U | X_HANDLE},
-        {"PERFORMER 7U SILVER", M_BRUSHED, rgb(176, 180, 184), rgb(130, 134, 138), rgb(70, 70, 72), 14.f, E_ROUND, X_1U | X_HANDLE},
-        {"BUS STEEL 7U", M_POWDER, rgb(30, 30, 32), rgb(18, 18, 20), rgb(44, 44, 46), 12.f, E_SQUARE, X_1U},
-        {"FLATBOAT", M_POWDER, rgb(34, 34, 36), rgb(22, 22, 24), rgb(44, 44, 46), 8.f, E_ROUND, X_NONE},
-        {"FLATBOAT WHITE", M_POWDER, rgb(226, 224, 218), rgb(180, 178, 172), rgb(80, 80, 82), 8.f, E_ROUND, X_NONE},
-        {"LAB EXTRUSION", M_BRUSHED, rgb(186, 188, 190), rgb(24, 24, 26), rgb(120, 122, 124), 16.f, E_CAPS, X_NONE},
-        {"LAB EXTRUSION GREY", M_BRUSHED, rgb(120, 124, 128), rgb(20, 20, 22), rgb(90, 92, 96), 16.f, E_CAPS, X_NONE},
-        {"SUITCASE 9U", M_TOLEX, rgb(40, 40, 42), rgb(160, 162, 166), rgb(40, 40, 42), 18.f, E_SQUARE, X_HANDLE | X_LATCHES},
-        {"SUITCASE 9U BLUE", M_TOLEX, rgb(22, 34, 60), rgb(160, 162, 166), rgb(36, 40, 50), 18.f, E_SQUARE, X_HANDLE | X_LATCHES},
-        {"TIERED WALNUT", M_WOOD, rgb(98, 62, 36), rgb(62, 38, 22), rgb(30, 30, 32), 20.f, E_SLANT, X_NONE},
-        {"TIERED ASH", M_WOOD, rgb(196, 170, 130), rgb(150, 124, 88), rgb(40, 40, 42), 20.f, E_SLANT, X_NONE},
-        {"WEST COAST BOAT", M_WOOD, rgb(150, 96, 52), rgb(104, 62, 30), rgb(26, 26, 28), 22.f, E_ROUND, X_NONE},
-        {"SCAFFOLD", M_ANODIZED, rgb(18, 18, 20), rgb(36, 36, 40), rgb(30, 30, 32), 12.f, E_CAPS, X_NONE},
-        {"POD RED", M_ANODIZED, rgb(150, 26, 26), rgb(100, 14, 14), rgb(40, 30, 30), 10.f, E_ROUND, X_NONE},
-        {"POD BLUE", M_ANODIZED, rgb(28, 70, 150), rgb(16, 44, 104), rgb(30, 34, 44), 10.f, E_ROUND, X_NONE},
-        {"POD GOLD", M_ANODIZED, rgb(176, 140, 60), rgb(130, 100, 36), rgb(50, 44, 34), 10.f, E_ROUND, X_NONE},
-        {"POD PURPLE", M_ANODIZED, rgb(96, 40, 140), rgb(64, 24, 100), rgb(36, 30, 44), 10.f, E_ROUND, X_NONE},
-        {"BRUTE DOCK", M_ANODIZED, rgb(22, 22, 24), rgb(150, 154, 160), rgb(34, 34, 36), 20.f, E_CAPS, X_LEGS},
-        {"CLEAR ACRYLIC", M_ACRYLIC, rgb(200, 220, 230), rgb(255, 255, 255), rgb(70, 72, 76), 12.f, E_ROUND, X_NONE},
-        {"SMOKED ACRYLIC", M_ACRYLIC, rgb(40, 40, 46), rgb(200, 200, 210), rgb(50, 50, 54), 12.f, E_ROUND, X_NONE},
-        {"PRINTED PLA ORANGE", M_PRINTED, rgb(230, 110, 20), rgb(170, 70, 8), rgb(36, 32, 30), 14.f, E_ROUND, X_NONE},
-        {"PRINTED PLA BLACK", M_PRINTED, rgb(30, 30, 32), rgb(16, 16, 18), rgb(40, 40, 42), 14.f, E_ROUND, X_NONE},
-        {"PRINTED PETG TEAL", M_PRINTED, rgb(20, 120, 130), rgb(10, 80, 90), rgb(30, 38, 40), 14.f, E_ROUND, X_NONE},
+        {"STALKER 6U", M_POWDER, rgb(24, 24, 26), rgb(14, 14, 15), rgb(40, 40, 42), 18.f, E_SLANT, X_LEGS, 0},
+        {"STALKER 6U SILVER", M_BRUSHED, rgb(170, 172, 176), rgb(120, 122, 126), rgb(60, 60, 62), 18.f, E_SLANT, X_LEGS, 0},
+        {"PERFORMER 7U", M_ANODIZED, rgb(20, 20, 22), rgb(44, 44, 48), rgb(36, 36, 38), 14.f, E_ROUND, X_1U | X_HANDLE, 0},
+        {"PERFORMER 7U SILVER", M_BRUSHED, rgb(176, 180, 184), rgb(130, 134, 138), rgb(70, 70, 72), 14.f, E_ROUND, X_1U | X_HANDLE, 0},
+        {"BUS STEEL 7U", M_POWDER, rgb(30, 30, 32), rgb(18, 18, 20), rgb(44, 44, 46), 12.f, E_SQUARE, X_1U, 0},
+        {"FLATBOAT", M_POWDER, rgb(34, 34, 36), rgb(22, 22, 24), rgb(44, 44, 46), 8.f, E_ROUND, X_NONE, 0},
+        {"FLATBOAT WHITE", M_POWDER, rgb(226, 224, 218), rgb(180, 178, 172), rgb(80, 80, 82), 8.f, E_ROUND, X_NONE, 0},
+        {"LAB EXTRUSION", M_BRUSHED, rgb(186, 188, 190), rgb(24, 24, 26), rgb(120, 122, 124), 16.f, E_CAPS, X_NONE, 0},
+        {"LAB EXTRUSION GREY", M_BRUSHED, rgb(120, 124, 128), rgb(20, 20, 22), rgb(90, 92, 96), 16.f, E_CAPS, X_NONE, 0},
+        {"SUITCASE 9U", M_TOLEX, rgb(40, 40, 42), rgb(160, 162, 166), rgb(40, 40, 42), 18.f, E_SQUARE, X_HANDLE | X_LATCHES, 0},
+        {"SUITCASE 9U BLUE", M_TOLEX, rgb(22, 34, 60), rgb(160, 162, 166), rgb(36, 40, 50), 18.f, E_SQUARE, X_HANDLE | X_LATCHES, 0},
+        {"TIERED WALNUT", M_WOOD, rgb(98, 62, 36), rgb(62, 38, 22), rgb(30, 30, 32), 20.f, E_SLANT, X_NONE, 0},
+        {"TIERED ASH", M_WOOD, rgb(196, 170, 130), rgb(150, 124, 88), rgb(40, 40, 42), 20.f, E_SLANT, X_NONE, 0},
+        {"WEST COAST BOAT", M_WOOD, rgb(150, 96, 52), rgb(104, 62, 30), rgb(26, 26, 28), 22.f, E_ROUND, X_NONE, 0},
+        {"SCAFFOLD", M_ANODIZED, rgb(18, 18, 20), rgb(36, 36, 40), rgb(30, 30, 32), 12.f, E_CAPS, X_NONE, 0},
+        {"POD RED", M_ANODIZED, rgb(150, 26, 26), rgb(100, 14, 14), rgb(40, 30, 30), 10.f, E_ROUND, X_NONE, 0},
+        {"POD BLUE", M_ANODIZED, rgb(28, 70, 150), rgb(16, 44, 104), rgb(30, 34, 44), 10.f, E_ROUND, X_NONE, 0},
+        {"POD GOLD", M_ANODIZED, rgb(176, 140, 60), rgb(130, 100, 36), rgb(50, 44, 34), 10.f, E_ROUND, X_NONE, 0},
+        {"POD PURPLE", M_ANODIZED, rgb(96, 40, 140), rgb(64, 24, 100), rgb(36, 30, 44), 10.f, E_ROUND, X_NONE, 0},
+        {"BRUTE DOCK", M_ANODIZED, rgb(22, 22, 24), rgb(150, 154, 160), rgb(34, 34, 36), 20.f, E_CAPS, X_LEGS, 0},
+        {"CLEAR ACRYLIC", M_ACRYLIC, rgb(200, 220, 230), rgb(255, 255, 255), rgb(70, 72, 76), 12.f, E_ROUND, X_NONE, 0},
+        {"SMOKED ACRYLIC", M_ACRYLIC, rgb(40, 40, 46), rgb(200, 200, 210), rgb(50, 50, 54), 12.f, E_ROUND, X_NONE, 0},
+        {"PRINTED PLA ORANGE", M_PRINTED, rgb(230, 110, 20), rgb(170, 70, 8), rgb(36, 32, 30), 14.f, E_ROUND, X_NONE, 0},
+        {"PRINTED PLA BLACK", M_PRINTED, rgb(30, 30, 32), rgb(16, 16, 18), rgb(40, 40, 42), 14.f, E_ROUND, X_NONE, 0},
+        {"PRINTED PETG TEAL", M_PRINTED, rgb(20, 120, 130), rgb(10, 80, 90), rgb(30, 38, 40), 14.f, E_ROUND, X_NONE, 0},
+        // studio consoles in hand-finished wood: thick cheeks, the rails edge to edge, black steel hardware
+        {"BIRCH PLY STUDIO", M_PLY, rgb(196, 162, 114), rgb(150, 118, 78), rgb(26, 26, 28), 24.f, E_SLANT, X_NONE, 0},
+        {"BLACK PLY STUDIO", M_PLY, rgb(38, 33, 30), rgb(22, 19, 17), rgb(24, 24, 26), 24.f, E_SLANT, X_NONE, 0},
+        {"CHERRY STUDIO", M_WOOD, rgb(136, 60, 34), rgb(92, 38, 20), rgb(24, 24, 26), 24.f, E_SLANT, X_NONE, 0},
+        {"WALNUT CONSOLE", M_WOOD, rgb(84, 54, 34), rgb(52, 32, 20), rgb(24, 24, 26), 28.f, E_SQUARE, X_NONE, 0},
+        // open frames: two side panels, the rails bare between them, the background showing through
+        {"OAK OPEN FRAME", M_WOOD, rgb(170, 126, 80), rgb(128, 90, 52), rgb(150, 154, 158), 22.f, E_SQUARE, X_OPEN, 0},
+        {"STEPPED OAK", M_WOOD, rgb(176, 132, 84), rgb(130, 92, 54), rgb(150, 154, 158), 22.f, E_STEP, X_OPEN, 0},
+        {"STEPPED WALNUT", M_WOOD, rgb(92, 58, 36), rgb(58, 36, 22), rgb(150, 154, 158), 22.f, E_STEP, X_OPEN, 0},
+        {"CURVED CONSOLE", M_WOOD, rgb(196, 170, 130), rgb(150, 124, 88), rgb(150, 154, 158), 22.f, E_CURVE, X_OPEN, 0},
+        {"LATTICE PRINT", M_PRINTED, rgb(34, 30, 34), rgb(20, 18, 20), rgb(150, 154, 158), 26.f, E_TRUSS, X_OPEN, 0},
+        {"LATTICE PRINT ORANGE", M_PRINTED, rgb(230, 110, 20), rgb(170, 70, 8), rgb(150, 154, 158), 26.f, E_TRUSS, X_OPEN, 0},
     };
 }
+// SIDE PANELS: put any side panels on any case (shape, material, width, open frame); AUTO keeps the case's own
+struct SideMat { const char* name; int material; NVGcolor base; };
+static const SideMat kSideMat[] = {
+    {"AUTO", M_NONE, {}}, {"WALNUT", M_WOOD, {}}, {"OAK", M_WOOD, {}}, {"CHERRY", M_WOOD, {}}, {"EBONY", M_WOOD, {}}, {"ASH", M_WOOD, {}},
+    {"BIRCH PLY", M_PLY, {}}, {"BLACK PLY", M_PLY, {}}, {"BLACK STEEL", M_POWDER, {}}, {"BRUSHED", M_BRUSHED, {}}, {"CARBON", M_CARBON, {}},
+    {"ORANGE PRINT", M_PRINTED, {}}, {"WHITE", M_POWDER, {}},
+};
+static const int kSideMatN = (int) (sizeof(kSideMat) / sizeof(kSideMat[0]));
+static NVGcolor sideColor(int i) {
+    static const int c[][3] = {{0, 0, 0}, {92, 58, 34}, {168, 124, 78}, {136, 60, 34}, {44, 30, 24}, {196, 170, 130}, {196, 162, 114}, {38, 33, 30},
+                               {26, 26, 28}, {170, 172, 176}, {24, 24, 26}, {230, 110, 20}, {220, 218, 210}};
+    i = clamp(i, 0, kSideMatN - 1);
+    return nvgRGB(c[i][0], c[i][1], c[i][2]);
+}
+static const char* const kSideShape[] = {"AUTO", "SQUARE", "SLANTED", "ROUNDED", "STEPPED", "CURVED", "LATTICE", "END CAPS"};
+static const int kSideShapeEnds[] = {-1, E_SQUARE, E_SLANT, E_ROUND, E_STEP, E_CURVE, E_TRUSS, E_CAPS};
+static const int kSideShapeN = 8;
+static const char* const kSideWidth[] = {"AUTO", "SLIM", "NORMAL", "WIDE", "XL"};
+static const float kSideWidthK[] = {1.f, 0.65f, 1.f, 1.45f, 1.9f};
+static const char* const kOpenName[] = {"AUTO", "ON", "OFF"};
+
 // the library: the built-in cases, then any in Rack's user folder, SynTHBloK/cases.json:
 //   [{"name": "MY CASE", "material": "wood", "base": "#5c3a22", "accent": "#3c2414", "rail": "#2e2e30", "side": 16,
 //     "ends": "slant", "extras": ["1u", "handle", "latches", "legs"]}]
@@ -95,8 +129,8 @@ static std::vector<CaseStyle>& caseLibrary() {
     json_error_t err;
     json_t* j = json_load_file(asset::user("SynTHBloK/cases.json").c_str(), 0, &err);
     if (!j) return lib;
-    static const char* const mats[M_NUM] = {"none", "wood", "anodized", "brushed", "powder", "tolex", "carbon", "ears", "acrylic", "printed"};
-    static const char* const ends[4] = {"square", "slant", "round", "caps"};
+    static const char* const mats[M_NUM] = {"none", "wood", "anodized", "brushed", "powder", "tolex", "carbon", "ears", "acrylic", "printed", "ply"};
+    static const char* const ends[E_ENDS] = {"square", "slant", "round", "caps", "step", "curve", "truss"};
     size_t i; json_t* e;
     json_array_foreach(j, i, e) {
         CaseStyle c = lib[1];
@@ -108,7 +142,7 @@ static std::vector<CaseStyle>& caseLibrary() {
         c.ends = E_SQUARE; c.extras = X_NONE;
         if (json_t* v = json_object_get(e, "ends")) {
             std::string m = json_is_string(v) ? json_string_value(v) : "";
-            for (int k = 0; k < 4; k++) if (m == ends[k]) c.ends = k;
+            for (int k = 0; k < E_ENDS; k++) if (m == ends[k]) c.ends = k;
         }
         if (json_t* v = json_object_get(e, "extras")) {
             size_t xi; json_t* xe;
@@ -118,6 +152,7 @@ static std::vector<CaseStyle>& caseLibrary() {
                 if (x == "handle") c.extras |= X_HANDLE;
                 if (x == "latches") c.extras |= X_LATCHES;
                 if (x == "legs") c.extras |= X_LEGS;
+                if (x == "open") c.extras |= X_OPEN;
             }
         }
         c.base = hexColor(json_string_value(json_object_get(e, "base")), c.base);
@@ -131,10 +166,15 @@ static std::vector<CaseStyle>& caseLibrary() {
 }
 
 // the SynTHBloK looks for the background
-static const int kLookN = 18;
+static const int kLookN = 30;
+enum { LOOK_GRADIENT = 18, LOOK_CASE_GRADIENT = 19, LOOK_ART = 20 };
+// ART: detailed pictures made once (tools/make_backdrop_art.py) and shipped in res/backdrops/: one textured
+// rectangle per frame, so they cost no more than a plain colour
+static const char* const kArtFile[10] = {"nebula", "aurora", "topographic", "synthwave", "flowfield", "crystal", "oscilloscope", "marble", "circuit", "spectrum"};
 static const char* const kLookName[kLookN] = {"Plain colour", "Amber grid", "OLED glow", "Diamond plate", "Deep space", "Amber rails (Rack's look, warmer)",
     "Carbon weave", "Circuit traces", "CRT scanlines", "Hex mesh", "Blueprint", "Pegboard", "Acoustic foam", "Brushed steel",
-    "Sunset fade", "Halftone dots", "Brick wall", "Wood slats"};
+    "Sunset fade", "Halftone dots", "Brick wall", "Wood slats", "Gradient (the colour, to black)", "Case gradient (follows the case)",
+    "Art: Nebula", "Art: Aurora", "Art: Topographic", "Art: Synthwave", "Art: Flow field", "Art: Crystal", "Art: Oscilloscope", "Art: Gold marble", "Art: Circuit board", "Art: Spectrum"};
 static const char* const kFitName[4] = {"Tiled across the rack", "Fill the screen (snaps to fit)", "Fit the screen (whole image shows)", "Centred on the screen"};
 static const int kColorN = 24;
 static const char* const kColorName[kColorN] = {"Black", "Charcoal", "Deep amber", "Ember", "Midnight teal", "Plum", "Forest", "Steel",
@@ -149,14 +189,16 @@ static const NVGcolor kColor[kColorN] = {rgb(6, 6, 6), rgb(22, 22, 24), rgb(40, 
 struct SynTHBloKBackdrop : Module {
     // settings (saved with the patch)
     bool showBg = true;
-    int look = 1;
+    int look = LOOK_GRADIENT;   // loads as the SynTHBloK black gradient (theme 0), no grid
     int colorIdx = 0;
     std::string imagePath;
     int fit = 1;   // fill the screen: the image always snaps to cover the whole background
     float imgScale = 1.f, imgDim = 0.f;
     float imgW = 1.f, imgH = 1.f, imgX = 0.f, imgY = 0.f;   // fine-tuning: width / height stretch, X / Y offset (of the image's size)
-    int caseIdx = 1;
+    int caseIdx = 4;   // BLACK ANODIZED
+    int themeIdx = 0;  // the theme last picked (-1: changed by hand since)
     float depthMm = 65.f;   // the case depth, mm, as real builds come
+    int sideShape = 0, sideMat = 0, sideWidth = 0, openMode = 0;   // side panels (0: the case's own)
     bool shadow = true, rails = true;
     bool showTitle = false;   // the name above the case: optional, off unless turned on (NAME page or menu)
     std::string title;   // empty: the patch's file name
@@ -167,6 +209,7 @@ struct SynTHBloKBackdrop : Module {
         json_t* r = json_object();
         json_object_set_new(r, "showBg", json_boolean(showBg));
         json_object_set_new(r, "look", json_integer(look));
+        json_object_set_new(r, "theme", json_integer(themeIdx));
         json_object_set_new(r, "color", json_integer(colorIdx));
         json_object_set_new(r, "image", json_string(imagePath.c_str()));
         json_object_set_new(r, "fit", json_integer(fit));
@@ -178,6 +221,10 @@ struct SynTHBloKBackdrop : Module {
         json_object_set_new(r, "imgY", json_real(imgY));
         json_object_set_new(r, "case", json_string(caseLibrary()[clamp(caseIdx, 0, (int) caseLibrary().size() - 1)].name.c_str()));
         json_object_set_new(r, "depthMm", json_real(depthMm));
+        json_object_set_new(r, "sideShape", json_integer(sideShape));
+        json_object_set_new(r, "sideMat", json_integer(sideMat));
+        json_object_set_new(r, "sideWidth", json_integer(sideWidth));
+        json_object_set_new(r, "openMode", json_integer(openMode));
         json_object_set_new(r, "shadow", json_boolean(shadow));
         json_object_set_new(r, "rails", json_boolean(rails));
         json_object_set_new(r, "showTitle", json_boolean(showTitle));
@@ -187,6 +234,8 @@ struct SynTHBloKBackdrop : Module {
     void dataFromJson(json_t* r) override {
         if (json_t* v = json_object_get(r, "showBg")) showBg = json_boolean_value(v);
         if (json_t* v = json_object_get(r, "look")) look = clamp((int) json_integer_value(v), 0, kLookN - 1);
+        themeIdx = -1;
+        if (json_t* v = json_object_get(r, "theme")) themeIdx = (int) json_integer_value(v);
         if (json_t* v = json_object_get(r, "color")) colorIdx = clamp((int) json_integer_value(v), 0, kColorN - 1);
         if (json_t* v = json_object_get(r, "image")) imagePath = json_string_value(v);
         if (json_t* v = json_object_get(r, "fit")) fit = clamp((int) json_integer_value(v), 0, 3);
@@ -202,6 +251,10 @@ struct SynTHBloKBackdrop : Module {
         }
         if (json_t* v = json_object_get(r, "depth")) depthMm = clamp((float) json_number_value(v), 0.f, 1.f) * 120.f;   // older patches: a share
         if (json_t* v = json_object_get(r, "depthMm")) depthMm = clamp((float) json_number_value(v), 0.f, 200.f);
+        if (json_t* v = json_object_get(r, "sideShape")) sideShape = clamp((int) json_integer_value(v), 0, kSideShapeN - 1);
+        if (json_t* v = json_object_get(r, "sideMat")) sideMat = clamp((int) json_integer_value(v), 0, kSideMatN - 1);
+        if (json_t* v = json_object_get(r, "sideWidth")) sideWidth = clamp((int) json_integer_value(v), 0, 4);
+        if (json_t* v = json_object_get(r, "openMode")) openMode = clamp((int) json_integer_value(v), 0, 2);
         if (json_t* v = json_object_get(r, "shadow")) shadow = json_boolean_value(v);
         if (json_t* v = json_object_get(r, "rails")) rails = json_boolean_value(v);
         if (json_t* v = json_object_get(r, "showTitle")) showTitle = json_boolean_value(v);
@@ -225,7 +278,11 @@ struct BackdropLayer : widget::TransparentWidget {
         if (image >= 0 && imageVg) nvgDeleteImage(imageVg, image);
         image = -1; imageLoaded.clear(); imageVg = NULL;
     }
-    ~BackdropLayer() { freeImage(); }
+    ~BackdropLayer() {
+        freeImage();
+        if (art >= 0 && artVg) nvgDeleteImage(artVg, art);
+        if (texVg) for (auto& kv : texImg) if (kv.second >= 0) nvgDeleteImage(texVg, kv.second);
+    }
 
     void step() override {
         if (parent) box = math::Rect(Vec(0, 0), parent->box.size);
@@ -233,7 +290,42 @@ struct BackdropLayer : widget::TransparentWidget {
     }
 
     // ---- the background ----
-    void drawLook(NVGcontext* vg, math::Rect v, int look, NVGcolor base) {
+    // GRADIENT looks: like the SynTHBloK panels, a lift at the top fading to near black, a soft glow in the middle
+    void drawGradient(NVGcontext* vg, math::Rect v, NVGcolor c) {
+        float x0 = v.pos.x, y0 = v.pos.y;
+        NVGcolor top = nvgRGBf(std::min(1.f, c.r * 1.25f + 0.07f), std::min(1.f, c.g * 1.25f + 0.07f), std::min(1.f, c.b * 1.25f + 0.075f));
+        NVGcolor bot = nvgRGBf(c.r * 0.22f + 0.008f, c.g * 0.22f + 0.008f, c.b * 0.22f + 0.01f);
+        nvgBeginPath(vg);
+        nvgRect(vg, x0, y0, v.size.x, v.size.y);
+        nvgFillPaint(vg, nvgLinearGradient(vg, x0, y0, x0, y0 + v.size.y, top, bot));
+        nvgFill(vg);
+        float cx = x0 + v.size.x * 0.5f, cy = y0 + v.size.y * 0.35f, r = std::max(v.size.x, v.size.y) * 0.6f;
+        nvgBeginPath(vg);
+        nvgRect(vg, x0, y0, v.size.x, v.size.y);
+        nvgFillPaint(vg, nvgRadialGradient(vg, cx, cy, r * 0.1f, r, nvgRGBAf(1.f, 1.f, 1.f, 0.035f), nvgRGBAf(0.f, 0.f, 0.f, 0.f)));
+        nvgFill(vg);
+    }
+    // ART: the picture fills the visible screen (stays put while you scroll), loaded once and kept
+    int art = -1, artFor = -1; NVGcontext* artVg = NULL; int artW = 0, artH = 0;
+    void drawArt(NVGcontext* vg, math::Rect v, int k) {
+        if (art < 0 || artFor != k || artVg != vg) {
+            if (art >= 0 && artVg) nvgDeleteImage(artVg, art);
+            art = nvgCreateImage(vg, asset::plugin(pluginInstance, string::f("res/backdrops/%s.jpg", kArtFile[k])).c_str(), 0);
+            artFor = k; artVg = vg; artW = artH = 0;
+            if (art >= 0) nvgImageSize(vg, art, &artW, &artH);
+        }
+        if (art < 0 || artW <= 0 || artH <= 0) { drawGradient(vg, v, nvgRGB(6, 6, 6)); return; }
+        float sc = std::max(v.size.x / artW, v.size.y / artH) * 1.004f, w = artW * sc, h = artH * sc;
+        float ox = v.pos.x + (v.size.x - w) * 0.5f, oy = v.pos.y + (v.size.y - h) * 0.5f;
+        nvgBeginPath(vg);
+        nvgRect(vg, v.pos.x, v.pos.y, v.size.x, v.size.y);
+        nvgFillPaint(vg, nvgImagePattern(vg, ox, oy, w, h, 0.f, art, 1.f));
+        nvgFill(vg);
+    }
+    void drawLook(NVGcontext* vg, math::Rect v, int look, NVGcolor base, NVGcolor caseCol) {
+        if (look >= LOOK_ART) { drawArt(vg, v, clamp(look - LOOK_ART, 0, 9)); return; }
+        if (look == LOOK_GRADIENT) { drawGradient(vg, v, base); return; }
+        if (look == LOOK_CASE_GRADIENT) { drawGradient(vg, v, nvgLerpRGBA(caseCol, nvgRGB(0, 0, 0), 0.45f)); return; }
         nvgBeginPath(vg);
         nvgRect(vg, v.pos.x, v.pos.y, v.size.x, v.size.y);
         nvgFillColor(vg, base);
@@ -518,7 +610,113 @@ struct BackdropLayer : widget::TransparentWidget {
     }
     static float topLip(const CaseStyle& cs) { return cs.extras & X_1U ? 22.f : 6.f; }
     static float caseRadius(const CaseStyle& cs) { return cs.ends == E_ROUND ? std::max(6.f, std::min(cs.side * 0.8f, 16.f)) : 0.f; }
+    // ---- REAL TEXTURES (tools/make_case_textures.py -> res/cases/*.png): neutral light/dark overlays drawn over the
+    // case's own colour, tiled; one textured rectangle each, so realism costs next to nothing
+    std::map<std::string, int> texImg; NVGcontext* texVg = NULL;
+    int tex(NVGcontext* vg, const char* name) {
+        if (texVg != vg) { texImg.clear(); texVg = vg; }   // a new GL context: images belong to the old one
+        auto it = texImg.find(name);
+        if (it != texImg.end()) return it->second;
+        int img = nvgCreateImage(vg, asset::plugin(pluginInstance, string::f("res/cases/%s.png", name)).c_str(), NVG_IMAGE_REPEATX | NVG_IMAGE_REPEATY);
+        texImg[name] = img;
+        return img;
+    }
+    void texRect(NVGcontext* vg, float x, float y, float w, float h, float rad, const char* name, float alpha, bool vertical, float size = 200.f) {
+        int img = tex(vg, name);
+        if (img < 0) return;
+        NVGpaint p = vertical ? nvgImagePattern(vg, x, y, size, size, (float) M_PI * 0.5f, img, alpha) : nvgImagePattern(vg, x, y, size, size, 0.f, img, alpha);
+        nvgBeginPath(vg);
+        nvgRoundedRect(vg, x, y, w, h, rad);
+        nvgFillPaint(vg, p);
+        nvgFill(vg);
+    }
+    static NVGcolor cheekBase(const CaseStyle& cs) { return cs.sideIdx > 0 ? sideColor(cs.sideIdx) : cs.base; }
+    static int cheekMat(const CaseStyle& cs) { return cs.sideIdx > 0 ? kSideMat[clamp(cs.sideIdx, 0, kSideMatN - 1)].material : cs.material; }
+    static const char* matTex(int mat) {
+        switch (mat) {
+            case M_WOOD: case M_PLY: return "wood";
+            case M_BRUSHED: case M_EARS: return "brushed";
+            case M_CARBON: return "carbon";
+            case M_TOLEX: return "tolex";
+            case M_ACRYLIC: return NULL;
+            default: return "powder";
+        }
+    }
+    // side panels in their own material, over the case's ends (square, rounded, end-cap frames)
+    void drawCheeks(NVGcontext* vg, const CaseStyle& cs, float x, float y, float w, float h) {
+        if (cs.sideIdx <= 0) return;
+        float s = cs.side, rad = caseRadius(cs);
+        NVGcolor b = cheekBase(cs);
+        int mat = cheekMat(cs);
+        for (int side = 0; side < 2; side++) {
+            float cx = side ? x + w - s : x;
+            nvgSave(vg); nvgScissor(vg, cx, y - 2.f, s, h + 4.f);
+            nvgBeginPath(vg); nvgRoundedRect(vg, x, y, w, h, rad);
+            nvgFillPaint(vg, nvgLinearGradient(vg, x, y, x, y + h, nvgLerpRGBA(b, nvgRGB(255, 255, 255), 0.08f), nvgLerpRGBA(b, nvgRGB(0, 0, 0), 0.15f)));
+            nvgFill(vg);
+            if (const char* t = matTex(mat)) texRect(vg, cx, y, s, h, 0.f, t, 0.85f, true, t[0] == 'w' ? 240.f : 180.f);
+            if (mat == M_PLY) {
+                float e = std::min(5.f, s * 0.25f), ex = side ? cx + s - e : cx;
+                nvgBeginPath(vg); nvgRect(vg, ex, y, e, h);
+                nvgFillColor(vg, nvgLerpRGBA(nvgRGB(214, 186, 140), b, 0.25f)); nvgFill(vg);
+                texRect(vg, ex, y, e, h, 0.f, "ply_edge", 0.9f, true, 64.f);
+            }
+            nvgRestore(vg);
+            nvgBeginPath(vg); nvgMoveTo(vg, side ? cx : cx + s, y + 1.f); nvgLineTo(vg, side ? cx : cx + s, y + h - 1.f);   // the joint
+            nvgStrokeColor(vg, nvgRGBA(0, 0, 0, 120)); nvgStrokeWidth(vg, 1.f); nvgStroke(vg);
+        }
+    }
     void drawFrameFill(NVGcontext* vg, const CaseStyle& cs, float x, float y, float w, float h) {
+        float rad = caseRadius(cs), s = cs.side;
+        auto base = [&](float bx, float by, float bw, float bh, float r) {   // the colour, lit from above
+            nvgBeginPath(vg); nvgRoundedRect(vg, bx, by, bw, bh, r);
+            nvgFillPaint(vg, nvgLinearGradient(vg, bx, by, bx, by + bh, nvgLerpRGBA(cs.base, nvgRGB(255, 255, 255), 0.07f), nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.12f)));
+            nvgFill(vg);
+        };
+        if (cs.material == M_WOOD || cs.material == M_PLY) {
+            base(x, y, w, h, rad);
+            texRect(vg, x, y, w, h, rad, "wood", 0.85f, false, 240.f);   // grain along the lips
+            for (int side = 0; side < 2; side++) {   // and up the cheeks
+                float cx = side ? x + w - s : x;
+                nvgSave(vg); nvgScissor(vg, cx, y, s, h);
+                base(x, y, w, h, rad);
+                texRect(vg, cx, y, s, h, 0.f, "wood", 0.85f, true, 240.f);
+                if (cs.material == M_PLY) {   // the layered cut edge round the outside of the cheek
+                    float e = std::min(5.f, s * 0.25f), ex = side ? cx + s - e : cx;
+                    nvgBeginPath(vg); nvgRect(vg, ex, y, e, h);
+                    nvgFillColor(vg, nvgLerpRGBA(nvgRGB(214, 186, 140), cs.base, 0.25f)); nvgFill(vg);
+                    texRect(vg, ex, y, e, h, 0.f, "ply_edge", 0.9f, true, 64.f);
+                }
+                nvgRestore(vg);
+            }
+            if (cs.material == M_PLY) {   // ply edge along the top lip too
+                float e = 3.f;
+                nvgBeginPath(vg); nvgRect(vg, x + s, y, w - 2.f * s, e);
+                nvgFillColor(vg, nvgLerpRGBA(nvgRGB(214, 186, 140), cs.base, 0.25f)); nvgFill(vg);
+                texRect(vg, x + s, y, w - 2.f * s, e, 0.f, "ply_edge", 0.9f, false, 64.f);
+            }
+            return;
+        }
+        if (cs.material == M_BRUSHED || cs.material == M_EARS) {
+            if (cs.ends == E_CAPS) base(x, y, w, h, rad); else base(x, y, w, h, rad);
+            texRect(vg, x, y, w, h, rad, "brushed", 0.9f, false, 300.f);
+            return;
+        }
+        if (cs.material == M_CARBON) { base(x, y, w, h, rad); texRect(vg, x, y, w, h, rad, "carbon", 0.8f, false, 120.f); return; }
+        if (cs.material == M_TOLEX) {
+            base(x, y, w, h, rad); texRect(vg, x, y, w, h, rad, "tolex", 0.9f, false, 160.f);
+            nvgBeginPath(vg); nvgRect(vg, x + 1.5f, y + 1.5f, w - 3.f, h - 3.f);   // the aluminium edge trim
+            nvgStrokeColor(vg, nvgTransRGBA(cs.accent, 120)); nvgStrokeWidth(vg, 2.f); nvgStroke(vg);
+            return;
+        }
+        if (cs.material == M_POWDER || cs.material == M_ANODIZED) {
+            base(x, y, w, h, rad);
+            texRect(vg, x, y, w, h, rad, "powder", cs.material == M_POWDER ? 0.9f : 0.45f, false, 160.f);
+            return;
+        }
+        drawFrameOld(vg, cs, x, y, w, h);
+    }
+    void drawFrameOld(NVGcontext* vg, const CaseStyle& cs, float x, float y, float w, float h) {
         float rad = caseRadius(cs);
         switch (cs.material) {
             case M_ACRYLIC: {   // see-through: a tint, a bright cut edge and a diagonal glint
@@ -570,7 +768,7 @@ struct BackdropLayer : widget::TransparentWidget {
             }
             case M_BRUSHED: {   // fine horizontal brushing
                 NVGcolor lo = cs.ends == E_CAPS ? nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.25f) : cs.accent;   // the end caps take the accent
-                NVGpaint p = nvgLinearGradient(vg, x, y, x, y + h, nvgLerpRGBA(cs.base, nvgRGB(255, 255, 255), 0.25f), lo);
+                NVGpaint p = nvgLinearGradient(vg, x, y, x, y + h, nvgLerpRGBA(cs.base, nvgRGB(255, 255, 255), 0.06f), nvgLerpRGBA(lo, cs.base, 0.4f));
                 nvgBeginPath(vg); nvgRoundedRect(vg, x, y, w, h, rad); nvgFillPaint(vg, p); nvgFill(vg);
                 nvgSave(vg);
                 nvgScissor(vg, x, y, w, h);
@@ -615,15 +813,101 @@ struct BackdropLayer : widget::TransparentWidget {
             }
         }
     }
+    // ---- OPEN FRAMES: only the two side panels (square, stepped, curved or a printed lattice) and the bare rails
+    void cheekPath(NVGcontext* vg, const CaseStyle& cs, float xin, float y, float h, int dir, int rows, bool holes) {
+        // xin: the inner edge (against the modules); dir -1 = left cheek (grows left), +1 = right cheek
+        float s = cs.side, rh = RACK_GRID_HEIGHT, lip = 8.f;
+        float top = y - lip, bot = y + h + lip;
+        nvgBeginPath(vg);
+        nvgMoveTo(vg, xin, top);
+        if (cs.ends == E_STEP) {   // a staircase: each row sets back, so the panel steps out toward the bottom
+            float step = s * 0.55f;
+            for (int k = 0; k < rows; k++) {
+                float ox = xin + dir * (s + k * step), ry = y + k * rh;
+                nvgLineTo(vg, ox, k == 0 ? top : ry);
+                nvgLineTo(vg, ox, k == rows - 1 ? bot : ry + rh);
+            }
+        }
+        else if (cs.ends == E_CURVE) {   // one long sweep, slim at the top, wide at the foot
+            float o0 = xin + dir * s * 0.7f, o1 = xin + dir * s * 1.9f;
+            nvgLineTo(vg, o0, top);
+            nvgBezierTo(vg, o0 + dir * s * 0.2f, top + (bot - top) * 0.45f, o1, top + (bot - top) * 0.55f, o1, bot);
+        }
+        else { nvgLineTo(vg, xin + dir * s, top); nvgLineTo(vg, xin + dir * s, bot); }
+        nvgLineTo(vg, xin, bot);
+        nvgClosePath(vg);
+        if (holes && cs.ends == E_TRUSS) {   // the printed lattice: triangles cut through, alternating
+            float w = s * 0.62f, cx = xin + dir * s * 0.5f, hh = w * 1.15f;
+            int i = 0;
+            for (float ty = top + 10.f; ty + hh < bot - 8.f; ty += hh * 0.62f, i++) {
+                nvgMoveTo(vg, cx - w * 0.5f, i & 1 ? ty : ty + hh);
+                nvgLineTo(vg, cx + w * 0.5f, i & 1 ? ty : ty + hh);
+                nvgLineTo(vg, cx, i & 1 ? ty + hh : ty);
+                nvgClosePath(vg);
+                nvgPathWinding(vg, NVG_HOLE);
+            }
+        }
+    }
+    void drawOpenFrame(NVGcontext* vg, const CaseStyle& cs, math::Rect in, float depthMm, bool doShadow, bool doRails, const std::vector<float>& rowTops) {
+        int rows = std::max(1, (int) rowTops.size());
+        float d = mm2px(depthMm) * 0.18f;
+        for (int side = 0; side < 2; side++) {
+            int dir = side ? 1 : -1;
+            float xin = side ? in.pos.x + in.size.x : in.pos.x;
+            if (doShadow) {   // a soft shadow under each panel
+                nvgSave(vg); nvgTranslate(vg, d * 0.5f + 4.f, d * 0.7f + 8.f);
+                cheekPath(vg, cs, xin, in.pos.y, in.size.y, dir, rows, false);
+                nvgFillColor(vg, nvgRGBA(0, 0, 0, 90)); nvgFill(vg);
+                nvgRestore(vg);
+            }
+            if (d > 0.5f) {   // the panel's thickness, seen behind it
+                int n = std::max(2, std::min(16, (int) (d / 2.f)));
+                for (int k = n; k >= 1; k--) {
+                    nvgSave(vg); nvgTranslate(vg, d * k / n, d * k / n);
+                    cheekPath(vg, cs, xin, in.pos.y, in.size.y, dir, rows, true);
+                    nvgFillColor(vg, nvgLerpRGBA(cheekBase(cs), nvgRGB(0, 0, 0), 0.5f + 0.25f * k / n)); nvgFill(vg);
+                    nvgRestore(vg);
+                }
+            }
+            // the face: the colour lit from above, then its texture
+            cheekPath(vg, cs, xin, in.pos.y, in.size.y, dir, rows, true);
+            nvgFillPaint(vg, nvgLinearGradient(vg, 0, in.pos.y, 0, in.pos.y + in.size.y, nvgLerpRGBA(cheekBase(cs), nvgRGB(255, 255, 255), 0.08f), nvgLerpRGBA(cheekBase(cs), nvgRGB(0, 0, 0), 0.15f)));
+            nvgFill(vg);
+            const char* t = matTex(cheekMat(cs));
+            int img = t ? tex(vg, t) : -1;
+            if (img >= 0) {
+                nvgFillPaint(vg, nvgImagePattern(vg, xin, in.pos.y, 240.f, 240.f, (float) M_PI * 0.5f, img, 0.85f));
+                nvgFill(vg);
+            }
+            nvgStrokeColor(vg, nvgRGBA(0, 0, 0, 120)); nvgStrokeWidth(vg, 0.8f); nvgStroke(vg);
+            for (float rt : rowTops)   // the black steel bolts holding the rails
+                for (int k = 0; k < 2; k++) {
+                    nvgBeginPath(vg);
+                    nvgCircle(vg, xin + dir * cs.side * 0.5f, rt + (k ? RACK_GRID_HEIGHT - 7.5f : 7.5f), 2.2f);
+                    nvgFillColor(vg, nvgRGB(16, 16, 18)); nvgFill(vg);
+                }
+        }
+        if (doRails)
+            for (float rt : rowTops) {
+                drawRail(vg, in.pos.x, in.pos.x + in.size.x, rt, cs.rail);
+                drawRail(vg, in.pos.x, in.pos.x + in.size.x, rt + RACK_GRID_HEIGHT - 15.f, cs.rail);
+            }
+    }
     void drawCase(NVGcontext* vg, const CaseStyle& cs, math::Rect in, float depthMm, bool doShadow, bool doRails, const std::vector<float>& rowTops) {
+        if (cs.extras & X_OPEN) { drawOpenFrame(vg, cs, in, depthMm, doShadow, doRails, rowTops); return; }
         float s = cs.side, t = 6.f, tt = topLip(cs);   // ends, the bottom lip and the top lip (taller with a 1U row)
         float x = in.pos.x - s, y = in.pos.y - tt, w = in.size.x + 2.f * s, h = in.size.y + t + tt;
         float d = mm2px(depthMm) * 0.18f;   // the visible side, below and to the right: the real depth, seen at a slant
         if (doShadow) {
-            NVGpaint sh = nvgBoxGradient(vg, x + d * 0.6f, y + d * 0.9f, w, h, 8.f, 22.f, nvgRGBA(0, 0, 0, 150), nvgRGBA(0, 0, 0, 0));
+            // two shadows: a wide soft ambient one, and a tight contact one where the case meets the surface
+            float rr = caseRadius(cs);
             nvgBeginPath(vg);
-            nvgRect(vg, x - 30.f, y - 30.f, w + d + 60.f, h + d + 60.f);
-            nvgFillPaint(vg, sh);
+            nvgRect(vg, x - 80.f, y - 60.f, w + d + 180.f, h + d + 180.f);
+            nvgFillPaint(vg, nvgBoxGradient(vg, x + d * 0.4f + 6.f, y + d * 0.6f + 14.f, w, h, rr + 10.f, 60.f, nvgRGBA(0, 0, 0, 110), nvgRGBA(0, 0, 0, 0)));
+            nvgFill(vg);
+            nvgBeginPath(vg);
+            nvgRect(vg, x - 20.f, y - 20.f, w + d + 60.f, h + d + 60.f);
+            nvgFillPaint(vg, nvgBoxGradient(vg, x + d * 0.8f + 1.f, y + d * 0.9f + 3.f, w, h, rr + 2.f, 10.f, nvgRGBA(0, 0, 0, 150), nvgRGBA(0, 0, 0, 0)));
             nvgFill(vg);
         }
         float rr = caseRadius(cs);
@@ -641,16 +925,17 @@ struct BackdropLayer : widget::TransparentWidget {
             nvgBeginPath(vg);
             nvgMoveTo(vg, x + w, y); nvgLineTo(vg, x + w + d, y + d); nvgLineTo(vg, x + w + d, y + h + d); nvgLineTo(vg, x + w, y + h);
             nvgClosePath(vg);
-            nvgFillColor(vg, nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.55f));
+            nvgFillPaint(vg, nvgLinearGradient(vg, x + w, 0, x + w + d, 0, nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.62f), nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.82f)));
             nvgFill(vg);
             nvgBeginPath(vg);
             nvgMoveTo(vg, x, y + h); nvgLineTo(vg, x + w, y + h); nvgLineTo(vg, x + w + d, y + h + d); nvgLineTo(vg, x + d, y + h + d);
             nvgClosePath(vg);
-            nvgFillColor(vg, nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.4f));
+            nvgFillPaint(vg, nvgLinearGradient(vg, 0, y + h, 0, y + h + d, nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.55f), nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.8f)));
             nvgFill(vg);
         }
         // the frame: the ends and lips, then the dark well the modules sit in
         drawFrameFill(vg, cs, x, y, w, h);
+        drawCheeks(vg, cs, x, y, w, h);
         if (rr > 0.f && cs.material != M_ACRYLIC) {   // contoured: rounded cheeks and a rounded top, lit from above
             nvgBeginPath(vg);
             nvgRoundedRect(vg, x, y, w, h, rr);
@@ -671,17 +956,15 @@ struct BackdropLayer : widget::TransparentWidget {
                 drawRail(vg, in.pos.x, in.pos.x + in.size.x, rt + RACK_GRID_HEIGHT - 15.f, cs.rail);
             }
         // finishing touches
-        if (cs.material == M_TOLEX) {   // metal corners
+        if (cs.material == M_TOLEX) {   // corner caps: small, dark metal, a thin lit edge (not big grey blocks)
+            float c = std::min(12.f, s * 0.75f);
             for (int k = 0; k < 4; k++) {
-                float cx = k & 1 ? x + w - 22.f : x, cy = k & 2 ? y + h - 22.f : y;
+                float cx = k & 1 ? x + w - c : x, cy = k & 2 ? y + h - c : y;
                 nvgBeginPath(vg);
-                nvgRoundedRect(vg, cx, cy, 22.f, 22.f, 3.f);
-                nvgFillColor(vg, nvgLerpRGBA(cs.accent, nvgRGB(255, 255, 255), 0.15f));
+                nvgRoundedRect(vg, cx, cy, c, c, 2.5f);
+                nvgFillPaint(vg, nvgLinearGradient(vg, cx, cy, cx + c, cy + c, nvgLerpRGBA(cs.accent, nvgRGB(0, 0, 0), 0.35f), nvgLerpRGBA(cs.accent, nvgRGB(0, 0, 0), 0.65f)));
                 nvgFill(vg);
-                nvgBeginPath(vg);
-                nvgCircle(vg, cx + 11.f, cy + 11.f, 2.2f);
-                nvgFillColor(vg, nvgRGBA(0, 0, 0, 120));
-                nvgFill(vg);
+                nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 28)); nvgStrokeWidth(vg, 0.8f); nvgStroke(vg);
             }
         }
         if (cs.material == M_EARS) {   // 19" ears with their slots
@@ -696,7 +979,7 @@ struct BackdropLayer : widget::TransparentWidget {
                     }
             }
         }
-        if (cs.material == M_WOOD) {   // the end cheeks' screws
+        if (cs.material == M_WOOD || cs.material == M_PLY) {   // the end cheeks' screws (black steel)
             for (int side = 0; side < 2; side++)
                 for (float rt : rowTops) {
                     nvgBeginPath(vg);
@@ -706,15 +989,15 @@ struct BackdropLayer : widget::TransparentWidget {
                 }
         }
         if (cs.ends == E_SLANT) {   // cheeks that flare out toward the bottom: a case on legs, a tiered cabinet
-            float fl = s * 0.9f;
+            float fl = s * 0.45f;
             for (int side = 0; side < 2; side++) {
                 float ex = side ? x + w : x, dir = side ? 1.f : -1.f;
                 nvgBeginPath(vg);
-                nvgMoveTo(vg, ex, y); nvgLineTo(vg, ex, y + h); nvgLineTo(vg, ex + dir * fl, y + h); nvgLineTo(vg, ex + dir * fl * 0.15f, y);
+                nvgMoveTo(vg, ex, y + 2.f); nvgLineTo(vg, ex, y + h); nvgLineTo(vg, ex + dir * fl, y + h); nvgLineTo(vg, ex + dir * 1.5f, y + 2.f);
                 nvgClosePath(vg);
-                nvgFillColor(vg, nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.3f));
+                nvgFillPaint(vg, nvgLinearGradient(vg, ex, 0, ex + dir * fl, 0, nvgLerpRGBA(cheekBase(cs), nvgRGB(0, 0, 0), 0.35f), nvgLerpRGBA(cheekBase(cs), nvgRGB(0, 0, 0), 0.7f)));
                 nvgFill(vg);
-                nvgStrokeColor(vg, nvgRGBA(0, 0, 0, 140)); nvgStrokeWidth(vg, 1.f); nvgStroke(vg);
+                nvgStrokeColor(vg, nvgRGBA(0, 0, 0, 90)); nvgStrokeWidth(vg, 0.8f); nvgStroke(vg);
             }
         }
         if (cs.ends == E_CAPS) {   // moulded end caps over the extrusions
@@ -791,6 +1074,11 @@ struct BackdropLayer : widget::TransparentWidget {
                 nvgFill(vg);
             }
         }
+        if (cs.material != M_ACRYLIC) {   // a fine lit edge along the top, like light catching a bevel
+            nvgBeginPath(vg);
+            nvgMoveTo(vg, x + caseRadius(cs) + 1.f, y + 1.f); nvgLineTo(vg, x + w - caseRadius(cs) - 1.f, y + 1.f);
+            nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 34)); nvgStrokeWidth(vg, 1.f); nvgStroke(vg);
+        }
         nvgBeginPath(vg);   // a fine edge so the case reads against any background
         nvgRoundedRect(vg, x + 0.5f, y + 0.5f, w - 1.f, h - 1.f, cs.ends == E_ROUND ? 9.f : 0.f);
         nvgStrokeColor(vg, nvgRGBA(0, 0, 0, 160));
@@ -830,12 +1118,20 @@ struct BackdropLayer : widget::TransparentWidget {
         if (!module) return;
         SynTHBloKBackdrop* m = module;
         math::Rect v = args.clipBox;
+        const std::vector<CaseStyle>& lib = caseLibrary();
+        CaseStyle cs = lib[clamp(m->caseIdx, 0, (int) lib.size() - 1)];
+        if (cs.material != M_NONE) {   // the side panel options
+            if (m->sideShape > 0) cs.ends = kSideShapeEnds[m->sideShape];
+            cs.side *= kSideWidthK[clamp(m->sideWidth, 0, 4)];
+            if (m->openMode == 1) cs.extras |= X_OPEN;
+            if (m->openMode == 2) cs.extras &= ~X_OPEN;
+            cs.sideIdx = m->sideMat;
+        }
+        NVGcolor col = kColor[clamp(m->colorIdx, 0, kColorN - 1)];
         if (m->showBg) {
-            drawLook(args.vg, v, m->look, kColor[clamp(m->colorIdx, 0, kColorN - 1)]);
+            drawLook(args.vg, v, m->look, col, cs.material == M_NONE ? col : cs.base);
             drawImage(args, v);
         }
-        const std::vector<CaseStyle>& lib = caseLibrary();
-        const CaseStyle& cs = lib[clamp(m->caseIdx, 0, (int) lib.size() - 1)];
         std::vector<Block> bl = blocks();
         if (cs.material != M_NONE)
             for (const Block& b : bl) drawCase(args.vg, cs, b.r, m->depthMm, m->shadow, m->rails, b.rows);
@@ -1013,29 +1309,103 @@ struct NameOled : ui::TextField {
     }
 };
 
+
+// THEMES: a look, a colour, a case and a depth that go together. Pick one, then change any part (it shows CUSTOM).
+struct Theme { const char* name; int look; int color; const char* caseName; float depthMm; };
+static const Theme kThemes[] = {
+    {"SYNTHBLOK BLACK", LOOK_GRADIENT, 0, "BLACK ANODIZED", 65.f},
+    {"WALNUT STUDIO", LOOK_CASE_GRADIENT, 0, "WALNUT SKIFF", 84.f},
+    {"OAK DAYLIGHT", LOOK_CASE_GRADIENT, 0, "OAK SKIFF", 65.f},
+    {"EBONY NIGHT", LOOK_GRADIENT, 1, "EBONY SKIFF", 84.f},
+    {"WEST COAST", 17, 13, "WEST COAST BOAT", 84.f},
+    {"TIERED SUNSET", 14, 5, "TIERED WALNUT", 100.f},
+    {"AMBER LAB", 1, 2, "LAB EXTRUSION", 84.f},
+    {"OLED GLOW", 2, 0, "BLACK ANODIZED", 50.f},
+    {"DEEP SPACE", 4, 0, "SMOKED ACRYLIC", 50.f},
+    {"BLUEPRINT", 10, 8, "BRUSHED ALUMINUM", 65.f},
+    {"ROAD WARRIOR", 3, 19, "ROAD CASE", 120.f},
+    {"TOUR CASE", 6, 1, "SUITCASE 9U", 120.f},
+    {"STUDIO FOAM", 12, 1, "STALKER 6U", 100.f},
+    {"PERFORMER", LOOK_GRADIENT, 19, "PERFORMER 7U", 100.f},
+    {"RETRO CRT", 8, 6, "BUS STEEL 7U", 84.f},
+    {"CIRCUIT", 7, 0, "PRINTED PLA BLACK", 65.f},
+    {"MAKER TEAL", LOOK_CASE_GRADIENT, 0, "PRINTED PETG TEAL", 50.f},
+    {"MAKER ORANGE", LOOK_CASE_GRADIENT, 0, "PRINTED PLA ORANGE", 50.f},
+    {"RED POD", LOOK_CASE_GRADIENT, 0, "POD RED", 50.f},
+    {"BLUE POD", LOOK_CASE_GRADIENT, 0, "POD BLUE", 50.f},
+    {"PURPLE POD", LOOK_CASE_GRADIENT, 0, "POD PURPLE", 50.f},
+    {"NAVY STEEL", LOOK_GRADIENT, 8, "BRUSHED ALUMINUM", 84.f},
+    {"OXBLOOD", LOOK_GRADIENT, 10, "EBONY SKIFF", 84.f},
+    {"FOREST", LOOK_GRADIENT, 6, "OAK SKIFF", 84.f},
+    {"CLEAN WHITE", LOOK_GRADIENT, 20, "FLATBOAT WHITE", 40.f},
+    {"CARBON", 6, 0, "CARBON FIBER", 65.f},
+    {"BIRCH STUDIO", LOOK_CASE_GRADIENT, 0, "BIRCH PLY STUDIO", 100.f},
+    {"BLACK PLY", LOOK_GRADIENT, 0, "BLACK PLY STUDIO", 100.f},
+    {"CHERRY STUDIO", LOOK_CASE_GRADIENT, 0, "CHERRY STUDIO", 100.f},
+    {"WALNUT CONSOLE", LOOK_ART + 2, 0, "WALNUT CONSOLE", 120.f},
+    {"OPEN OAK", LOOK_GRADIENT, 0, "OAK OPEN FRAME", 84.f},
+    {"STAIRCASE", LOOK_CASE_GRADIENT, 0, "STEPPED WALNUT", 120.f},
+    {"CURVED STUDIO", LOOK_ART + 1, 0, "CURVED CONSOLE", 100.f},
+    {"LATTICE", LOOK_ART + 4, 0, "LATTICE PRINT", 84.f},
+    // with the ART pictures
+    {"NEBULA DREAM", LOOK_ART + 0, 0, "SMOKED ACRYLIC", 50.f},
+    {"AURORA", LOOK_ART + 1, 0, "BLACK ANODIZED", 65.f},
+    {"TOPO MAP", LOOK_ART + 2, 0, "WALNUT SKIFF", 84.f},
+    {"SYNTHWAVE", LOOK_ART + 3, 0, "PRINTED PLA BLACK", 65.f},
+    {"FLOW", LOOK_ART + 4, 0, "CARBON FIBER", 65.f},
+    {"CRYSTAL CAVE", LOOK_ART + 5, 0, "BRUSHED ALUMINUM", 84.f},
+    {"SCOPE", LOOK_ART + 6, 0, "BUS STEEL 7U", 84.f},
+    {"GOLD MARBLE", LOOK_ART + 7, 0, "EBONY SKIFF", 84.f},
+    {"PCB", LOOK_ART + 8, 0, "LAB EXTRUSION", 84.f},
+    {"SPECTRUM", LOOK_ART + 9, 0, "PERFORMER 7U", 100.f},
+};
+static const int kThemeN = (int) (sizeof(kThemes) / sizeof(kThemes[0]));
+static void applyTheme(SynTHBloKBackdrop* m, int i) {
+    i = ((i % kThemeN) + kThemeN) % kThemeN;
+    const Theme& t = kThemes[i];
+    m->look = t.look; m->colorIdx = t.color; m->depthMm = t.depthMm; m->showBg = true;
+    m->sideShape = m->sideMat = m->sideWidth = m->openMode = 0;
+    const std::vector<CaseStyle>& lib = caseLibrary();
+    for (size_t k = 0; k < lib.size(); k++) if (lib[k].name == t.caseName) m->caseIdx = (int) k;
+    m->themeIdx = i;
+}
 // ---- the OLED menu: the settings on the panel, so nobody has to dig in the right-click menu ----------------
 // Tabs BG / CASE / NAME along the top; each row is a small label over its value. Click the left half of a row
 // for the previous value, the right half for the next (on/off rows just flip), or scroll over it. Long values
 // slide sideways. On NAME, click the name and type (Enter: done).
 static const char* const kLookShort[kLookN] = {"PLAIN", "AMBER GRID", "OLED GLOW", "DIAMOND PLATE", "DEEP SPACE", "AMBER RAILS",
-    "CARBON WEAVE", "CIRCUIT", "SCANLINES", "HEX MESH", "BLUEPRINT", "PEGBOARD", "FOAM", "BRUSHED STEEL", "SUNSET FADE", "HALFTONE", "BRICK", "WOOD SLATS"};
+    "CARBON WEAVE", "CIRCUIT", "SCANLINES", "HEX MESH", "BLUEPRINT", "PEGBOARD", "FOAM", "BRUSHED STEEL", "SUNSET FADE", "HALFTONE", "BRICK", "WOOD SLATS", "GRADIENT", "CASE GRADIENT",
+    "NEBULA", "AURORA", "TOPOGRAPHIC", "SYNTHWAVE", "FLOW FIELD", "CRYSTAL", "OSCILLOSCOPE", "GOLD MARBLE", "CIRCUIT BOARD", "SPECTRUM"};
 static const char* const kFitShort[4] = {"TILED", "FILL", "FIT", "CENTRED"};
 static const float kDepthMm[9] = {0.f, 25.f, 40.f, 50.f, 65.f, 84.f, 100.f, 120.f, 150.f};
 struct BackdropOled : widget::OpaqueWidget {
     SynTHBloKBackdrop* module = NULL;
     NameOled* name = NULL;
     int page = 0, hover = -1;
-    static constexpr float kTabH = 12.f, kRowH = 19.f, kPad = 3.f;
+    static constexpr float kTabH = 10.f, kRowH = 16.f, kPad = 3.f;
+    static const int kPages = 4;   // THEME, BG, CASE, NAME
     struct Row { std::string label, value; std::function<void(int)> step; bool flip; };
     std::vector<Row> rows() {
         std::vector<Row> r;
         SynTHBloKBackdrop* m = module;
         if (!m) return r;
         auto wrap = [](int v, int d, int n) { return ((v + d) % n + n) % n; };
-        if (page == 0) {
+        auto hand = [=]() { m->themeIdx = -1; };   // changed by hand: the theme shows CUSTOM
+        const std::vector<CaseStyle>& clib = caseLibrary();
+        int cn = (int) clib.size();
+        int di = 0; for (int k = 0; k < 9; k++) if (std::fabs(kDepthMm[k] - m->depthMm) < std::fabs(kDepthMm[di] - m->depthMm)) di = k;
+        if (page == 0) {   // THEME: pick one, then combine its parts as you like
+            r.push_back({"THEME", m->themeIdx >= 0 && m->themeIdx < kThemeN ? kThemes[m->themeIdx].name : "CUSTOM",
+                [=](int d) { applyTheme(m, (m->themeIdx >= 0 ? m->themeIdx : -1 + (d < 0 ? 1 : 0)) + d); }, false});
+            r.push_back({"LOOK", kLookShort[clamp(m->look, 0, kLookN - 1)], [=](int d) { m->look = wrap(m->look, d, kLookN); hand(); }, false});
+            r.push_back({"COLOUR", string::uppercase(kColorName[clamp(m->colorIdx, 0, kColorN - 1)]), [=](int d) { m->colorIdx = wrap(m->colorIdx, d, kColorN); hand(); }, false});
+            r.push_back({"CASE", clib[clamp(m->caseIdx, 0, cn - 1)].name, [=](int d) { m->caseIdx = wrap(m->caseIdx, d, cn); hand(); }, false});
+            r.push_back({"DEPTH", m->depthMm < 1.f ? "FLAT" : string::f("%d MM", (int) std::round(m->depthMm)), [=](int d) { m->depthMm = kDepthMm[clamp(di + d, 0, 8)]; hand(); }, false});
+        }
+        else if (page == 1) {
             r.push_back({"BACKGROUND", m->showBg ? "ON" : "OFF", [=](int) { m->showBg = !m->showBg; }, true});
-            r.push_back({"LOOK", kLookShort[clamp(m->look, 0, kLookN - 1)], [=](int d) { m->look = wrap(m->look, d, kLookN); }, false});
-            r.push_back({"COLOUR", string::uppercase(kColorName[clamp(m->colorIdx, 0, kColorN - 1)]), [=](int d) { m->colorIdx = wrap(m->colorIdx, d, kColorN); }, false});
+            r.push_back({"LOOK", kLookShort[clamp(m->look, 0, kLookN - 1)], [=](int d) { m->look = wrap(m->look, d, kLookN); hand(); }, false});
+            r.push_back({"COLOUR", string::uppercase(kColorName[clamp(m->colorIdx, 0, kColorN - 1)]), [=](int d) { m->colorIdx = wrap(m->colorIdx, d, kColorN); hand(); }, false});
             r.push_back({"IMAGE", m->imagePath.empty() ? "LOAD..." : string::uppercase(system::getStem(m->imagePath)), [=](int d) {
                 if (d < 0 && !m->imagePath.empty()) { m->imagePath.clear(); return; }   // left half: clear
                 osdialog_filters* f = osdialog_filters_parse("Images:png,jpg,jpeg,bmp,gif");
@@ -1048,12 +1418,14 @@ struct BackdropOled : widget::OpaqueWidget {
                 r.push_back({"DARKEN", string::f("%d%%", (int) std::round(m->imgDim * 100.f)), [=](int d) { m->imgDim = clamp(m->imgDim + d * 0.05f, 0.f, 0.9f); }, false});
             }
         }
-        else if (page == 1) {
-            const std::vector<CaseStyle>& lib = caseLibrary();
-            int n = (int) lib.size();
-            r.push_back({"CASE", lib[clamp(m->caseIdx, 0, n - 1)].name, [=](int d) { m->caseIdx = wrap(m->caseIdx, d, n); }, false});
-            int di = 0; for (int k = 0; k < 9; k++) if (std::fabs(kDepthMm[k] - m->depthMm) < std::fabs(kDepthMm[di] - m->depthMm)) di = k;
-            r.push_back({"DEPTH", m->depthMm < 1.f ? "FLAT" : string::f("%d MM", (int) std::round(m->depthMm)), [=](int d) { m->depthMm = kDepthMm[clamp(di + d, 0, 8)]; }, false});
+        else if (page == 2) {   // CASE
+            r.push_back({"CASE", clib[clamp(m->caseIdx, 0, cn - 1)].name, [=](int d) { m->caseIdx = wrap(m->caseIdx, d, cn); hand(); }, false});
+            r.push_back({"DEPTH", m->depthMm < 1.f ? "FLAT" : string::f("%d MM", (int) std::round(m->depthMm)), [=](int d) { m->depthMm = kDepthMm[clamp(di + d, 0, 8)]; hand(); }, false});
+            r.push_back({"SIDES", kSideShape[clamp(m->sideShape, 0, kSideShapeN - 1)], [=](int d) { m->sideShape = wrap(m->sideShape, d, kSideShapeN); hand(); }, false});
+            r.push_back({"SIDE MATERIAL", kSideMat[clamp(m->sideMat, 0, kSideMatN - 1)].name, [=](int d) { m->sideMat = wrap(m->sideMat, d, kSideMatN); hand(); }, false});
+            r.push_back({"SIDE WIDTH", kSideWidth[clamp(m->sideWidth, 0, 4)], [=](int d) { m->sideWidth = wrap(m->sideWidth, d, 5); hand(); }, false});
+            r.push_back({"OPEN FRAME", kOpenName[clamp(m->openMode, 0, 2)], [=](int d) { m->openMode = wrap(m->openMode, d, 3); hand(); }, false});
+            r.push_back({"BG MATCHES CASE", m->look == LOOK_CASE_GRADIENT ? "ON" : "OFF", [=](int) { m->look = m->look == LOOK_CASE_GRADIENT ? LOOK_GRADIENT : LOOK_CASE_GRADIENT; hand(); }, true});
             r.push_back({"SHADOW", m->shadow ? "ON" : "OFF", [=](int) { m->shadow = !m->shadow; }, true});
             r.push_back({"RAILS", m->rails ? "ON" : "OFF", [=](int) { m->rails = !m->rails; }, true});
         }
@@ -1065,19 +1437,20 @@ struct BackdropOled : widget::OpaqueWidget {
         return r;
     }
     float rowY(int i) { return kTabH + 3.f + i * kRowH; }
+    float tabW(int k) { static const float wt[kPages] = {5.2f, 3.2f, 4.4f, 4.6f}; return box.size.x * wt[k] / 17.4f; }
     int rowAt(Vec p) { if (p.y < kTabH + 3.f) return -1; int i = (int) ((p.y - kTabH - 3.f) / kRowH); return i; }
     void step() override {
         if (name) {   // the name field lives in the first NAME row
-            name->visible = page == 2;
-            name->box.pos = box.pos.plus(Vec(kPad, rowY(0) + 7.f));
-            name->box.size = Vec(box.size.x - 2.f * kPad, kRowH - 8.f);
+            name->visible = page == 3;
+            name->box.pos = box.pos.plus(Vec(kPad, rowY(0) + 6.f));
+            name->box.size = Vec(box.size.x - 2.f * kPad, kRowH - 7.f);
         }
         OpaqueWidget::step();
     }
     void onButton(const ButtonEvent& e) override {
         if (e.button != GLFW_MOUSE_BUTTON_LEFT || e.action != GLFW_PRESS) { OpaqueWidget::onButton(e); return; }
         e.consume(this);
-        if (e.pos.y < kTabH) { page = clamp((int) (e.pos.x / (box.size.x / 3.f)), 0, 2); return; }
+        if (e.pos.y < kTabH) { float x = 0.f; for (int k = 0; k < kPages; k++) { x += tabW(k); if (e.pos.x < x) { page = k; break; } } return; }
         std::vector<Row> r = rows();
         int i = rowAt(e.pos);
         if (i < 0 || i >= (int) r.size() || !r[i].step) return;
@@ -1108,19 +1481,22 @@ struct BackdropOled : widget::OpaqueWidget {
         if (!font) return;
         NVGcontext* vg = args.vg;
         nvgFontFaceId(vg, font->handle);
-        float W = box.size.x, tw = W / 3.f;
+        float W = box.size.x;
         // tabs
-        static const char* const tabs[3] = {"BG", "CASE", "NAME"};
-        nvgFontSize(vg, 6.5f);
-        nvgTextLetterSpacing(vg, 0.6f);
+        static const char* const tabs[kPages] = {"THEME", "BG", "CASE", "NAME"};
+        nvgFontSize(vg, 5.f);
+        nvgTextLetterSpacing(vg, 0.2f);
         nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        for (int k = 0; k < 3; k++) {
+        float tx0 = 0.f;
+        for (int k = 0; k < kPages; k++) {
+            float tw = tabW(k);
             if (k == page) {
-                nvgBeginPath(vg); nvgRect(vg, k * tw + 1.f, 1.f, tw - 2.f, kTabH - 2.f);
+                nvgBeginPath(vg); nvgRect(vg, tx0 + 0.6f, 1.f, tw - 1.2f, kTabH - 2.f);
                 nvgFillColor(vg, oled::amber()); nvgFill(vg);
             }
             nvgFillColor(vg, k == page ? oled::ink() : oled::dim());
-            nvgText(vg, k * tw + tw * 0.5f + 0.3f, kTabH * 0.5f + 0.5f, tabs[k], NULL);
+            nvgText(vg, tx0 + tw * 0.5f + 0.1f, kTabH * 0.5f + 0.5f, tabs[k], NULL);
+            tx0 += tw;
         }
         nvgBeginPath(vg); nvgMoveTo(vg, 1.f, kTabH + 0.5f); nvgLineTo(vg, W - 1.f, kTabH + 0.5f);
         nvgStrokeColor(vg, oled::outline(90)); nvgStrokeWidth(vg, 0.6f); nvgStroke(vg);
@@ -1136,30 +1512,34 @@ struct BackdropOled : widget::OpaqueWidget {
                 nvgFillColor(vg, oled::amber(22)); nvgFill(vg);
             }
             nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-            nvgFontSize(vg, 5.5f);
-            nvgTextLetterSpacing(vg, 0.6f);
+            nvgFontSize(vg, 4.8f);
+            nvgTextLetterSpacing(vg, 0.4f);
             nvgFillColor(vg, oled::dim());
-            nvgText(vg, kPad, y + 1.5f, r[i].label.c_str(), NULL);
-            if (page == 2 && i == 0) continue;   // the name field draws itself
+            nvgText(vg, kPad, y + 1.2f, r[i].label.c_str(), NULL);
+            if (page == 3 && i == 0) continue;   // the name field draws itself
             // the value, with arrows when it steps; slides sideways when it's too long and hovered
             bool arrows = r[i].step && !r[i].flip;
             float vx = kPad + (arrows ? 6.f : 0.f), vw = iw - (arrows ? 12.f : 0.f);
-            nvgFontSize(vg, 8.f);
-            nvgTextLetterSpacing(vg, 0.3f);
-            float bw = nvgTextBounds(vg, 0, 0, r[i].value.c_str(), NULL, NULL), off = 0.f;
+            float bw = 0.f, off = 0.f;
+            for (float fsz : {6.8f, 5.8f, 5.f}) {   // three fixed sizes only (nothing re-rasterised per frame)
+                nvgFontSize(vg, fsz);
+                nvgTextLetterSpacing(vg, fsz > 6.f ? 0.2f : 0.f);
+                bw = nvgTextBounds(vg, 0, 0, r[i].value.c_str(), NULL, NULL);
+                if (bw <= vw) break;
+            }
             if (bw > vw && hot) { float span = bw - vw + 8.f; off = std::fmod((float) system::getTime() * 18.f, span * 2.f); if (off > span) off = 2.f * span - off; }
             nvgSave(vg);
             nvgScissor(vg, vx, y, vw, kRowH);
             nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
             nvgFillColor(vg, oled::amber());
             float tx = bw <= vw ? vx + (vw - bw) * 0.5f : vx - off;
-            nvgText(vg, tx, y + 12.5f, r[i].value.c_str(), NULL);
+            nvgText(vg, tx, y + 10.6f, r[i].value.c_str(), NULL);
             nvgRestore(vg);
             if (arrows) {
                 nvgFillColor(vg, hot ? oled::amber() : oled::outline(140));
                 for (int sd = 0; sd < 2; sd++) {
-                    float ax = sd ? W - kPad - 1.f : kPad + 1.f, ay = y + 12.5f, d = sd ? -1.f : 1.f;
-                    nvgBeginPath(vg); nvgMoveTo(vg, ax, ay); nvgLineTo(vg, ax + d * 3.5f, ay - 2.5f); nvgLineTo(vg, ax + d * 3.5f, ay + 2.5f); nvgClosePath(vg); nvgFill(vg);
+                    float ax = sd ? W - kPad - 1.f : kPad + 1.f, ay = y + 10.6f, d = sd ? -1.f : 1.f;
+                    nvgBeginPath(vg); nvgMoveTo(vg, ax, ay); nvgLineTo(vg, ax + d * 3.f, ay - 2.2f); nvgLineTo(vg, ax + d * 3.f, ay + 2.2f); nvgClosePath(vg); nvgFill(vg);
                 }
             }
         }
@@ -1176,7 +1556,7 @@ struct NameButton : widget::OpaqueWidget {
     }
     void onDragEnd(const DragEndEvent& e) override {
         if (e.button != GLFW_MOUSE_BUTTON_LEFT || !field) return;
-        if (menu) { menu->page = 2; menu->step(); }
+        if (menu) { menu->page = 3; menu->step(); }
         field->visible = true;
         APP->event->setSelectedWidget(field);
     }
@@ -1295,13 +1675,14 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
     // CASE SNAPSHOTS (a dev aid): if Rack's user folder holds SynTHBloK/snap_cases.txt when this BACKDROP opens, it
     // steps through every case and saves a picture of the Rack window for each to SynTHBloK/case_shots/
     // (NN_NAME.bmp), then puts the case back and writes done.txt. The trigger file is removed first, so it runs once.
-    int shotI = -1, shotWait = 0, shotKeep = 0;
+    int shotI = -1, shotWait = 0, shotKeep = 0, nowWait = 0;
     bool shotChecked = false;
     std::string shotDir;
     void shotStep(SynTHBloKBackdrop* m) {
         // runs only when the trigger file is there (it never ships; only the dev workflow writes it)
         if (!shotChecked) {
             shotChecked = true;
+            if (system::exists(asset::user("SynTHBloK/snap_now.txt"))) { system::remove(asset::user("SynTHBloK/snap_now.txt")); nowWait = 1; APP->scene->rackScroll->zoomToModules(); }
             std::string trig = asset::user("SynTHBloK/snap_cases.txt");
             INFO("BACKDROP snapshots: looking for %s: %s", trig.c_str(), system::exists(trig) ? "found" : "none");
             if (system::exists(trig)) {
@@ -1310,11 +1691,14 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
                 system::createDirectories(shotDir);
                 shotKeep = m->caseIdx;
                 shotI = 0; shotWait = -240;   // ~4 s for the patch to settle first
+                APP->scene->rackScroll->zoomToModules();
             }
         }
+        if (nowWait == 170) APP->scene->rackScroll->zoomToModules();
+        if (nowWait > 0 && ++nowWait > 180) { snapWindow(asset::user("SynTHBloK/rack_now.bmp")); nowWait = -1; }
         if (shotI < 0) return;
         const std::vector<CaseStyle>& lib = caseLibrary();
-        if (shotWait == 0) m->caseIdx = shotI;
+        if (shotWait == 0) { m->caseIdx = shotI; APP->scene->rackScroll->zoomToModules(); }   // frame the modules for every shot
         if (++shotWait < 14) return;   // a few frames on screen before the picture
         std::string n = lib[shotI].name;
         for (char& c : n) if (c == ' ') c = '_';
@@ -1389,6 +1773,15 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
             for (size_t i = 0; i < lib.size(); i++)
                 sub->addChild(createCheckMenuItem(lib[i].name, "", [=]() { return m->caseIdx == (int) i; }, [=]() { m->caseIdx = (int) i; }));
         }));
+        menu->addChild(createIndexSubmenuItem("Side panels", std::vector<std::string>(kSideShape, kSideShape + kSideShapeN),
+            [=]() { return (size_t) m->sideShape; }, [=](size_t i) { m->sideShape = (int) i; m->themeIdx = -1; }));
+        menu->addChild(createSubmenuItem("Side material", kSideMat[clamp(m->sideMat, 0, kSideMatN - 1)].name, [=](Menu* sub) {
+            for (int i = 0; i < kSideMatN; i++) sub->addChild(createCheckMenuItem(kSideMat[i].name, "", [=]() { return m->sideMat == i; }, [=]() { m->sideMat = i; m->themeIdx = -1; }));
+        }));
+        menu->addChild(createIndexSubmenuItem("Side width", std::vector<std::string>(kSideWidth, kSideWidth + 5),
+            [=]() { return (size_t) m->sideWidth; }, [=](size_t i) { m->sideWidth = (int) i; }));
+        menu->addChild(createIndexSubmenuItem("Open frame", std::vector<std::string>(kOpenName, kOpenName + 3),
+            [=]() { return (size_t) m->openMode; }, [=](size_t i) { m->openMode = (int) i; }));
         menu->addChild(createSubmenuItem("Case depth", m->depthMm < 1.f ? "flat" : string::f("%d mm", (int) std::round(m->depthMm)), [=](Menu* sub) {
             // the depths real cases come in (the room behind the rails for the modules)
             static const float mm[9] = {0.f, 25.f, 40.f, 50.f, 65.f, 84.f, 100.f, 120.f, 150.f};
