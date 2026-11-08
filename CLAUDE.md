@@ -76,6 +76,9 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   think|do|check|fix|ask,text}]).
 - `tools/open_workbench.ps1`: the workbench on 127.0.0.1:8766 (plus the Tailscale address for the phone), with the
   chat, patch-feed and open-in-Rack helpers.
+- POWERSHELL tab console modes: PS, CMD (cmd.exe) and ADMIN. ADMIN starts `tools/admin_worker.ps1` through the Windows
+  admin prompt (Nick clicks Yes once); it runs hidden, takes commands from `tools/ps_runs/admin/`, and quits after 15 min
+  idle or on END ADMIN. After changing `rack_open_server.py`, run `tools/restart_feeds.ps1` (RUN THESE item) to load it.
 - `tools/build_and_reload.ps1`: build, close Rack cleanly, devinstall, screenshots, reopen Rack.
 - `tools/rack_shots.ps1`: module screenshots into `web-images/screenshots`. Its default Rack path is Rack2Pro; on a
   PC with Rack Free pass `-Rack 'C:\Program Files\VCV\Rack2Free\Rack.exe'`.

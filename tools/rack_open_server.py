@@ -25,6 +25,10 @@
 #        output captured to tools/ps_runs/<run>.log; items marked "admin" start through the normal Windows admin prompt
 #        (Nick clicks Yes) - nothing here gets around that prompt
 #   GET  /ps/tasks                 the runs (state, exit code);  GET /ps/task/out?run=..&from=k  a run's output
+#   POST /cmd {"cmd": "..."}, GET /cmd/out?from=k, POST /cmd/kill: the same console as Command Prompt (cmd.exe)
+#   ADMIN console: POST /admin/start shows the normal Windows admin prompt (UAC); after Nick clicks Yes a hidden admin
+#        PowerShell (tools/admin_worker.ps1) runs the commands typed in ADMIN mode: POST /admin {"cmd"}, GET /admin/out?from=k,
+#        POST /admin/kill, POST /admin/stop, GET /admin/status. It closes itself after 15 min with no command, or on END.
 #   Only the workbench's own page can use it: its Origin, and the token this server writes at start (other
 #   sites can't read either). No interactive input (no vim / less): commands that finish, like make, git, ls.
 # Only .vcv files straight inside patches/ or Rack's patches folder can be opened.
@@ -110,6 +114,104 @@ def ps_start(cmd):
             PS['code'] = code; PS['done'] = True
     threading.Thread(target=pump, daemon=True).start()
     return my
+
+# ---- POWERSHELL tab: Command Prompt mode (cmd.exe, one command at a time, cd carries over) ----
+CMD = {'id': 0, 'proc': None, 'buf': '', 'done': True, 'code': 0, 'cwd': REPO, 'lock': threading.Lock()}
+def cmd_start(cmd):
+    with CMD['lock']:
+        if CMD['proc'] and CMD['proc'].poll() is None: return None
+        CMD['id'] += 1; CMD['buf'] = ''; CMD['done'] = False; CMD['code'] = 0
+        os.makedirs(os.path.join(HERE, 'ps_runs'), exist_ok=True)
+        bat = os.path.join(HERE, 'ps_runs', 'cmd_console.cmd')
+        with open(bat, 'w', encoding='utf-8', newline='\r\n') as f:
+            f.write('@echo off\nchcp 65001 >nul\ncd /d "%s"\n%s\nset "__c=%%errorlevel%%"\necho(\necho \x01CWD:%%cd%%\nexit /b %%__c%%\n' % (CMD['cwd'], cmd))
+        p = subprocess.Popen(['cmd.exe', '/d', '/c', bat], cwd=CMD['cwd'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        CMD['proc'] = p; my = CMD['id']
+    def pump():
+        for raw in iter(lambda: p.stdout.read1(4096) if hasattr(p.stdout, 'read1') else p.stdout.read(1), b''):
+            with CMD['lock']:
+                if CMD['id'] == my: CMD['buf'] += raw.decode('utf-8', 'replace')
+        code = p.wait()
+        with CMD['lock']:
+            if CMD['id'] != my: return
+            i = CMD['buf'].rfind(MARK)
+            if i >= 0:
+                CMD['cwd'] = CMD['buf'][i + len(MARK):].strip() or CMD['cwd']
+                CMD['buf'] = CMD['buf'][:i].rstrip('\r\n') + '\n'
+            CMD['code'] = code; CMD['done'] = True
+    threading.Thread(target=pump, daemon=True).start()
+    return my
+
+# ---- POWERSHELL tab: ADMIN mode. tools/admin_worker.ps1 runs elevated (started through the Windows admin prompt, so Nick
+# has to click Yes) and watches tools/ps_runs/admin/ for the next command; each command runs from a small script this
+# server writes, with its output appended to a log that /admin/out reads. The worker quits after 15 min idle or on END.
+ADIR = os.path.join(HERE, 'ps_runs', 'admin')
+ADM = {'id': 0, 'cwd': REPO, 'starting': 0, 'lock': threading.Lock()}
+AEND = '\x01END:'
+def admin_status():
+    import time as _t
+    try:
+        with open(os.path.join(ADIR, 'state.json'), encoding='utf-8-sig') as f: st = json.load(f)
+    except Exception: st = {}
+    alive = _t.time() * 1000 - (st.get('alive') or 0) < 6000
+    if alive: ADM['starting'] = 0
+    return {'alive': alive, 'busy': alive and bool(st.get('busy')), 'starting': not alive and _t.time() - ADM['starting'] < 90}
+def admin_start():
+    import time as _t
+    if admin_status()['alive']: return True
+    os.makedirs(ADIR, exist_ok=True)
+    for n in ('stop', 'kill', 'cmd.json'):
+        try: os.remove(os.path.join(ADIR, n))
+        except Exception: pass
+    ADM['starting'] = _t.time()
+    worker = os.path.join(HERE, 'admin_worker.ps1')
+    args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', worker, '-Dir', ADIR]
+    q = "Start-Process -FilePath '%s' -Verb RunAs -WindowStyle Hidden -ArgumentList %s" % (PSX, ','.join("'%s'" % a.replace("'", "''") for a in args))
+    subprocess.Popen([PSX, '-NoProfile', '-Command', q], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    return True
+def admin_log(i): return os.path.join(ADIR, 'out_%d.txt' % i)
+def admin_read():
+    try:
+        with open(admin_log(ADM['id']), 'rb') as f: txt = f.read().decode('utf-8-sig', 'replace').replace('﻿', '')
+    except Exception: txt = ''
+    done, code = False, 0
+    e = txt.find(AEND)
+    if e >= 0:
+        done = True
+        try: code = int(txt[e + len(AEND):].strip().split()[0])
+        except Exception: code = 1
+        c = txt.find(MARK)
+        if 0 <= c < e: ADM['cwd'] = txt[c + len(MARK):e].strip() or ADM['cwd']; txt = txt[:c]
+        else: txt = txt[:e]
+    else:
+        c = txt.find(MARK)
+        if c >= 0: txt = txt[:c]
+    if not ADM['id']: done = True
+    return txt, done, code
+def admin_send(cmd):
+    st = admin_status()
+    if not st['alive']: return None, 'the admin console is not running: click ADMIN and approve the Windows prompt'
+    with ADM['lock']:
+        if ADM['id'] and not admin_read()[1]: return None, 'a command is still running (Ctrl+C stops it)'
+        ADM['id'] += 1; i = ADM['id']
+        wrap = os.path.join(ADIR, 'cmd_%d.ps1' % i); log = admin_log(i)
+        lq = log.replace("'", "''")
+        body = ("$ErrorActionPreference = 'Continue'; [Console]::OutputEncoding = [Text.Encoding]::UTF8; $ProgressPreference = 'SilentlyContinue'\n"
+                "$log = '%s'\n'' | Out-File -LiteralPath $log -Encoding utf8\n"
+                "Set-Location -LiteralPath '%s'\n$c = 0\n"
+                "try { & {\n%s\n} *>&1 | Out-String -Width 160 -Stream | ForEach-Object { $_ | Out-File -LiteralPath $log -Append -Encoding utf8 } }\n"
+                "catch { \"$_\" | Out-File -LiteralPath $log -Append -Encoding utf8; $c = 1 }\n"
+                "([char]1 + 'CWD:' + (Get-Location).Path) | Out-File -LiteralPath $log -Append -Encoding utf8\n"
+                "([char]1 + 'END:' + $c) | Out-File -LiteralPath $log -Append -Encoding utf8\n") % (lq, ADM['cwd'].replace("'", "''"), cmd)
+        with open(wrap, 'w', encoding='utf-8-sig') as f: f.write(body)
+        tmp = os.path.join(ADIR, 'cmd.json.tmp')
+        with open(tmp, 'w', encoding='utf-8') as f: json.dump({'id': i, 'script': wrap}, f)
+        os.replace(tmp, os.path.join(ADIR, 'cmd.json'))
+    return i, None
+def admin_flag(name):
+    try: open(os.path.join(ADIR, name), 'w').close()
+    except Exception: pass
 
 RUNS_DIR = os.path.join(HERE, 'ps_runs')
 RUNS = {}   # run id -> {id, item, name, admin, started, log, state}
@@ -295,6 +397,20 @@ class H(BaseHTTPRequestHandler):
                     with open(r['log'], 'rb') as f: txt = f.read().decode('utf-8-sig', 'replace').replace('\ufeff', '')
                 except Exception: txt = ''
                 return self.reply(200, {'ok': True, 'text': txt[frm:], 'next': len(txt), 'state': next((x['state'] for x in ps_runs() if x['id'] == r['id']), '')})
+        if self.path.startswith('/cmd/') or self.path.startswith('/admin/'):
+            if self.headers.get('Origin') not in ORIGINS or self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False})
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            frm = int((q.get('from') or ['0'])[0])
+            if self.path.startswith('/cmd/out'):
+                with CMD['lock']:
+                    buf = CMD['buf']; i = buf.find(MARK)
+                    if i >= 0: buf = buf[:i]
+                    return self.reply(200, {'ok': True, 'id': CMD['id'], 'text': buf[frm:], 'next': len(buf), 'done': CMD['done'], 'code': CMD['code'], 'cwd': CMD['cwd']})
+            if self.path.startswith('/admin/status'): return self.reply(200, dict(admin_status(), ok=True, cwd=ADM['cwd']))
+            if self.path.startswith('/admin/out'):
+                txt, done, code = admin_read()
+                if not done and not admin_status()['alive']: done, code = True, 1   # the admin console closed mid-command
+                return self.reply(200, {'ok': True, 'id': ADM['id'], 'text': txt[frm:], 'next': len(txt), 'done': done, 'code': code, 'cwd': ADM['cwd']})
         if self.path == '/cleaner/running':
             if self.headers.get('Origin') not in ORIGINS or self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False})
             return self.reply(200, {'ok': True, 'running': running_uninstallers()})
@@ -304,7 +420,7 @@ class H(BaseHTTPRequestHandler):
             except Exception as e: return self.reply(500, {'ok': False, 'error': str(e)})
         self.reply(404, {'ok': False})
     def do_POST(self):
-        if self.path not in ('/open', '/gen', '/sh', '/sh/kill', '/cleaner', '/cleaner/uninstall', '/cleaner/settings', '/runq/open', '/ps', '/ps/kill', '/ps/task'): return self.reply(404, {'ok': False})
+        if self.path not in ('/open', '/gen', '/sh', '/sh/kill', '/cleaner', '/cleaner/uninstall', '/cleaner/settings', '/runq/open', '/ps', '/ps/kill', '/ps/task', '/cmd', '/cmd/kill', '/admin', '/admin/kill', '/admin/start', '/admin/stop'): return self.reply(404, {'ok': False})
         # pages from other sites can't use it: only the workbench's own origin
         if self.headers.get('Origin') not in ORIGINS: return self.reply(403, {'ok': False, 'error': 'not the workbench'})
         if self.path.startswith('/sh'):
@@ -340,6 +456,26 @@ class H(BaseHTTPRequestHandler):
             i = ps_start(cmd)
             if i is None: return self.reply(409, {'ok': False, 'error': 'a command is still running (Ctrl+C stops it)'})
             return self.reply(200, {'ok': True, 'id': i, 'cwd': PS['cwd']})
+        if self.path in ('/cmd', '/cmd/kill', '/admin', '/admin/kill', '/admin/start', '/admin/stop'):
+            if self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False, 'error': 'no token'})
+            if self.path == '/cmd/kill':
+                p = CMD['proc']
+                if p and p.poll() is None: subprocess.run(['taskkill', '/T', '/F', '/PID', str(p.pid)], capture_output=True)
+                return self.reply(200, {'ok': True})
+            if self.path == '/admin/kill': admin_flag('kill'); return self.reply(200, {'ok': True})
+            if self.path == '/admin/stop': admin_flag('stop'); return self.reply(200, {'ok': True})
+            if self.path == '/admin/start': admin_start(); return self.reply(200, dict(admin_status(), ok=True))
+            try: req = json.loads(self.rfile.read(min(int(self.headers.get('Content-Length') or 0), 8000)) or b'{}')
+            except Exception: return self.reply(400, {'ok': False, 'error': 'bad request'})
+            cmd = str(req.get('cmd') or '')
+            if not cmd.strip() or len(cmd) > 4000: return self.reply(400, {'ok': False, 'error': 'empty'})
+            if self.path == '/cmd':
+                i = cmd_start(cmd)
+                if i is None: return self.reply(409, {'ok': False, 'error': 'a command is still running (Ctrl+C stops it)'})
+                return self.reply(200, {'ok': True, 'id': i, 'cwd': CMD['cwd']})
+            i, err = admin_send(cmd)
+            if i is None: return self.reply(409, {'ok': False, 'error': err})
+            return self.reply(200, {'ok': True, 'id': i, 'cwd': ADM['cwd']})
         if self.path == '/runq/open':
             if self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False, 'error': 'no token'})
             try: rid = str(json.loads(self.rfile.read(min(int(self.headers.get('Content-Length') or 0), 2000)) or b'{}').get('id') or '')

@@ -1186,6 +1186,11 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
 #ps-log,#ps-term{flex:1;min-height:0;overflow:auto;margin:0;font:11px/1.35 Consolas,'Cascadia Mono',monospace;color:#9fe3bb;white-space:pre-wrap;word-break:break-word}
 #ps-log .end{color:#5ff6ff}#ps-log .bad,#ps-term .err{color:#ff4466}#ps-term .cmd{color:#ffb347}#ps-term .dim{color:#3d6c78}
 #ps-in{display:flex;gap:6px;align-items:center;padding-top:6px;border-top:1px solid #0f3b46;font:11px Consolas,'Cascadia Mono',monospace}
+#ps-modes{float:right;display:flex;gap:4px;margin-right:6px}#ps-modes button{float:none;opacity:.55}#ps-modes button.on{opacity:1;background:#ffb347;color:#011;--hb:#ffb347}
+#ps-modes button[data-m=admin].on{background:#ff4466;--hb:#ff4466}#ps-modes button[data-m=admin].live:not(.on){color:#ff4466;opacity:1}
+#ps-aend{display:none;margin-right:6px}#ps-aend.on{display:inline-block;--hb:#ff4466;color:#ff4466}
+#ps-con.admin{--hc:#ff4466;box-shadow:inset 0 0 0 1px #ff446666,inset 0 0 26px #ff446618}#ps-con.admin #ps-prompt{color:#ff4466}#ps-con.admin #ps-cmd{caret-color:#ff4466}
+#ps-mname .warn{color:#ff4466}#ps-mname .ok{color:#7dffb2}
 #ps-prompt{color:#ffb347;white-space:nowrap}#ps-cmd{flex:1;background:transparent;border:0;outline:0;color:var(--tx);font:inherit;caret-color:#ffb347}
 </style>
 </head>
@@ -1267,7 +1272,7 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
     <div class="hud" id="ps-q"><h4><b>RUN QUEUE</b> · scripts waiting for you</h4><div id="ps-qlist"></div><h4 style="margin-top:12px"><b>RUNS</b> · this session</h4><div id="ps-runs"></div></div>
     <div id="runq" role="status" aria-live="polite"><div class="rh"><b>RUN THESE</b><span id="runq-n"></span></div><div id="runq-list"></div></div>
     <div class="hud" id="ps-out"><h4><b>OUTPUT</b> <span id="ps-oname">pick a run</span></h4><div id="ps-uac">WINDOWS IS ASKING FOR ADMIN PERMISSION · click <b>Yes</b> on the prompt on your screen</div><pre id="ps-log"></pre></div>
-    <div class="hud" id="ps-con"><h4><b>CONSOLE</b> · PowerShell in SynTHBloK <button type="button" id="ps-clear">CLEAR</button></h4><pre id="ps-term"></pre><div id="ps-in"><span id="ps-prompt">PS&gt;</span><input id="ps-cmd" autocomplete="off" spellcheck="false" placeholder="a command: Get-ChildItem, Get-Process claude, ..." /></div></div>
+    <div class="hud" id="ps-con"><h4><b>CONSOLE</b> · <span id="ps-mname">PowerShell in SynTHBloK</span> <button type="button" id="ps-clear">CLEAR</button><button type="button" id="ps-aend" title="close the admin console now">END ADMIN</button><span id="ps-modes"><button type="button" data-m="ps" class="on">PS</button><button type="button" data-m="cmd">CMD</button><button type="button" data-m="admin" title="PowerShell as administrator: Windows asks once, then it stays on until END or 15 min idle">ADMIN</button></span></h4><pre id="ps-term"></pre><div id="ps-in"><span id="ps-prompt">PS&gt;</span><input id="ps-cmd" autocomplete="off" spellcheck="false" placeholder="a command: Get-ChildItem, Get-Process claude, ..." /></div></div>
   </div></div>
 <div id="libre" role="dialog" aria-label="LIBRE hardware diagnostics"><div class="head"><span><b>LIBRE · HARDWARE DIAGNOSTICS</b> &nbsp;<span id="lb-at">waiting for LibreHardwareMonitor…</span></span><button type="button" id="libre-x" aria-label="Close">&times;</button></div>
   <div id="lb-top" class="hud"><h4><b>VITALS</b> · live from LibreHardwareMonitor</h4><div id="lb-gg"></div></div>
@@ -3948,16 +3953,49 @@ document.getElementById('ps-q').addEventListener('click', e => {
 });
 // the console
 const psPut = (t, c) => { const el = document.getElementById('ps-term'), d = document.createElement('span'); if (c) d.className = c; d.textContent = t; el.appendChild(d); el.scrollTop = el.scrollHeight; };
-psPut('PowerShell · runs in your SynTHBloK folder (cd carries over). One command at a time; Ctrl+C stops it; no prompts that wait for typing.\n', 'dim');
+psPut('PowerShell · runs in your SynTHBloK folder (cd carries over). One command at a time; Ctrl+C stops it; no prompts that wait for typing.\nCMD = Command Prompt. ADMIN = PowerShell as administrator (Windows asks you once; it closes after 15 min idle or on END ADMIN).\n', 'dim');
+// three modes share this console: PS (PowerShell), CMD (Command Prompt), ADMIN (elevated PowerShell via tools/admin_worker.ps1)
+const PSM = { ps: { run: '/ps', out: '/ps/out', kill: '/ps/kill', tag: 'PS', cwd: '' }, cmd: { run: '/cmd', out: '/cmd/out', kill: '/cmd/kill', tag: 'CMD', cwd: '' },
+  admin: { run: '/admin', out: '/admin/out', kill: '/admin/kill', tag: 'ADMIN PS', cwd: '' } };
+PSX.mode = 'ps'; PSX.admin = { alive: false, starting: false };
+const psShort = c => (c || '').replace(/^.*\\SynTHBloK/i, '~\\SynTHBloK');
+function psPrompt() { const m = PSM[PSX.mode]; document.getElementById('ps-prompt').textContent = m.tag + (m.cwd ? ' ' + psShort(m.cwd) : '') + '>'; }
+function psModeDraw() {
+  const a = PSX.admin, el = document.getElementById('ps-mname');
+  document.querySelectorAll('#ps-modes button').forEach(b => { b.classList.toggle('on', b.dataset.m === PSX.mode); if (b.dataset.m === 'admin') b.classList.toggle('live', a.alive); });
+  document.getElementById('ps-con').classList.toggle('admin', PSX.mode === 'admin');
+  document.getElementById('ps-aend').classList.toggle('on', a.alive);
+  el.innerHTML = PSX.mode === 'cmd' ? 'Command Prompt in SynTHBloK' : PSX.mode === 'ps' ? 'PowerShell in SynTHBloK'
+    : a.alive ? 'PowerShell <span class="warn">AS ADMINISTRATOR</span> · <span class="ok">ON</span> · closes after 15 min idle'
+    : a.starting ? '<span class="warn">WINDOWS IS ASKING FOR ADMIN PERMISSION · click Yes on the prompt on your screen</span>' : 'admin console is off · click ADMIN to start it';
+  psPrompt();
+}
+async function psAdminTick() {
+  try { const r = await psFetch('/admin/status'); if (r.j.ok) { const was = PSX.admin.alive; PSX.admin = r.j; if (r.j.cwd) PSM.admin.cwd = r.j.cwd;
+    if (!was && r.j.alive) psPut('admin console is ON (as administrator)\n', 'err'); else if (was && !r.j.alive) psPut('admin console closed\n', 'dim'); } } catch (e) {}
+  psModeDraw();
+}
+setInterval(() => { if (document.getElementById('psx').classList.contains('on') && (PSX.mode === 'admin' || PSX.admin.alive || PSX.admin.starting)) psAdminTick(); }, 1500);
+document.getElementById('ps-modes').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (PSX.busy) { psPut('a command is still running (Ctrl+C stops it)\n', 'err'); return; }
+  PSX.mode = b.dataset.m; psModeDraw(); document.getElementById('ps-cmd').focus();
+  if (PSX.mode === 'admin') { await psAdminTick();
+    if (!PSX.admin.alive && !PSX.admin.starting) { let r; try { r = await psFetch('/admin/start', {}); } catch (e) { r = { status: 0, j: {} }; }
+      if (r.status === 404) { psPut('the workbench helper needs a restart to know ADMIN (close and reopen the workbench)\n', 'err'); return; }
+      psPut('starting the admin console: click Yes on the Windows prompt\n', 'err'); PSX.admin.starting = true; psModeDraw(); } }
+});
+document.getElementById('ps-aend').onclick = async () => { await psFetch('/admin/stop', {}).catch(() => {}); psPut('closing the admin console...\n', 'dim'); setTimeout(psAdminTick, 1200); };
 async function psExec(cmd) {
   if (PSX.busy) { psPut('a command is still running (Ctrl+C stops it)\n', 'err'); return; }
-  psPut('PS> ' + cmd + '\n', 'cmd'); PSX.busy = true; PSX.tfrom = 0;
-  let r; try { r = await psFetch('/ps', { cmd }); } catch (e) { r = { status: 0, j: { error: 'the workbench helper is not answering' } }; }
-  if (!r.j.ok) { psPut((r.status === 404 ? 'the workbench helper needs a restart to know PowerShell' : r.j.error || 'could not run it') + '\n', 'err'); PSX.busy = false; return; }
+  const md = PSX.mode, m = PSM[md];
+  psPut(m.tag + '> ' + cmd + '\n', 'cmd'); PSX.busy = true; PSX.tfrom = 0; PSX.busyMode = md;
+  let r; try { r = await psFetch(m.run, { cmd }); } catch (e) { r = { status: 0, j: { error: 'the workbench helper is not answering' } }; }
+  if (!r.j.ok) { psPut((r.status === 404 ? 'the workbench helper needs a restart to know ' + m.tag + ' (close and reopen the workbench)' : r.j.error || 'could not run it') + '\n', 'err'); PSX.busy = false; return; }
   for (;;) { await new Promise(res => setTimeout(res, 400));
-    let o; try { o = (await psFetch('/ps/out?from=' + PSX.tfrom)).j; } catch (e) { break; }
+    let o; try { o = (await psFetch(m.out + '?from=' + PSX.tfrom)).j; } catch (e) { break; }
     if (o.text) psPut(o.text); PSX.tfrom = o.next || PSX.tfrom;
-    if (o.done) { if (o.code) psPut('(exit ' + o.code + ')\n', 'err'); document.getElementById('ps-prompt').textContent = 'PS ' + (o.cwd || '').replace(/^.*\\SynTHBloK/i, '~\\SynTHBloK') + '>'; break; } }
+    if (o.done) { if (o.code) psPut('(exit ' + o.code + ')\n', 'err'); if (o.cwd) m.cwd = o.cwd; psPrompt(); break; } }
   PSX.busy = false;
 }
 document.getElementById('ps-cmd').addEventListener('keydown', e => {
@@ -3965,9 +4003,10 @@ document.getElementById('ps-cmd').addEventListener('keydown', e => {
   if (e.key === 'Enter' && i.value.trim()) { const c = i.value; PSX.hist.unshift(c); PSX.hi = -1; i.value = ''; psExec(c); }
   else if (e.key === 'ArrowUp' && PSX.hist.length) { PSX.hi = Math.min(PSX.hist.length - 1, PSX.hi + 1); i.value = PSX.hist[PSX.hi]; e.preventDefault(); }
   else if (e.key === 'ArrowDown') { PSX.hi = Math.max(-1, PSX.hi - 1); i.value = PSX.hi < 0 ? '' : PSX.hist[PSX.hi]; e.preventDefault(); }
-  else if (e.key === 'c' && e.ctrlKey && PSX.busy) { psFetch('/ps/kill', {}); psPut('^C\n', 'err'); e.preventDefault(); }
+  else if (e.key === 'c' && e.ctrlKey && PSX.busy) { psFetch(PSM[PSX.busyMode || PSX.mode].kill, {}); psPut('^C\n', 'err'); e.preventDefault(); }
 });
 document.getElementById('ps-clear').onclick = () => { document.getElementById('ps-term').textContent = ''; };
+psModeDraw();
 
 // TELEMETRY banner: the newest event only, plus the readout's mode and clock
 setInterval(() => {
