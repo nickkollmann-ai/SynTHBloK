@@ -18,6 +18,13 @@
 #   GET  /cleaner/running           (token) uninstallers running right now (process name + window title), read-only
 #   POST /runq/open {id}            (token) the CORE tab's RUN THESE window: opens ONE .bat that Claude listed in
 #        tools/run_queue.json, only from the Desktop or the SynTHBloK folder (Windows still asks for admin if the .bat needs it)
+#   POWERSHELL tab (all token-protected, this computer only):
+#   POST /ps        {"cmd": "..."}  one PowerShell command at a time in the SynTHBloK folder (cd carries over)
+#   GET  /ps/out?from=k            its output;  POST /ps/kill stops it
+#   POST /ps/task   {"id": "..."}  runs a RUN THESE item's script (tools\*.ps1 named in tools/run_queue.json) with its
+#        output captured to tools/ps_runs/<run>.log; items marked "admin" start through the normal Windows admin prompt
+#        (Nick clicks Yes) - nothing here gets around that prompt
+#   GET  /ps/tasks                 the runs (state, exit code);  GET /ps/task/out?run=..&from=k  a run's output
 #   Only the workbench's own page can use it: its Origin, and the token this server writes at start (other
 #   sites can't read either). No interactive input (no vim / less): commands that finish, like make, git, ls.
 # Only .vcv files straight inside patches/ or Rack's patches folder can be opened.
@@ -73,6 +80,85 @@ def sh_start(cmd):
             SH['code'] = code; SH['done'] = True
     threading.Thread(target=pump, daemon=True).start()
     return my
+
+# ---- the POWERSHELL tab: a console like MSYS2's, plus scripts from the RUN THESE list with live output ----
+PSX = r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+PS = {'id': 0, 'proc': None, 'buf': '', 'done': True, 'code': 0, 'cwd': REPO, 'lock': threading.Lock()}
+def ps_start(cmd):
+    with PS['lock']:
+        if PS['proc'] and PS['proc'].poll() is None: return None
+        PS['id'] += 1; PS['buf'] = ''; PS['done'] = False; PS['code'] = 0
+        script = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8; $ProgressPreference = 'SilentlyContinue'; "
+                  "Set-Location -LiteralPath $env:PS_CWD; try { " + cmd + " | Out-String -Width 160 -Stream } catch { $_ | Out-String } ; "
+                  "$c = if ($?) { 0 } else { 1 }; [Console]::Out.Write(\"`n\" + [char]1 + 'CWD:' + (Get-Location).Path); exit $c")
+        env = dict(os.environ, PS_CWD=PS['cwd'])
+        p = subprocess.Popen([PSX, '-NoProfile', '-NoLogo', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+                             cwd=PS['cwd'], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        PS['proc'] = p; my = PS['id']
+    def pump():
+        for raw in iter(lambda: p.stdout.read1(4096) if hasattr(p.stdout, 'read1') else p.stdout.read(1), b''):
+            with PS['lock']:
+                if PS['id'] == my: PS['buf'] += raw.decode('utf-8', 'replace')
+        code = p.wait()
+        with PS['lock']:
+            if PS['id'] != my: return
+            i = PS['buf'].rfind(MARK)
+            if i >= 0:
+                PS['cwd'] = PS['buf'][i + len(MARK):].strip() or PS['cwd']
+                PS['buf'] = PS['buf'][:i].rstrip('\n') + '\n'
+            PS['code'] = code; PS['done'] = True
+    threading.Thread(target=pump, daemon=True).start()
+    return my
+
+RUNS_DIR = os.path.join(HERE, 'ps_runs')
+RUNS = {}   # run id -> {id, item, name, admin, started, log, state}
+def ps_task(rid):
+    import time as _t
+    try: items = json.load(open(os.path.join(HERE, 'run_queue.json'), encoding='utf-8-sig')).get('items', [])
+    except Exception: return None, 'no run queue'
+    it = next((x for x in items if x.get('id') == rid), None)
+    if not it or not it.get('script'): return None, 'this item has no script to run here'
+    sc = os.path.abspath(os.path.join(REPO, it['script']))
+    if not sc.lower().startswith(os.path.join(REPO, 'tools').lower() + os.sep) or not sc.lower().endswith('.ps1') or not os.path.isfile(sc):
+        return None, 'only .ps1 scripts in SynTHBloK\\tools can run here'
+    if any(r['item'] == rid and r['state'] in ('waiting', 'running') for r in RUNS.values()): return None, 'already running'
+    os.makedirs(RUNS_DIR, exist_ok=True)
+    run = _t.strftime('%Y%m%d-%H%M%S') + '-' + re.sub(r'[^\w-]', '', rid)[:30]
+    log = os.path.join(RUNS_DIR, run + '.log'); wrap = os.path.join(RUNS_DIR, run + '.ps1')
+    with open(wrap, 'w', encoding='utf-8-sig') as f:
+        f.write("$ErrorActionPreference = 'Continue'\n$log = '%s'\n" % log.replace("'", "''") +
+                "'##START ' + (Get-Date -Format s) | Out-File -LiteralPath $log -Encoding utf8\n"
+                "try { & '%s' *>&1 | ForEach-Object { \"$_\" | Out-File -LiteralPath $log -Append -Encoding utf8 } ; $c = if ($?) { 0 } else { 1 } }\n" % sc.replace("'", "''") +
+                "catch { \"$_\" | Out-File -LiteralPath $log -Append -Encoding utf8; $c = 1 }\n"
+                "'##END ' + $c | Out-File -LiteralPath $log -Append -Encoding utf8\n")
+    open(log, 'w').close()
+    args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', wrap]
+    if it.get('admin'):
+        # the normal Windows admin prompt (UAC): Nick clicks Yes on his screen, or nothing runs
+        q = "Start-Process -FilePath '%s' -Verb RunAs -WindowStyle Hidden -ArgumentList %s" % (PSX, ','.join("'%s'" % a.replace("'", "''") for a in args))
+        subprocess.Popen([PSX, '-NoProfile', '-Command', q], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    else:
+        subprocess.Popen([PSX] + args, cwd=REPO, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    RUNS[run] = {'id': run, 'item': rid, 'name': it.get('name', rid), 'admin': bool(it.get('admin')), 'started': int(_t.time() * 1000), 'log': log, 'state': 'waiting'}
+    try:
+        done = json.load(open(RUND, encoding='utf-8'))
+    except Exception: done = {}
+    done[rid] = int(_t.time() * 1000)
+    with open(RUND, 'w', encoding='utf-8') as f: json.dump(done, f)
+    return run, None
+def ps_runs():
+    out = []
+    for r in sorted(RUNS.values(), key=lambda r: -r['started']):
+        try:
+            with open(r['log'], 'rb') as f: f.seek(max(0, os.path.getsize(r['log']) - 300)); tail = f.read().decode('utf-8-sig', 'replace')
+        except Exception: tail = ''
+        m = re.search(r'##END (\d+)', tail)
+        if m: r['state'] = 'done' if m.group(1) == '0' else 'failed'; r['code'] = int(m.group(1))
+        elif os.path.exists(r['log']) and os.path.getsize(r['log']) > 0: r['state'] = 'running'
+        elif r['admin'] and r['state'] == 'waiting': r['state'] = 'needs-ok'
+        out.append({k: v for k, v in r.items() if k != 'log'})
+    return out
 
 def rack_running():
     r = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq Rack.exe', '/NH'], capture_output=True, text=True)
@@ -192,6 +278,23 @@ class H(BaseHTTPRequestHandler):
                     i = buf.find(MARK)
                     if i >= 0: buf = buf[:i]   # the cwd marker is never shown
                 return self.reply(200, {'ok': True, 'id': SH['id'], 'text': buf[frm:], 'next': len(buf), 'done': SH['done'], 'code': SH['code'], 'cwd': SH['cwd']})
+        if self.path.startswith('/ps/'):
+            if self.headers.get('Origin') not in ORIGINS or self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False})
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            frm = int((q.get('from') or ['0'])[0])
+            if self.path.startswith('/ps/out'):
+                with PS['lock']:
+                    buf = PS['buf']; i = buf.find(MARK)
+                    if i >= 0: buf = buf[:i]
+                    return self.reply(200, {'ok': True, 'id': PS['id'], 'text': buf[frm:], 'next': len(buf), 'done': PS['done'], 'code': PS['code'], 'cwd': PS['cwd']})
+            if self.path.startswith('/ps/tasks'): return self.reply(200, {'ok': True, 'runs': ps_runs()})
+            if self.path.startswith('/ps/task/out'):
+                r = RUNS.get((q.get('run') or [''])[0])
+                if not r: return self.reply(404, {'ok': False})
+                try:
+                    with open(r['log'], 'rb') as f: txt = f.read().decode('utf-8-sig', 'replace').replace('\ufeff', '')
+                except Exception: txt = ''
+                return self.reply(200, {'ok': True, 'text': txt[frm:], 'next': len(txt), 'state': next((x['state'] for x in ps_runs() if x['id'] == r['id']), '')})
         if self.path == '/cleaner/running':
             if self.headers.get('Origin') not in ORIGINS or self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False})
             return self.reply(200, {'ok': True, 'running': running_uninstallers()})
@@ -201,7 +304,7 @@ class H(BaseHTTPRequestHandler):
             except Exception as e: return self.reply(500, {'ok': False, 'error': str(e)})
         self.reply(404, {'ok': False})
     def do_POST(self):
-        if self.path not in ('/open', '/gen', '/sh', '/sh/kill', '/cleaner', '/cleaner/uninstall', '/cleaner/settings', '/runq/open'): return self.reply(404, {'ok': False})
+        if self.path not in ('/open', '/gen', '/sh', '/sh/kill', '/cleaner', '/cleaner/uninstall', '/cleaner/settings', '/runq/open', '/ps', '/ps/kill', '/ps/task'): return self.reply(404, {'ok': False})
         # pages from other sites can't use it: only the workbench's own origin
         if self.headers.get('Origin') not in ORIGINS: return self.reply(403, {'ok': False, 'error': 'not the workbench'})
         if self.path.startswith('/sh'):
@@ -221,6 +324,22 @@ class H(BaseHTTPRequestHandler):
             return self.reply(200, {'ok': True, 'id': i, 'cwd': SH['cwd']})
         if self.path == '/gen': return self.gen()
         if self.path == '/cleaner': return self.cleaner()
+        if self.path in ('/ps', '/ps/kill', '/ps/task'):
+            if self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False, 'error': 'no token'})
+            if self.path == '/ps/kill':
+                p = PS['proc']
+                if p and p.poll() is None: subprocess.run(['taskkill', '/T', '/F', '/PID', str(p.pid)], capture_output=True)
+                return self.reply(200, {'ok': True})
+            try: req = json.loads(self.rfile.read(min(int(self.headers.get('Content-Length') or 0), 8000)) or b'{}')
+            except Exception: return self.reply(400, {'ok': False, 'error': 'bad request'})
+            if self.path == '/ps/task':
+                run, err = ps_task(str(req.get('id') or ''))
+                return self.reply(200 if run else 409, {'ok': bool(run), 'run': run, 'error': err})
+            cmd = str(req.get('cmd') or '')
+            if not cmd.strip() or len(cmd) > 4000: return self.reply(400, {'ok': False, 'error': 'empty'})
+            i = ps_start(cmd)
+            if i is None: return self.reply(409, {'ok': False, 'error': 'a command is still running (Ctrl+C stops it)'})
+            return self.reply(200, {'ok': True, 'id': i, 'cwd': PS['cwd']})
         if self.path == '/runq/open':
             if self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False, 'error': 'no token'})
             try: rid = str(json.loads(self.rfile.read(min(int(self.headers.get('Content-Length') or 0), 2000)) or b'{}').get('id') or '')
