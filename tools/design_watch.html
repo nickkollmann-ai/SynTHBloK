@@ -1208,6 +1208,7 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
 #sitex{position:fixed;inset:0;top:var(--tabs-h,80px);z-index:13;display:none;grid-template-rows:auto minmax(0,1fr);background:#010407}
 #sitex.on{display:grid}
 #sitex>.head{display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid var(--line);background:#02030a;font-size:10.5px;min-width:0}
+#sb-mode #sb-word{font-size:19px}
 #sitex>.head>b{color:var(--ok);letter-spacing:.18em;font-weight:600;white-space:nowrap}
 #sitex .sb,#sitex>.head button,#site-comm button{--hb:#5ff6ff88;background-color:#04161c;color:#5ff6ff;font:inherit;font-size:9.5px;letter-spacing:.14em;padding:3px 10px;cursor:pointer;border:1px solid var(--hb);white-space:nowrap;clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
 #sitex>.head button.on{background:#5ff6ff;color:#011}#sitex>.head button:hover,#site-comm button:hover{box-shadow:0 0 10px #5ff6ff66}
@@ -1219,7 +1220,7 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
 #site-watch.on{background:#7dffb2!important;color:#011!important;--hb:#7dffb2}
 #sitex #site-x{font-size:12px;padding:2px 10px}
 .site-v{display:none;min-height:0;gap:8px;padding:8px 10px 10px}.site-v.on{display:grid}
-#site-live{grid-template-columns:minmax(0,1fr) 390px}#site-build{grid-template-columns:400px minmax(0,1fr)}
+#site-live{grid-template-columns:minmax(0,1fr)}#site-build{grid-template-columns:340px minmax(0,1fr) 360px}
 .sx{background:#010407;box-shadow:inset 0 0 0 1px #0f3b46;padding:12px 14px 10px;min-height:0;display:flex;flex-direction:column;position:relative}
 .sx h4{margin:0 0 8px;font-size:9px;letter-spacing:.2em;color:#5f8792;font-weight:500;display:flex;gap:8px;align-items:baseline}.sx h4 b{color:var(--hc,#5ff6ff);font-weight:600}
 .sx h4 .r{margin-left:auto;display:flex;gap:4px}
@@ -1284,12 +1285,12 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
   <button type="button" id="patch-btn" class="tab" title="Rack's live patch">PATCH MAP<b id="patch-n"></b></button>
   <button type="button" id="lib-btn" class="tab" title="Saved patches: patches/ and Rack's patches folder">PATCHES<b id="lib-n"></b></button>
   <button type="button" id="lab-btn" class="tab" title="How the BACKDROP themes and cases are being built (tools/backdrop_lab.json)">BACKDROP LAB<b id="lab-n"></b></button>
-  <button type="button" id="site-btn" class="tab" title="SITE: liquidnick.com live, a BUILDER view while Claude changes it, and COMM to ask for changes (tools/site*.json)">SITE</button>
   <button type="button" id="cln-btn" class="tab" title="The PC cleanup: what changed, what is next, and approvals (tools/cleaner.json)">CLEANER<b id="cln-n"></b></button>
   <button type="button" id="ps-btn" class="tab" title="POWERSHELL: run the queued scripts here, watch their output, and a PowerShell console">POWERSHELL</button>
   <button type="button" id="libre-btn" class="tab" title="LIBRE: every sensor LibreHardwareMonitor reads (tools/lhm.json)">LIBRE</button>
   <button type="button" id="think-btn" class="tab idle" title="CORE: Claude's thinking + this PC live (tools/claude_thinking.json, tools/pc_stats.json)">CORE<b id="think-now" hidden></b></button>
   <span class="sp"></span>
+  <button type="button" id="site-btn" class="tab" title="SITE: liquidnick.com live, a BUILDER view while Claude changes it, and COMM to ask for changes (tools/site*.json)">SITE</button>
   <div class="views" id="wb-views" title="What the WORKBENCH page shows"><i>VIEW</i><button type="button" data-v="all" class="on">ALL</button><button type="button" data-v="design">DESIGN</button><button type="button" data-v="code">CODE</button><button type="button" data-v="feeds">FEEDS + CHAT</button></div>
 </nav>
 <main>
@@ -1356,11 +1357,6 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
   <div class="site-v on" id="site-live">
     <div class="sx site-frame"><div class="bar"><b>LIVE</b><span id="site-cur">www.liquidnick.com</span></div><iframe id="site-if" title="liquidnick.com" referrerpolicy="no-referrer"></iframe>
       <div class="site-block" id="site-blk"><b>THE SITE WON'T SHOW INSIDE OTHER PAGES</b><div>liquidnick.com sends a "no framing" header, so the browser won't show it here.<br>WATCH still checks it for changes. Ask Claude in COMM to allow the workbench (127.0.0.1) to show it.</div><button type="button" class="sb" id="site-blk-open">OPEN IN BROWSER ↗</button></div></div>
-    <div id="site-right">
-      <div class="sx" id="site-changes"><h4><b>CHANGES</b> · what Claude is doing on the site</h4><div id="site-chlist"></div></div>
-      <div class="sx" id="site-comm"><h4><b>COMM</b> · you &harr; Claude about the site</h4><div id="site-log"></div>
-        <div id="site-in"><textarea id="site-msg" placeholder="what to change: &quot;make the hero darker&quot;, &quot;add the new module to downloads&quot;... (Ctrl+Enter sends)"></textarea><button type="button" id="site-send">SEND</button><label><input type="checkbox" id="site-att" checked />this page</label></div></div>
-    </div>
   </div>
   <div class="site-v" id="site-build">
     <div id="sb-left">
@@ -1371,6 +1367,11 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
         <div class="sx" id="sb-logc"><h4><b>LOG</b></h4><div id="sb-log"></div></div></div>
     </div>
     <div class="sx site-frame" id="sb-prev"><div class="bar"><b>PREVIEW</b><button type="button" data-p="local" class="sb on" title="your local working copy (Desktop\liquidnick_site_work): changes show here before they go live">LOCAL COPY</button><button type="button" data-p="live" class="sb" title="the live site">LIVE SITE</button><span id="sb-purl"></span><button type="button" class="sb" id="sb-reload">RELOAD</button></div><iframe id="sb-if" title="site preview"></iframe></div>
+    <div id="site-right">
+      <div class="sx" id="site-changes"><h4><b>CHANGES</b> · what Claude is doing on the site</h4><div id="site-chlist"></div></div>
+      <div class="sx" id="site-comm"><h4><b>COMM</b> · you &harr; Claude about the site</h4><div id="site-log"></div>
+        <div id="site-in"><textarea id="site-msg" placeholder="what to change: &quot;make the hero darker&quot;, &quot;add the new module to downloads&quot;... (Ctrl+Enter sends)"></textarea><button type="button" id="site-send">SEND</button><label><input type="checkbox" id="site-att" checked />this page</label></div></div>
+    </div>
   </div>
 </div>
 <div id="psx" role="dialog" aria-label="PowerShell"><div class="head"><span><b>POWERSHELL · SCRIPTS + CONSOLE</b> &nbsp;<span id="ps-at">this PC only · admin scripts still ask Windows for your OK</span></span><button type="button" id="ps-x" aria-label="Close">&times;</button></div>
