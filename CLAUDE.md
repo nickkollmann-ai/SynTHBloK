@@ -85,6 +85,11 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   while working on the site, keeps `tools/site_build.json` current ({updated, mode: idle|think|build|deploy, task, rev, page,
   now{title,detail,why}, plan[], files[{path,add,del,note}], log[{t,kind,text}]}; bump rev to reload the preview). The
   BUILDER preview serves the local copy `Desktop\liquidnick_site_work` via the helper's GET /site/local/<path>.
+- BACKDROP LAB > BUILDER: Claude's live BACKDROP work from `tools/backdrop_build.json` (mode idle|think|build|compile|shoot,
+  task, now, plan, files, log, preview, shots[{src,name}], messages[]), the INFLUENCES board from `tools/backdrop_influences.json`
+  (Nick's Midjourney themes; local only), and COMM (`tools/backdrop_inbox.json` via the helper's POST /backdrop; "check BACKDROP").
+  Art: `python3 tools/make_backdrop_art.py [names | psy]` renders res/backdrops/*.jpg; new looks/cases/themes go at the END of
+  their lists (patches save looks, colours and side materials by number).
 - `tools/build_and_reload.ps1`: build, close Rack cleanly, devinstall, screenshots, reopen Rack.
 - `tools/rack_shots.ps1`: module screenshots into `web-images/screenshots`. Its default Rack path is Rack2Pro; on a
   PC with Rack Free pass `-Rack 'C:\Program Files\VCV\Rack2Free\Rack.exe'`.

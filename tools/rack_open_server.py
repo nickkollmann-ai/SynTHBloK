@@ -34,6 +34,7 @@
 #   SITE tab: POST /site {"text", "page"}  a message for Claude about liquidnick.com (tools/site_inbox.json, local only)
 #        GET /site/check?url=...  fetches a liquidnick.com page (only that site) and returns its status, a hash of the
 #        page (to spot changes) and whether the site lets other pages show it in a frame
+#        POST /backdrop {"text"}  the same for the BACKDROP LAB BUILDER (tools/backdrop_inbox.json)
 #        GET /site/local/<path>   serves the local working copy (Desktop\liquidnick_site_work) for the BUILDER preview
 #   Only the workbench's own page can use it: its Origin, and the token this server writes at start (other
 #   sites can't read either). No interactive input (no vim / less): commands that finish, like make, git, ls.
@@ -515,7 +516,7 @@ class H(BaseHTTPRequestHandler):
             except Exception as e: return self.reply(500, {'ok': False, 'error': str(e)})
         self.reply(404, {'ok': False})
     def do_POST(self):
-        if self.path not in ('/open', '/gen', '/sh', '/sh/kill', '/cleaner', '/cleaner/uninstall', '/cleaner/settings', '/runq/open', '/ps', '/ps/kill', '/ps/task', '/ps/task/in', '/ps/task/stop', '/site', '/cmd', '/cmd/kill', '/admin', '/admin/kill', '/admin/start', '/admin/stop'): return self.reply(404, {'ok': False})
+        if self.path not in ('/open', '/gen', '/sh', '/sh/kill', '/cleaner', '/cleaner/uninstall', '/cleaner/settings', '/runq/open', '/ps', '/ps/kill', '/ps/task', '/ps/task/in', '/ps/task/stop', '/site', '/backdrop', '/cmd', '/cmd/kill', '/admin', '/admin/kill', '/admin/start', '/admin/stop'): return self.reply(404, {'ok': False})
         # pages from other sites can't use it: only the workbench's own origin
         if self.headers.get('Origin') not in ORIGINS: return self.reply(403, {'ok': False, 'error': 'not the workbench'})
         if self.path.startswith('/sh'):
@@ -536,6 +537,7 @@ class H(BaseHTTPRequestHandler):
         if self.path == '/gen': return self.gen()
         if self.path == '/cleaner': return self.cleaner()
         if self.path == '/site': return self.site_note()
+        if self.path == '/backdrop': return self.site_note('backdrop_inbox.json')
         if self.path in ('/ps', '/ps/kill', '/ps/task', '/ps/task/in', '/ps/task/stop'):
             if self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False, 'error': 'no token'})
             if self.path == '/ps/kill':
@@ -627,12 +629,12 @@ class H(BaseHTTPRequestHandler):
             with open(path + '.tmp', 'w', encoding='utf-8') as f: json.dump(box, f, indent=1)
             os.replace(path + '.tmp', path)
         if reply: self.reply(200, {'ok': True, 'id': m['id']})
-    def site_note(self):
+    def site_note(self, fname='site_inbox.json'):
         try: req = json.loads(self.rfile.read(min(int(self.headers.get('Content-Length') or 0), 20000)) or b'{}')
         except Exception: return self.reply(400, {'ok': False, 'error': 'bad request'})
         text = str(req.get('text') or '')[:4000]; page = str(req.get('page') or '')[:300]
         if not text.strip(): return self.reply(400, {'ok': False, 'error': 'empty'})
-        path = os.path.join(HERE, 'site_inbox.json')
+        path = os.path.join(HERE, fname)
         with SITE_LOCK:
             try:
                 with open(path, encoding='utf-8') as f: box = json.load(f)

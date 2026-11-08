@@ -60,3 +60,7 @@ tools/ps_runs/
 tools/site.json
 tools/site_inbox.json
 tools/site_build.json
+# BACKDROP LAB BUILDER feed, notes, and the Midjourney influences (local only: private prompts)
+tools/backdrop_build.json
+tools/backdrop_inbox.json
+tools/backdrop_influences.json

@@ -90,6 +90,21 @@ static std::vector<CaseStyle> builtInCases() {
         {"CURVED CONSOLE", M_WOOD, rgb(196, 170, 130), rgb(150, 124, 88), rgb(150, 154, 158), 22.f, E_CURVE, X_OPEN, 0},
         {"LATTICE PRINT", M_PRINTED, rgb(34, 30, 34), rgb(20, 18, 20), rgb(150, 154, 158), 26.f, E_TRUSS, X_OPEN, 0},
         {"LATTICE PRINT ORANGE", M_PRINTED, rgb(230, 110, 20), rgb(170, 70, 8), rgb(150, 154, 158), 26.f, E_TRUSS, X_OPEN, 0},
+        // PSYCHEDELIC (Nov 2026): neon acrylics, UV prints and blacklight finishes to go with the psychedelic ART
+        {"NEON ACRYLIC PINK", M_ACRYLIC, rgb(255, 47, 168), rgb(255, 200, 236), rgb(54, 40, 52), 12.f, E_ROUND, X_NONE, 0},
+        {"NEON ACRYLIC CYAN", M_ACRYLIC, rgb(25, 227, 255), rgb(210, 250, 255), rgb(36, 50, 56), 12.f, E_ROUND, X_NONE, 0},
+        {"SMOKED VIOLET ACRYLIC", M_ACRYLIC, rgb(64, 30, 96), rgb(200, 170, 240), rgb(44, 36, 54), 12.f, E_ROUND, X_NONE, 0},
+        {"UV PRINT LIME", M_PRINTED, rgb(182, 255, 42), rgb(120, 190, 20), rgb(36, 40, 30), 14.f, E_ROUND, X_NONE, 0},
+        {"UV PRINT MAGENTA", M_PRINTED, rgb(230, 36, 150), rgb(160, 20, 100), rgb(40, 30, 38), 14.f, E_ROUND, X_NONE, 0},
+        {"BLACKLIGHT POD", M_ANODIZED, rgb(70, 24, 130), rgb(40, 12, 90), rgb(34, 28, 44), 10.f, E_ROUND, X_NONE, 0},
+        {"IRIDESCENT ANODIZED", M_ANODIZED, rgb(36, 96, 128), rgb(120, 40, 150), rgb(34, 34, 42), 12.f, E_SQUARE, X_NONE, 0},
+        {"GRAFFITI ROAD CASE", M_TOLEX, rgb(20, 18, 26), rgb(255, 47, 168), rgb(34, 30, 38), 18.f, E_SQUARE, X_LATCHES, 0},
+        {"FORGE STEEL", M_POWDER, rgb(150, 52, 14), rgb(90, 26, 8), rgb(40, 30, 26), 18.f, E_SLANT, X_LEGS, 0},
+        {"EBONY GOLD CONSOLE", M_WOOD, rgb(44, 30, 24), rgb(26, 18, 14), rgb(190, 152, 64), 28.f, E_CURVE, X_NONE, 0},
+        {"MYCELIUM LATTICE", M_PRINTED, rgb(18, 96, 104), rgb(10, 58, 64), rgb(150, 154, 158), 26.f, E_TRUSS, X_OPEN, 0},
+        {"ACID LATTICE", M_PRINTED, rgb(182, 255, 42), rgb(110, 170, 20), rgb(150, 154, 158), 26.f, E_TRUSS, X_OPEN, 0},
+        {"STEPPED NEON", M_PRINTED, rgb(255, 47, 168), rgb(170, 20, 110), rgb(150, 154, 158), 22.f, E_STEP, X_OPEN, 0},
+        {"CURVED VIOLET", M_PRINTED, rgb(138, 60, 255), rgb(90, 30, 180), rgb(150, 154, 158), 22.f, E_CURVE, X_OPEN, 0},
     };
 }
 // SIDE PANELS: put any side panels on any case (shape, material, width, open frame); AUTO keeps the case's own
@@ -98,11 +113,14 @@ static const SideMat kSideMat[] = {
     {"AUTO", M_NONE, {}}, {"WALNUT", M_WOOD, {}}, {"OAK", M_WOOD, {}}, {"CHERRY", M_WOOD, {}}, {"EBONY", M_WOOD, {}}, {"ASH", M_WOOD, {}},
     {"BIRCH PLY", M_PLY, {}}, {"BLACK PLY", M_PLY, {}}, {"BLACK STEEL", M_POWDER, {}}, {"BRUSHED", M_BRUSHED, {}}, {"CARBON", M_CARBON, {}},
     {"ORANGE PRINT", M_PRINTED, {}}, {"WHITE", M_POWDER, {}},
+    {"NEON PINK", M_ACRYLIC, {}}, {"NEON CYAN", M_ACRYLIC, {}}, {"ACID LIME", M_PRINTED, {}}, {"UV VIOLET", M_PRINTED, {}}, {"BLACKLIGHT", M_ANODIZED, {}},
+    {"FORGE RUST", M_POWDER, {}}, {"GOLD", M_BRUSHED, {}},
 };
 static const int kSideMatN = (int) (sizeof(kSideMat) / sizeof(kSideMat[0]));
 static NVGcolor sideColor(int i) {
     static const int c[][3] = {{0, 0, 0}, {92, 58, 34}, {168, 124, 78}, {136, 60, 34}, {44, 30, 24}, {196, 170, 130}, {196, 162, 114}, {38, 33, 30},
-                               {26, 26, 28}, {170, 172, 176}, {24, 24, 26}, {230, 110, 20}, {220, 218, 210}};
+                               {26, 26, 28}, {170, 172, 176}, {24, 24, 26}, {230, 110, 20}, {220, 218, 210},
+                               {255, 47, 168}, {25, 227, 255}, {182, 255, 42}, {138, 60, 255}, {70, 24, 130}, {150, 52, 14}, {196, 160, 70}};
     i = clamp(i, 0, kSideMatN - 1);
     return nvgRGB(c[i][0], c[i][1], c[i][2]);
 }
@@ -168,23 +186,28 @@ static std::vector<CaseStyle>& caseLibrary() {
 }
 
 // the SynTHBloK looks for the background
-static const int kLookN = 30;
+static const int kLookN = 39;
+static const int kArtN = 19;
 enum { LOOK_GRADIENT = 18, LOOK_CASE_GRADIENT = 19, LOOK_ART = 20 };
 // ART: detailed pictures made once (tools/make_backdrop_art.py) and shipped in res/backdrops/: one textured
 // rectangle per frame, so they cost no more than a plain colour
-static const char* const kArtFile[10] = {"nebula", "aurora", "topographic", "synthwave", "flowfield", "crystal", "oscilloscope", "marble", "circuit", "spectrum"};
+static const char* const kArtFile[kArtN] = {"nebula", "aurora", "topographic", "synthwave", "flowfield", "crystal", "oscilloscope", "marble", "circuit", "spectrum",
+    // the PSYCHEDELIC set (Nov 2026), drawn from Nick's own abstract artwork
+    "wildstyle", "liquid", "kaleidoscope", "biolum", "forge", "escher", "biomorph", "stickerbomb", "spheres"};
 static const char* const kLookName[kLookN] = {"Plain colour", "Amber grid", "OLED glow", "Diamond plate", "Deep space", "Amber rails (Rack's look, warmer)",
     "Carbon weave", "Circuit traces", "CRT scanlines", "Hex mesh", "Blueprint", "Pegboard", "Acoustic foam", "Brushed steel",
     "Sunset fade", "Halftone dots", "Brick wall", "Wood slats", "Gradient (the colour, to black)", "Case gradient (follows the case)",
-    "Art: Nebula", "Art: Aurora", "Art: Topographic", "Art: Synthwave", "Art: Flow field", "Art: Crystal", "Art: Oscilloscope", "Art: Gold marble", "Art: Circuit board", "Art: Spectrum"};
+    "Art: Nebula", "Art: Aurora", "Art: Topographic", "Art: Synthwave", "Art: Flow field", "Art: Crystal", "Art: Oscilloscope", "Art: Gold marble", "Art: Circuit board", "Art: Spectrum",
+    "Psychedelic: Neon wildstyle", "Psychedelic: Liquid illusion", "Psychedelic: Sacred kaleidoscope", "Psychedelic: Bioluminescent network", "Psychedelic: Machine elf forge",
+    "Psychedelic: Escher blocks", "Psychedelic: Grey biomorph", "Psychedelic: Sticker bomb", "Psychedelic: Glass spheres"};
 static const char* const kFitName[4] = {"Tiled across the rack", "Fill the screen (snaps to fit)", "Fit the screen (whole image shows)", "Centred on the screen"};
-static const int kColorN = 24;
+static const int kColorN = 28;
 static const char* const kColorName[kColorN] = {"Black", "Charcoal", "Deep amber", "Ember", "Midnight teal", "Plum", "Forest", "Steel",
     "Navy", "Indigo", "Oxblood", "Wine", "Rust", "Mocha", "Olive", "Moss", "Slate blue", "Deep cyan", "Deep magenta", "Gunmetal",
-    "Warm grey", "Sand", "SynTHBloK orange", "Cream"};
+    "Warm grey", "Sand", "SynTHBloK orange", "Cream", "Blacklight violet", "Deep neon pink", "Deep acid green", "Deep UV blue"};
 static const NVGcolor kColor[kColorN] = {rgb(6, 6, 6), rgb(22, 22, 24), rgb(40, 22, 6), rgb(46, 12, 6), rgb(6, 30, 36), rgb(34, 14, 38), rgb(10, 30, 16), rgb(36, 40, 46),
     rgb(8, 14, 40), rgb(22, 12, 52), rgb(52, 8, 12), rgb(44, 10, 26), rgb(70, 28, 10), rgb(44, 30, 22), rgb(42, 44, 14), rgb(26, 44, 22), rgb(34, 44, 70), rgb(0, 54, 64), rgb(64, 8, 54), rgb(30, 34, 38),
-    rgb(70, 66, 62), rgb(120, 100, 70), rgb(200, 96, 10), rgb(214, 204, 182)};
+    rgb(70, 66, 62), rgb(120, 100, 70), rgb(200, 96, 10), rgb(214, 204, 182), rgb(30, 8, 50), rgb(60, 6, 42), rgb(18, 42, 6), rgb(8, 12, 64)};
 
 } // namespace
 
@@ -346,7 +369,7 @@ struct BackdropLayer : widget::TransparentWidget {
         nvgFill(vg);
     }
     void drawLook(NVGcontext* vg, math::Rect v, int look, NVGcolor base, NVGcolor caseCol) {
-        if (look >= LOOK_ART) { drawArt(vg, v, clamp(look - LOOK_ART, 0, 9)); return; }
+        if (look >= LOOK_ART) { drawArt(vg, v, clamp(look - LOOK_ART, 0, kArtN - 1)); return; }
         if (look == LOOK_GRADIENT) { drawGradient(vg, v, base); return; }
         if (look == LOOK_CASE_GRADIENT) { drawGradient(vg, v, nvgLerpRGBA(caseCol, nvgRGB(0, 0, 0), 0.45f)); return; }
         nvgBeginPath(vg);
@@ -1483,6 +1506,33 @@ static const Theme kThemes[] = {
     {"GOLD MARBLE", LOOK_ART + 7, 0, "EBONY SKIFF", 84.f},
     {"PCB", LOOK_ART + 8, 0, "LAB EXTRUSION", 84.f},
     {"SPECTRUM", LOOK_ART + 9, 0, "PERFORMER 7U", 100.f},
+    // PSYCHEDELIC combos (Nov 2026): Nick's abstract artwork, with neon, UV and blacklight cases
+    {"NEON WILDSTYLE", LOOK_ART + 10, 0, "GRAFFITI ROAD CASE", 84.f},
+    {"WILDSTYLE STAIRS", LOOK_ART + 10, 0, "STEPPED NEON", 100.f},
+    {"LIQUID DREAM", LOOK_ART + 11, 0, "SMOKED VIOLET ACRYLIC", 50.f},
+    {"LIQUID WALNUT", LOOK_ART + 11, 0, "WALNUT CONSOLE", 120.f},
+    {"SACRED GEOMETRY", LOOK_ART + 12, 0, "BLACKLIGHT POD", 65.f},
+    {"KALEIDO GOLD", LOOK_ART + 12, 0, "EBONY GOLD CONSOLE", 120.f},
+    {"BIOLUMINESCENCE", LOOK_ART + 13, 0, "MYCELIUM LATTICE", 84.f},
+    {"DEEP SEA GLOW", LOOK_ART + 13, 0, "SMOKED ACRYLIC", 50.f},
+    {"MACHINE ELF", LOOK_ART + 14, 0, "FORGE STEEL", 100.f},
+    {"FORGE STUDIO", LOOK_ART + 14, 0, "BLACK PLY STUDIO", 100.f},
+    {"ESCHER", LOOK_ART + 15, 0, "TIERED WALNUT", 100.f},
+    {"IMPOSSIBLE OAK", LOOK_ART + 15, 0, "STEPPED OAK", 120.f},
+    {"BIOMORPH", LOOK_ART + 16, 0, "CARBON FIBER", 65.f},
+    {"BIOMORPH CHROME", LOOK_ART + 16, 0, "BRUSHED ALUMINUM", 84.f},
+    {"STICKER BOMB", LOOK_ART + 17, 0, "UV PRINT LIME", 65.f},
+    {"STICKER SUITCASE", LOOK_ART + 17, 0, "SUITCASE 9U", 120.f},
+    {"GLASS ORBS", LOOK_ART + 18, 0, "NEON ACRYLIC CYAN", 50.f},
+    {"BUBBLE POD", LOOK_ART + 18, 0, "NEON ACRYLIC PINK", 50.f},
+    {"ACID LATTICE", LOOK_ART + 3, 0, "ACID LATTICE", 84.f},
+    {"IRIDESCENT", LOOK_ART + 0, 0, "IRIDESCENT ANODIZED", 65.f},
+    {"CURVED VIOLET", LOOK_ART + 12, 0, "CURVED VIOLET", 100.f},
+    {"MAGENTA PRINT", LOOK_ART + 10, 0, "UV PRINT MAGENTA", 65.f},
+    {"BLACKLIGHT", LOOK_GRADIENT, 24, "BLACKLIGHT POD", 65.f},
+    {"NEON PINK NIGHT", LOOK_GRADIENT, 25, "NEON ACRYLIC PINK", 50.f},
+    {"ACID GREEN", LOOK_GRADIENT, 26, "UV PRINT LIME", 65.f},
+    {"UV BLUE", LOOK_GRADIENT, 27, "NEON ACRYLIC CYAN", 50.f},
 };
 static const int kThemeN = (int) (sizeof(kThemes) / sizeof(kThemes[0]));
 static void applyTheme(SynTHBloKBackdrop* m, int i) {
@@ -1500,7 +1550,8 @@ static void applyTheme(SynTHBloKBackdrop* m, int i) {
 // slide sideways. On NAME, click the name and type (Enter: done).
 static const char* const kLookShort[kLookN] = {"PLAIN", "AMBER GRID", "OLED GLOW", "DIAMOND PLATE", "DEEP SPACE", "AMBER RAILS",
     "CARBON WEAVE", "CIRCUIT", "SCANLINES", "HEX MESH", "BLUEPRINT", "PEGBOARD", "FOAM", "BRUSHED STEEL", "SUNSET FADE", "HALFTONE", "BRICK", "WOOD SLATS", "GRADIENT", "CASE GRADIENT",
-    "NEBULA", "AURORA", "TOPOGRAPHIC", "SYNTHWAVE", "FLOW FIELD", "CRYSTAL", "OSCILLOSCOPE", "GOLD MARBLE", "CIRCUIT BOARD", "SPECTRUM"};
+    "NEBULA", "AURORA", "TOPOGRAPHIC", "SYNTHWAVE", "FLOW FIELD", "CRYSTAL", "OSCILLOSCOPE", "GOLD MARBLE", "CIRCUIT BOARD", "SPECTRUM",
+    "WILDSTYLE", "LIQUID", "KALEIDOSCOPE", "BIOLUMINESCENT", "MACHINE ELF", "ESCHER", "BIOMORPH", "STICKER BOMB", "GLASS SPHERES"};
 static const char* const kFitShort[4] = {"TILED", "FILL", "FIT", "CENTRED"};
 static const float kDepthMm[9] = {0.f, 25.f, 40.f, 50.f, 65.f, 84.f, 100.f, 120.f, 150.f};
 struct BackdropOled : widget::OpaqueWidget {
