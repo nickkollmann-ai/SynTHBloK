@@ -52,7 +52,11 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
 
 ## Releases (automated)
 - Every push builds win-x64, lin-x64, mac-x64 and mac-arm64 in GitHub Actions (`.github/workflows/build.yml`).
-- `powershell -ExecutionPolicy Bypass -File tools\release.ps1` (or `-Minor`, `-Version 2.x.y`) bumps
+- Release with `bash tools/release.sh 2.x.y` in MSYS2 (double-click a one-line .bat like `release_v2.1.0.bat`): it bumps every
+  plugin.json, commits, tags and pushes. `tools/release.ps1`'s GitHub sign-in breaks in Windows PowerShell 5 (the space in
+  "Program Files" splits the credential helper). If a tag's "GitHub Release" job fails, `bash tools/publish_release.sh 2.x.y <run id>`
+  publishes it from that run's packages. Post on the VCV thread with `gh issue comment 1015 --repo VCVRack/library`.
+- (old) `powershell -ExecutionPolicy Bypass -File tools\release.ps1` (or `-Minor`, `-Version 2.x.y`) bumps
   `plugin.json`, commits, tags `v<ver>` and pushes. The tag makes a GitHub Release with all four packages. Then it
   offers to post "Version X, commit Y" on the VCV thread (`tools/vcv-library-issue.txt`). Only post after that
   build is green.

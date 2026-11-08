@@ -97,5 +97,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" packages/*.vcvplugin \
+          # the packages keep their folders (dist/ and singles/<slug>/dist/), so find them all
+          mapfile -t files < <(find packages -name '*.vcvplugin' | sort)
+          echo "${#files[@]} packages"; printf '  %s\n' "${files[@]}"
+          [ "${#files[@]}" -gt 0 ] || { echo "no .vcvplugin packages found"; exit 1; }
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" \
             --title "SynTHBloK $GITHUB_REF_NAME" --generate-notes
