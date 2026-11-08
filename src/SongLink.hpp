@@ -24,6 +24,7 @@ struct Member {
     // requests from MATRIX-SONG (-1 / L_NONE: none)
     std::atomic<int> reqPattern{-1}, reqLoop{L_NONE};
     std::atomic<bool> songMuted{false}, songLinked{false};
+    std::atomic<int> songRow{-1};          // the Composer row conducting this module (0-7; -1: none), for its badge
     // the Composer conducting this module (its module id; -1: free). One at a time: a second Composer leaves an
     // owned module alone until its owner lets it go (empties the row, or is deleted).
     std::atomic<int64_t> songOwner{-1};
@@ -95,5 +96,44 @@ template <typename F> bool with(int64_t id, F f) {
     for (Member* mb : r.v) if (mb->self && mb->self->id == id) { f(*mb); return true; }
     return false;
 }
+
+// THE ROW COLOURS: the Composer's rows, the badge on each conducted module and RANDROYD's cables all share
+// them (MATRIX pattern colours: yellow -> red), so a module's row reads at a glance
+inline NVGcolor rowColor(int r, int a = 255) {
+    static const unsigned char C[8][3] = {{0xff, 0xd7, 0x14}, {0xff, 0xb0, 0x00}, {0xff, 0x8c, 0x00}, {0xff, 0x6a, 0x00},
+                                          {0xf0, 0x40, 0x00}, {0xcc, 0x1a, 0x00}, {0xb3, 0x17, 0x00}, {0xc2, 0x1a, 0x00}};
+    r = std::max(0, std::min(7, r));
+    return nvgRGBA(C[r][0], C[r][1], C[r][2], a);
+}
+// a small "ROW n" pill in the row's colour, top right of a conducted module (hidden while no Composer has it)
+struct RowBadge : widget::Widget {
+    Member* mb = NULL;
+    template <class T> static RowBadge* create(Vec panel, T* module) {
+        RowBadge* b = new RowBadge;
+        b->mb = module;   // NULL in the module browser
+        b->box.size = mm2px(Vec(10.5f, 4.2f));
+        b->box.pos = Vec(panel.x - mm2px(7.6f) - b->box.size.x, mm2px(1.4f));
+        return b;
+    }
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1 || !mb || !mb->songLinked.load()) return;
+        int r = mb->songRow.load();
+        if (r < 0) return;
+        NVGcolor c = rowColor(r);
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, box.size.y * 0.5f);
+        nvgFillColor(args.vg, c);
+        nvgFill(args.vg);
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        char t[8];
+        snprintf(t, sizeof t, "ROW %d", r + 1);
+        nvgFontFaceId(args.vg, font->handle);
+        nvgFontSize(args.vg, box.size.y * 0.72f);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, nvgRGB(0x14, 0x0c, 0x04));
+        nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.5f + 0.5f, t, NULL);
+    }
+};
 
 }  // namespace songlink

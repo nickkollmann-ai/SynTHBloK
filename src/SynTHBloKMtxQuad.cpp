@@ -43,8 +43,11 @@ struct SynTHBloKMtxQuad : SynTHBloK, songlink::Member {   // MATRIX-SONG picks i
     enum MqInputId { RUN_INPUT = INPUTS_LEN, MQ_INPUTS_END };
     enum MqOutputId { CV_OUTPUT = OUTPUTS_LEN, GATE_OUTPUT, ACC_OUTPUT, MQ_OUTPUTS_END };
 
-    uint8_t note[8][8] = {};      // [pattern][step]: bit d = scale degree d (bottom row = 0)
-    float val[8][B_NUM][8];       // [pattern][bank][step], 0..1
+    // up to 16 steps a pattern (two bars of a DnB / dubstep line); the grid shows 8 at a time
+    static constexpr int kSteps = 16;
+    uint8_t note[8][kSteps] = {};      // [pattern][step]: bit d = scale degree d (bottom row = 0)
+    float val[8][B_NUM][kSteps];       // [pattern][bank][step], 0..1
+    int viewMode = 0;                  // the grid's page: 0 follows the playhead, 1 steps 1-8, 2 steps 9-16
 
     int step = -1;
     bool running = true;
@@ -64,7 +67,7 @@ struct SynTHBloKMtxQuad : SynTHBloK, songlink::Member {   // MATRIX-SONG picks i
 
     SynTHBloKMtxQuad() : SynTHBloK(MQ_PARAMS_END - PARAMS_LEN, MQ_INPUTS_END - INPUTS_LEN, MQ_OUTPUTS_END - OUTPUTS_LEN, 0) {
         configParam(PAT_PARAM, 1.f, 8.f, 1.f, "Pattern");
-        configParam(LEN_PARAM, 1.f, 8.f, 8.f, "Pattern length (steps)");
+        configParam(LEN_PARAM, 1.f, (float) kSteps, 8.f, "Pattern length (steps; over 8, the grid pages 1-8 / 9-16)");
         configParam(BANK_PARAM, 0.f, 7.f, 0.f, "Slider bank");
         paramQuantities[PAT_PARAM]->snapEnabled = true;
         paramQuantities[LEN_PARAM]->snapEnabled = true;
@@ -93,11 +96,18 @@ struct SynTHBloKMtxQuad : SynTHBloK, songlink::Member {   // MATRIX-SONG picks i
     int songPatternNow() override { return curPat(); }
     void songSetPattern(int p) override { params[PAT_PARAM].setValue((float)(clamp(p, 0, 7) + 1)); }
     int bank() { return clamp((int)params[BANK_PARAM].getValue(), 0, 7); }
-    int len() { return clamp((int)params[LEN_PARAM].getValue(), 1, 8); }
+    int len() { return clamp((int)params[LEN_PARAM].getValue(), 1, kSteps); }
+    // the grid's page (0: steps 1-8, 1: steps 9-16): it follows the playhead unless pinned in the menu
+    int page() {
+        if (len() <= 8) return viewMode == 2 ? 1 : 0;
+        if (viewMode) return viewMode - 1;
+        return (running && step >= 8) ? 1 : 0;
+    }
+    int col(int c) { return clamp(c + 8 * page(), 0, kSteps - 1); }
 
     void clearPattern(int p) {
-        for (int c = 0; c < 8; c++) note[p][c] = 0;
-        for (int b = 0; b < B_NUM; b++) for (int c = 0; c < 8; c++) val[p][b][c] = kMqBankDef[b];
+        for (int c = 0; c < kSteps; c++) note[p][c] = 0;
+        for (int b = 0; b < B_NUM; b++) for (int c = 0; c < kSteps; c++) val[p][b][c] = kMqBankDef[b];
     }
     void clearAll() { for (int p = 0; p < 8; p++) clearPattern(p); }
     void copyToNext() {
@@ -108,17 +118,18 @@ struct SynTHBloKMtxQuad : SynTHBloK, songlink::Member {   // MATRIX-SONG picks i
     }
 
     // Pad (r, c): degree 7 - r at step c.
-    bool padOn(int r, int c) { return note[curPat()][c] >> (7 - r) & 1; }
-    void togglePad(int r, int c) { note[curPat()][c] ^= 1 << (7 - r); }
-    bool stepAcc(int c) { return val[curPat()][B_ACC][c] >= 0.5f; }
+    bool padOn(int r, int c) { return note[curPat()][col(c)] >> (7 - r) & 1; }
+    void togglePad(int r, int c) { note[curPat()][col(c)] ^= 1 << (7 - r); }
+    bool stepAcc(int c) { return val[curPat()][B_ACC][col(c)] >= 0.5f; }
     // right-click: the step's accent on / off; an empty pad also gets its note
     void toggleAccent(int r, int c) {
-        float& a = val[curPat()][B_ACC][c];
+        float& a = val[curPat()][B_ACC][col(c)];
         if (!padOn(r, c)) { togglePad(r, c); a = 1.f; return; }
         a = a >= 0.5f ? 0.f : 1.f;
     }
-    float stripGet(int i) { return val[curPat()][bank()][i]; }
-    void stripSet(int i, float v) { val[curPat()][bank()][i] = clamp(v, 0.f, 1.f); }
+    float stripGet(int i) { return val[curPat()][bank()][col(i)]; }
+    void stripSet(int i, float v) { val[curPat()][bank()][col(i)] = clamp(v, 0.f, 1.f); }
+    bool headAt(int c) { return running && step == col(c); }
 
     int scale() { return clamp((int)params[SCALE_PARAM].getValue(), 0, kMqScaleCount - 1); }
     // semitones of scale degree d above the key
@@ -360,6 +371,7 @@ struct SynTHBloKMtxQuad : SynTHBloK, songlink::Member {   // MATRIX-SONG picks i
                     for (int t = R; t <= 7 && __builtin_popcount(m) < 3; t++) if (chordTone(t, R)) m |= 1 << t;
                 note[pt][c] = m;
             }
+            for (int c = 8; c < kSteps; c++) note[pt][c] = note[pt][c - 8];   // steps 9-16 repeat the bar
         }
     }
 
@@ -368,32 +380,39 @@ struct SynTHBloKMtxQuad : SynTHBloK, songlink::Member {   // MATRIX-SONG picks i
         json_t* na = json_array();
         json_t* va = json_array();
         for (int p = 0; p < 8; p++) {
-            char h[17];
-            for (int c = 0; c < 8; c++) snprintf(h + 2 * c, 3, "%02x", note[p][c]);
+            char h[2 * kSteps + 1];
+            for (int c = 0; c < kSteps; c++) snprintf(h + 2 * c, 3, "%02x", note[p][c]);
             json_array_append_new(na, json_string(h));
-            for (int b = 0; b < B_NUM; b++) for (int c = 0; c < 8; c++) json_array_append_new(va, json_real(val[p][b][c]));
+            for (int b = 0; b < B_NUM; b++) for (int c = 0; c < kSteps; c++) json_array_append_new(va, json_real(val[p][b][c]));
         }
         json_object_set_new(root, "notes", na);   // per pattern: two hex digits per step, bit d = scale degree d
         json_object_set_new(root, "steps", va);   // per pattern, bank, step
         json_object_set_new(root, "justChords", json_boolean(justChords));
+        json_object_set_new(root, "viewMode", json_integer(viewMode));
         return root;
     }
     void dataFromJson(json_t* root) override {
         SynTHBloK::dataFromJson(root);
         json_t* na = json_object_get(root, "notes");
+        // a pattern's string sets every step: an 8-step string (older patches, RANDROYD) leaves 9-16 empty
         for (int p = 0; p < 8 && na && p < (int)json_array_size(na); p++) {
             const char* h = json_string_value(json_array_get(na, p));
-            for (int c = 0; h && c < 8 && h[2 * c] && h[2 * c + 1]; c++) {
+            if (!h) continue;
+            int c = 0;
+            for (; c < kSteps && h[2 * c] && h[2 * c + 1]; c++) {
                 char b[3] = {h[2 * c], h[2 * c + 1], 0};
                 note[p][c] = (uint8_t)strtol(b, NULL, 16);
             }
+            for (; c < kSteps; c++) note[p][c] = 0;
         }
+        if (json_t* j = json_object_get(root, "viewMode")) viewMode = clamp((int)json_integer_value(j), 0, 2);
         if (json_t* j = json_object_get(root, "justChords")) justChords = json_boolean_value(j);
         json_t* va = json_object_get(root, "steps");
-        if (va && json_array_size(va) == 8 * B_NUM * 8) {
-            int i = 0;
-            for (int p = 0; p < 8; p++) for (int b = 0; b < B_NUM; b++) for (int c = 0; c < 8; c++)
-                val[p][b][c] = clamp((float)json_number_value(json_array_get(va, i++)), 0.f, 1.f);
+        size_t vn = va ? json_array_size(va) : 0;
+        if (vn == 8 * B_NUM * 8 || vn == 8 * B_NUM * kSteps) {   // 8 or 16 steps a pattern
+            int per = vn == 8 * B_NUM * 8 ? 8 : kSteps, i = 0;
+            for (int p = 0; p < 8; p++) for (int b = 0; b < B_NUM; b++) for (int c = 0; c < kSteps; c++)
+                val[p][b][c] = c < per ? clamp((float)json_number_value(json_array_get(va, i++)), 0.f, 1.f) : kMqBankDef[b];
         }
     }
 };
@@ -409,7 +428,7 @@ struct MQPad : OpaqueWidget {
     void draw(const DrawArgs& args) override {
         static const int preview[8] = {0, -1, 2, 4, -1, 7, 4, 2};
         bool on = module ? module->padOn(r, c) : 7 - r == preview[c];
-        bool playing = module && module->running && module->step == c;
+        bool playing = module && module->headAt(c);
         int p = module ? module->curPat() : 0;
         NVGcolor col = kPatColor[p], onCol = kPatOnColor[p];
         if (r != 0 && r != 7) col = nvgLerpRGBA(kIdle, col, 0.5f);
@@ -483,7 +502,7 @@ struct MQStrip : OpaqueWidget {
     void set(float v) { if (module) module->stripSet(idx, v); }
     void draw(const DrawArgs& args) override {
         int b = module ? module->bank() : 0;
-        bool head = module && module->running && module->step == idx;
+        bool head = module && module->headAt(idx);
         NVGcolor col = kPatOnColor[b];
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 1.6f);
@@ -519,6 +538,7 @@ struct SynTHBloKMtxQuadWidget : ModuleWidget {
     SynTHBloKMtxQuadWidget(MQ* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/SynTHBloKMtxQuad.svg")));
+        addChild(songlink::RowBadge::create(box.size, module));   // the Composer row conducting it
         using namespace rack::componentlibrary;
         const float PW = 208.28f, MX = 81.28f;   // 41 HP: the grid section (16 HP), then the QUAD with its essential jacks (25 HP)
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));
@@ -560,13 +580,13 @@ struct SynTHBloKMtxQuadWidget : ModuleWidget {
         }
         // LOOP beside the sliders: up, the length, down
         JLoopArrow<MQ>* up = createWidget<JLoopArrow<MQ>>(mm2px(Vec(RX - 3.5f, 81.f)));
-        up->box.size = mm2px(Vec(7.f, 6.f)); up->module = module; up->dir = 1;
+        up->box.size = mm2px(Vec(7.f, 6.f)); up->module = module; up->dir = 1; up->maxLen = MQ::kSteps;
         addChild(up);
         JLoopDisplay<MQ>* ld = createWidget<JLoopDisplay<MQ>>(mm2px(Vec(RX - 3.5f, 88.f)));
-        ld->box.size = mm2px(Vec(7.f, 27.5f)); ld->module = module;
+        ld->box.size = mm2px(Vec(7.f, 27.5f)); ld->module = module; ld->maxLen = MQ::kSteps;
         addChild(ld);
         JLoopArrow<MQ>* dn = createWidget<JLoopArrow<MQ>>(mm2px(Vec(RX - 3.5f, 117.5f)));
-        dn->box.size = mm2px(Vec(7.f, 6.f)); dn->module = module; dn->dir = -1;
+        dn->box.size = mm2px(Vec(7.f, 6.f)); dn->module = module; dn->dir = -1; dn->maxLen = MQ::kSteps;
         addChild(dn);
 
         // ---------------- the QUAD ----------------
@@ -591,9 +611,17 @@ struct SynTHBloKMtxQuadWidget : ModuleWidget {
         menu->addChild(createIndexSubmenuItem("Grid octave (bottom row)", {"C1", "C2", "C3", "C4", "C5"},
             [=]() { return (size_t)(m->params[MQ::OCT_PARAM].getValue() + 2.f); },
             [=](size_t i) { m->params[MQ::OCT_PARAM].setValue((float)i - 2.f); }));
-        menu->addChild(createIndexSubmenuItem("Pattern length", {"1 step", "2 steps", "3 steps", "4 steps", "5 steps", "6 steps", "7 steps", "8 steps"},
+        menu->addChild(createIndexSubmenuItem("Pattern length", {"1 step", "2 steps", "3 steps", "4 steps", "5 steps", "6 steps", "7 steps", "8 steps",
+                                                                 "9 steps", "10 steps", "11 steps", "12 steps", "13 steps", "14 steps", "15 steps", "16 steps (2 bars)"},
             [=]() { return (size_t)(m->params[MQ::LEN_PARAM].getValue() - 1.f); },
             [=](size_t i) { m->params[MQ::LEN_PARAM].setValue((float)i + 1.f); }));
+        menu->addChild(createIndexSubmenuItem("Grid shows", {"Follow the playhead", "Steps 1-8", "Steps 9-16"},
+            [=]() { return (size_t)m->viewMode; },
+            [=](size_t i) { m->viewMode = (int)i; }));
+        menu->addChild(createMenuItem("Copy steps 1-8 to 9-16", "", [=]() {
+            int p = m->curPat();
+            for (int c = 8; c < MQ::kSteps; c++) { m->note[p][c] = m->note[p][c - 8]; for (int b = 0; b < B_NUM; b++) m->val[p][b][c] = m->val[p][b][c - 8]; }
+        }));
         menu->addChild(createMenuItem("Copy pattern to the next one", "", [=]() { m->copyToNext(); }));
         menu->addChild(createMenuItem("Clear this pattern", "", [=]() { m->clearPattern(m->curPat()); }));
         menu->addChild(createMenuItem("Clear every pattern", "", [=]() { m->clearAll(); }));

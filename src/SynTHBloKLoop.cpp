@@ -2591,6 +2591,7 @@ struct SynTHBloKLoopWidget : ModuleWidget {
     SynTHBloKLoopWidget(LP* module) {
         setModule(module);
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKLoop.svg")));
+        addChild(songlink::RowBadge::create(box.size, module));   // the Composer row conducting it
         using namespace rack::componentlibrary;
         const float PW = 254.f;    // 50 HP
         const float DX = 20.32f;   // everything right of the input column (the inputs and their gain knobs)

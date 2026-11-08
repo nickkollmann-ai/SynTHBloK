@@ -772,6 +772,7 @@ struct SynTHBloKMatrixForgeWidget : ModuleWidget {
     SynTHBloKMatrixForgeWidget(MF* module) {
         setModule(module);
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKMatrixForge.svg")));
+        addChild(songlink::RowBadge::create(box.size, module));   // the Composer row conducting it
         using namespace rack::componentlibrary;
         const float PW = 233.68f;   // 46 HP
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));

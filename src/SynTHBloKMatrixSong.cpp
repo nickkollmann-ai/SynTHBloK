@@ -41,9 +41,14 @@ static const char* const kSecName[kSecs] = {"A", "B", "C", "D", "E", "F", "G", "
 static const NVGcolor* const kRowCol = kPatOnColor;
 static const char* const kLoopGlyph[songlink::L_COUNT] = {"", "PLAY", "STOP", "REC", "ONCE"};
 
+// the song cycle's directions
+static const int kDirN = 7;
+static const char* const kDirName[kDirN] = {"Forward", "Backward", "Ping-pong", "Random", "Drunk walk (a step either way)",
+                                            "Shuffle (each once, new order every round)", "Odd / even (A C E G, then B D F H)"};
+
 struct SynTHBloKMatrixSong : Module {
     // REC_ / PLAY_ / LEN_PARAM: unused (the take is gone), kept so saved patches keep their param ids
-    enum ParamIds { RUN_PARAM, RESET_PARAM, REC_PARAM, PLAY_PARAM, QUANT_PARAM, BPM_PARAM, MIDI_ON_PARAM, LEN_PARAM, SECS_PARAM, BARS_PARAM, CYCOFF_PARAM, NUM_PARAMS };
+    enum ParamIds { RUN_PARAM, RESET_PARAM, REC_PARAM, PLAY_PARAM, QUANT_PARAM, BPM_PARAM, MIDI_ON_PARAM, LEN_PARAM, SECS_PARAM, BARS_PARAM, CYCOFF_PARAM, DIR_PARAM, NUM_PARAMS };
     // RUN_ / RESET_INPUT: no jacks on the panel (the RUN / RESET outputs and buttons cover them), kept for ids
     enum InputIds { CLOCK_INPUT, RUN_INPUT, RESET_INPUT, NUM_INPUTS };
     enum OutputIds { CLOCK_OUTPUT, RUN_OUTPUT, RESET_OUTPUT, BAR_OUTPUT, SECT_OUTPUT, NUM_OUTPUTS };
@@ -92,8 +97,9 @@ struct SynTHBloKMatrixSong : Module {
         configSwitch(SECS_PARAM, 0.f, 7.f, 0.f, "Song cycle: RUN steps from A up to this section (A: stays on one)", {"A (no cycle)", "A-B", "A-C", "A-D", "A-E", "A-F", "A-G", "A-H"});
         configSwitch(BARS_PARAM, 0.f, 4.f, 2.f, "Bars each section plays in the song cycle", {"1 bar", "2 bars", "4 bars", "8 bars", "16 bars"});
         configSwitch(CYCOFF_PARAM, 0.f, 1.f, 0.f, "Song cycle off (keeps SECTIONS; choosing one turns it back on)", {"Cycle on", "Cycle off"});
+        configSwitch(DIR_PARAM, 0.f, (float) (kDirN - 1), 0.f, "Song cycle direction", std::vector<std::string>(kDirName, kDirName + kDirN));
         for (int i = 0; i < kNumLed; i++) lastLed[i] = -1;
-        for (int id : {RUN_PARAM, QUANT_PARAM}) paramQuantities[id]->randomizeEnabled = false;
+        for (int id : {RUN_PARAM, QUANT_PARAM, DIR_PARAM}) paramQuantities[id]->randomizeEnabled = false;
         configInput(CLOCK_INPUT, "Clock (16th notes; the BPM knob when unpatched)");
         configInput(RUN_INPUT, "Run (trigger: toggles RUN)");
         configInput(RESET_INPUT, "Reset (trigger)");
@@ -134,10 +140,58 @@ struct SynTHBloKMatrixSong : Module {
         int q = queued.load();
         if (q >= 0) return params[QUANT_PARAM].getValue() > 0.5f ? -1 : q;
         int cs = cycleSecs();
-        if (cs > 1 && barInSec + 1 >= cycleBars()) return curSec + 1 >= cs ? 0 : curSec + 1;
+        if (cs > 1 && barInSec + 1 >= cycleBars()) { int pl = planned.load(); return pl >= 0 ? pl : (curSec + 1 >= cs ? 0 : curSec + 1); }
         return -1;
     }
     int countIn() { return 4 - clamp(tick, 0, 15) / 4; }
+
+    // DIRECTION: how the song cycle moves through its sections. The next section is planned when one starts
+    // (and again if the cycle or the direction changes), so the display's count-in shows where it will go.
+    int dir() { return clamp((int)params[DIR_PARAM].getValue(), 0, kDirN - 1); }
+    std::atomic<int> planned{-1};
+    int plannedCs = -1, plannedDir = -1, plannedFrom = -1;
+    int pingStep = 1;
+    int shuf[kSecs] = {}, shufN = 0, shufPos = 0;
+    int planNext(int cur, int cs) {
+        if (cs <= 1) return 0;
+        cur = clamp(cur, 0, cs - 1);
+        auto rnd = [](int n) { return std::min((int)(random::uniform() * n), n - 1); };
+        switch (dir()) {
+            case 1: return (cur - 1 + cs) % cs;
+            case 2: {
+                if (cur + pingStep >= cs) pingStep = -1;
+                if (cur + pingStep < 0) pingStep = 1;
+                return clamp(cur + pingStep, 0, cs - 1);
+            }
+            case 3: { int r = rnd(cs - 1); return r >= cur ? r + 1 : r; }
+            case 4: return (cur + (random::uniform() < 0.5f ? -1 : 1) + cs) % cs;
+            case 5: {
+                if (shufN != cs || shufPos >= shufN) {   // a new round: every section once, in a new order
+                    shufN = cs; shufPos = 0;
+                    for (int i = 0; i < cs; i++) shuf[i] = i;
+                    for (int i = cs - 1; i > 0; i--) std::swap(shuf[i], shuf[rnd(i + 1)]);
+                    if (shuf[0] == cur && cs > 1) std::swap(shuf[0], shuf[1]);   // no section twice in a row
+                }
+                return shuf[shufPos++];
+            }
+            case 6: {
+                int order[kSecs], n = 0;
+                for (int i = 0; i < cs; i += 2) order[n++] = i;
+                for (int i = 1; i < cs; i += 2) order[n++] = i;
+                for (int i = 0; i < n; i++) if (order[i] == cur) return order[(i + 1) % n];
+                return 0;
+            }
+            default: return (cur + 1) % cs;
+        }
+    }
+    // the audio thread keeps the plan fresh
+    void keepPlan() {
+        int cs = cycleSecs(), d = dir();
+        if (plannedFrom != curSec || plannedCs != cs || plannedDir != d) {
+            plannedFrom = curSec; plannedCs = cs; plannedDir = d;
+            planned = planNext(curSec, cs);
+        }
+    }
     void loadLive(int s) { for (int r = 0; r < kRows; r++) lev[r] = cells[s][r].level; }
     // a row is silent while its MUTE button is on, or the playing section's pad mutes it (right-click a pad)
     bool muted(int r) { return mut[r] || cells[curSec][r].mute; }
@@ -196,7 +250,7 @@ struct SynTHBloKMatrixSong : Module {
         const int64_t me = id;
         songlink::with(rowId[r], [&](songlink::Member& m) {
             if (m.songOwner.load() != me) return;
-            m.songLevel = 1.f; m.songMuted = false; m.songLinked = false;
+            m.songLevel = 1.f; m.songMuted = false; m.songLinked = false; m.songRow = -1;
             m.songOwner = -1;
         });
     }
@@ -403,6 +457,7 @@ struct SynTHBloKMatrixSong : Module {
 
         int an = applyNow.exchange(-1);
         if (an >= 0) apply(an);
+        keepPlan();
 
         // ---- clock: CLOCK (16ths) or the BPM knob ----
         bool edge = false, ext = inputs[CLOCK_INPUT].isConnected();
@@ -436,7 +491,7 @@ struct SynTHBloKMatrixSong : Module {
             if (bar && !start) barInSec++;
             // the song cycle: its bars played, the next section launches on this bar (after the last, A)
             int cs = cycleSecs();
-            if (bar && !start && cs > 1 && queued.load() < 0 && barInSec >= cycleBars()) queued = curSec + 1 >= cs ? 0 : curSec + 1;
+            if (bar && !start && cs > 1 && queued.load() < 0 && barInSec >= cycleBars()) { keepPlan(); queued = clamp(planned.load(), 0, cs - 1); }
 
             int to = start ? curSec : -1;
             int q = queued.load();
@@ -452,7 +507,7 @@ struct SynTHBloKMatrixSong : Module {
                 if (rowId[r] < 0) continue;
                 float l = lev[r];
                 bool m = muted(r);
-                conduct(r, [&](songlink::Member& mb) { mb.songLevel = l; mb.songMuted = m; mb.songLinked = true; });
+                conduct(r, [&](songlink::Member& mb) { mb.songLevel = l; mb.songMuted = m; mb.songLinked = true; mb.songRow = r; });
             }
         }
 
@@ -728,11 +783,22 @@ struct RowLabel : OpaqueWidget {
                 nvgStroke(args.vg);
             }
         }
+        // the row's colour chip with its number: the same colour as the badge on the module it conducts
+        float chip = box.size.y - 3.f;
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 1.5f, 1.5f, chip, chip, 1.f);
+        nvgFillColor(args.vg, gone ? nvgTransRGBA(col, 60) : col);
+        nvgFill(args.vg);
         nvgFontFaceId(args.vg, font->handle);
+        nvgFontSize(args.vg, 6.f);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(args.vg, nvgRGB(0x14, 0x0c, 0x04));
+        char rn[3] = {(char)('1' + r), 0, 0};
+        nvgText(args.vg, 1.5f + chip * 0.5f, box.size.y * 0.5f, rn, NULL);
         nvgFontSize(args.vg, 6.5f);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
         nvgFillColor(args.vg, col);
-        nvgText(args.vg, 3.f, box.size.y * 0.5f, name, NULL);
+        nvgText(args.vg, chip + 4.f, box.size.y * 0.5f, name, NULL);
         bool linked = !module || module->rowId[r] >= 0;
         float px = box.size.x - 3.f - (linked ? xW() : 0.f);
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
@@ -1476,6 +1542,9 @@ struct SynTHBloKMatrixSongWidget : ModuleWidget {
         if (!m) return;
         ModulePictures::appendMenu(menu);
         menu->addChild(new MenuSeparator);
+        menu->addChild(createIndexSubmenuItem("Song cycle direction", std::vector<std::string>(kDirName, kDirName + kDirN),
+            [=]() { return (size_t)m->dir(); },
+            [=](size_t i) { m->params[MS::DIR_PARAM].setValue((float)i); }));
         menu->addChild(createBoolPtrMenuItem("Place free modules on empty rows", "", &m->autoFill));
         menu->addChild(createMenuItem("Empty every row", m->autoFill ? "free modules are placed again" : "", [=]() { for (int r = 0; r < kRows; r++) { m->release(r); m->rowId[r] = -1; } }));
         menu->addChild(createMenuItem("Disconnect every module", "stays off until chosen", [=]() { for (int r = 0; r < kRows; r++) m->disconnect(r); }));

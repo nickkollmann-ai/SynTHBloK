@@ -841,6 +841,7 @@ struct SynTHBloKEchoWidget : ModuleWidget {
     SynTHBloKEchoWidget(EC* module) {
         setModule(module);
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKEcho.svg")));
+        addChild(songlink::RowBadge::create(box.size, module));   // the Composer row conducting it
         using namespace rack::componentlibrary;
         const float PW = 101.6f;   // 20 HP
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));

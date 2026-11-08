@@ -651,6 +651,7 @@ struct SynTHBloKMatrix8Widget : ModuleWidget {
     SynTHBloKMatrix8Widget(SynTHBloKMatrix8* module) {
         setModule(module);
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKMatrix8.svg")));
+        addChild(songlink::RowBadge::create(box.size, module));   // the Composer row conducting it
         using namespace rack::componentlibrary;
         const float PW = 127.0f;
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));

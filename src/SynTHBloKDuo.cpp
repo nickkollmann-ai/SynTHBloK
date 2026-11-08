@@ -1471,6 +1471,7 @@ struct SynTHBloKDuoWidget : ModuleWidget {
     SynTHBloKDuoWidget(DU* module) {
         setModule(module);
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKDuo.svg")));
+        addChild(songlink::RowBadge::create(box.size, module));   // the Composer row conducting it
         using namespace rack::componentlibrary;
         const float PW = 335.28f;   // 66 HP
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));

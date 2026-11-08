@@ -36,8 +36,9 @@ void randroydDrumSilence(Module* m, int mask);
 namespace rdz {
 // MTX-LOOP's track ramp
 static NVGcolor ramp(int i, int a = 255) {
-    static const unsigned char C[8][3] = {{255, 210, 26}, {255, 178, 26}, {255, 143, 26}, {255, 106, 18},
-                                          {255, 74, 18}, {232, 48, 15}, {184, 32, 12}, {138, 22, 10}};
+    // the Composer's row colours (songlink::rowColor): track n's cables, OLED rows and the module badges match
+    static const unsigned char C[8][3] = {{0xff, 0xd7, 0x14}, {0xff, 0xb0, 0x00}, {0xff, 0x8c, 0x00}, {0xff, 0x6a, 0x00},
+                                          {0xf0, 0x40, 0x00}, {0xcc, 0x1a, 0x00}, {0xb3, 0x17, 0x00}, {0xc2, 0x1a, 0x00}};
     i = clamp(i, 0, 7);
     return nvgRGBA(C[i][0], C[i][1], C[i][2], a);
 }
@@ -270,7 +271,8 @@ struct SynTHBloKRandroyd : Module {
     int uiBpm = 0; bool uiRun = false, uiSong = false;   // the song's tempo / transport, mirrored by the UI each frame
     int hProg[4] = {0, 0, 0, 0};
     std::string hLeadR, hBassR;   // this track's own lead / bass rhythms (8 sixteenths); empty = the genre's
-    int hBassT = -1, hLeadT = -1;  // this track's bass / lead sound type (rdz::B_*, rdz::L_*); -1 = roll one
+    int hBassT = -1, hLeadT = -1;
+    int masterV = 0;               // the master settings' version (2: the gentle mastering)  // this track's bass / lead sound type (rdz::B_*, rdz::L_*); -1 = roll one
     int trackRole[8] = {-1, -1, -1, -1, -1, -1, -1, -1};   // QUAD role: 0 bass 1 acid 2 lead 3 chords
     // each part's recipe (which modules build it): 0 the standard MTX build, 1 TECHNO RIG, 2 BROKEN BEAT,
     // 3 METAL GARDEN, 4 QUAD + MORPH FILTER, 5 QUAD + DELAY, 6 QUAD + DUAL FILTER, 7 MTX-DUO (bass part, plays the
@@ -345,6 +347,155 @@ struct SynTHBloKRandroyd : Module {
         bank = 0; set = 0; scene = -1; selTrack = -1;
     }
 
+    // ---- the saved tracks and scene sets, as JSON (in the patch, and in the library file) ----
+    json_t* slotsJson() {
+        json_t* sl = json_array();
+        for (int b = 0; b < BANKS; b++) for (int t = 0; t < SPOTS; t++) {
+            const Slot& s = slots[b][t];
+            if (!s.used) continue;
+            json_t* j = json_object();
+            json_object_set_new(j, "bank", json_integer(b));
+            json_object_set_new(j, "track", json_integer(t));
+            json_object_set_new(j, "name", json_string(s.name.c_str()));
+            json_object_set_new(j, "genre", json_integer(s.genre));
+            json_object_set_new(j, "bpm", json_integer(s.bpm));
+            json_object_set_new(j, "key", json_integer(s.key));
+            json_object_set_new(j, "scale", json_integer(s.scale));
+            json_object_set_new(j, "named", json_boolean(s.named));
+            json_object_set_new(j, "modules", json_integer(s.modules));
+            json_object_set_new(j, "snap", json_string(s.snapshot.c_str()));
+            json_object_set_new(j, "date", json_string(s.date.c_str()));
+            json_array_append_new(sl, j);
+        }
+        return sl;
+    }
+    json_t* setsJson() {
+        json_t* st = json_array();
+        for (int i = 0; i < 8; i++) {
+            json_t* sj = json_object();
+            json_object_set_new(sj, "used", json_boolean(sets[i].used));
+            json_t* scs = json_array();
+            for (int k = 0; k < 8; k++) {
+                const Scene& c = sets[i].scenes[k];
+                json_t* cj = json_object();
+                json_object_set_new(cj, "used", json_boolean(c.used));
+                json_object_set_new(cj, "name", json_string(c.name.c_str()));
+                json_object_set_new(cj, "mask", json_integer(c.mask));
+                json_object_set_new(cj, "bars", json_integer(c.bars));
+                json_array_append_new(scs, cj);
+            }
+            json_object_set_new(sj, "scenes", scs);
+            json_array_append_new(st, sj);
+        }
+        return st;
+    }
+    bool anySet() { for (auto& x : sets) if (x.used) return true; return false; }
+    void slotsFrom(json_t* sl, bool fillEmpty) {
+        if (sl) {
+            size_t i; json_t* j;
+            json_array_foreach(sl, i, j) {
+                int b = (int) json_integer_value(json_object_get(j, "bank"));
+                int t = (int) json_integer_value(json_object_get(j, "track"));
+                if (b < 0 || b >= BANKS || t < 0 || t >= SPOTS) continue;
+                Slot& s = slots[b][t];
+                if (fillEmpty && s.used) continue;   // the library only fills spots the patch left empty
+                s = Slot();
+                s.used = true;
+                if (json_t* v = json_object_get(j, "name")) s.name = json_string_value(v);
+                s.genre = (int) json_integer_value(json_object_get(j, "genre"));
+                s.bpm = (int) json_integer_value(json_object_get(j, "bpm"));
+                s.key = json_object_get(j, "key") ? (int) json_integer_value(json_object_get(j, "key")) : -1;
+                s.scale = (int) json_integer_value(json_object_get(j, "scale"));
+                s.named = json_is_true(json_object_get(j, "named"));
+                s.modules = (int) json_integer_value(json_object_get(j, "modules"));
+                if (json_t* v = json_object_get(j, "snap")) s.snapshot = json_string_value(v);
+                if (json_t* v = json_object_get(j, "date")) s.date = json_string_value(v);
+            }
+        }
+    }
+    void setsFrom(json_t* st, bool fillEmpty) {
+        if (st && !(fillEmpty && anySet())) {
+            for (int i = 0; i < 8 && i < (int) json_array_size(st); i++) {
+                json_t* sj = json_array_get(st, i);
+                sets[i].used = json_boolean_value(json_object_get(sj, "used"));
+                json_t* scs = json_object_get(sj, "scenes");
+                for (int k = 0; k < 8 && scs && k < (int) json_array_size(scs); k++) {
+                    json_t* cj = json_array_get(scs, k);
+                    Scene& c = sets[i].scenes[k];
+                    c.used = json_boolean_value(json_object_get(cj, "used"));
+                    if (json_t* v = json_object_get(cj, "name")) c.name = json_string_value(v);
+                    c.mask = (uint8_t) json_integer_value(json_object_get(cj, "mask"));
+                    c.bars = std::max(1, (int) json_integer_value(json_object_get(cj, "bars")));
+                }
+            }
+        }
+    }
+    // THE LIBRARY: every saved track (and the scene sets) also lives in a file in Rack's user folder, so they
+    // survive closing Rack without saving the patch, deleting RANDROYD, or opening another patch. A RANDROYD
+    // that is added (or loaded from a patch) fills its empty spots from it; the widget writes it back on changes.
+    // The playing track, while unsaved, is kept there too ("autosave"), for RECOVER.
+    static std::string libPath() { return asset::user("SynTHBloK/randroyd_library.json"); }
+    std::string autosaveSnap, autosaveName;
+    int autosaveGenre = 0, autosaveBpm = 0, autosaveKey = -1, autosaveScale = 0;
+    void libraryLoad() {
+        json_error_t err;
+        json_t* lib = json_load_file(libPath().c_str(), 0, &err);
+        if (!lib) return;
+        slotsFrom(json_object_get(lib, "slots"), true);
+        setsFrom(json_object_get(lib, "sets"), true);
+        if (json_t* a = json_object_get(lib, "autosave")) {
+            if (json_t* v = json_object_get(a, "snap")) autosaveSnap = json_string_value(v);
+            if (json_t* v = json_object_get(a, "name")) autosaveName = json_string_value(v);
+            autosaveGenre = (int) json_integer_value(json_object_get(a, "genre"));
+            autosaveBpm = (int) json_integer_value(json_object_get(a, "bpm"));
+            autosaveKey = json_object_get(a, "key") ? (int) json_integer_value(json_object_get(a, "key")) : -1;
+            autosaveScale = (int) json_integer_value(json_object_get(a, "scale"));
+        }
+        json_decref(lib);
+    }
+    // the library as text (compared with what was last written, so the file is only touched on a change)
+    std::string libraryText() {
+        json_t* lib = json_object();
+        json_object_set_new(lib, "slots", slotsJson());
+        json_object_set_new(lib, "sets", setsJson());
+        if (!autosaveSnap.empty()) {
+            json_t* a = json_object();
+            json_object_set_new(a, "snap", json_string(autosaveSnap.c_str()));
+            json_object_set_new(a, "name", json_string(autosaveName.c_str()));
+            json_object_set_new(a, "genre", json_integer(autosaveGenre));
+            json_object_set_new(a, "bpm", json_integer(autosaveBpm));
+            json_object_set_new(a, "key", json_integer(autosaveKey));
+            json_object_set_new(a, "scale", json_integer(autosaveScale));
+            json_object_set_new(lib, "autosave", a);
+        }
+        char* txt = json_dumps(lib, JSON_INDENT(1));
+        json_decref(lib);
+        std::string out = txt ? txt : "";
+        free(txt);
+        return out;
+    }
+    std::string libWritten;
+    bool libBackedUp = false;
+    void libraryWrite() {
+        std::string txt = libraryText();
+        if (txt == libWritten) return;
+        system::createDirectories(asset::user("SynTHBloK"));
+        std::string path = libPath();
+        if (!libBackedUp && system::isFile(path)) {   // once a session: the file as it was, before this session's changes
+            system::copy(path, path + ".bak");
+            libBackedUp = true;
+        }
+        if (FILE* f = std::fopen(path.c_str(), "wb")) {
+            std::fwrite(txt.data(), 1, txt.size(), f);
+            std::fclose(f);
+            libWritten = txt;
+        }
+    }
+    void onAdd(const AddEvent& e) override {
+        Module::onAdd(e);
+        libraryLoad();
+    }
+
     json_t* dataToJson() override {
         json_t* root = json_object();
         json_t* arr = json_array();
@@ -386,6 +537,7 @@ struct SynTHBloKRandroyd : Module {
         json_object_set_new(root, "hProg", hp);
         json_object_set_new(root, "hLeadR", json_string(hLeadR.c_str()));
         json_object_set_new(root, "hBassT", json_integer(hBassT));
+        json_object_set_new(root, "masterV", json_integer(masterV));
         json_object_set_new(root, "hLeadT", json_integer(hLeadT));
         json_object_set_new(root, "hBassR", json_string(hBassR.c_str()));
         json_t* rl = json_array();
@@ -418,43 +570,8 @@ struct SynTHBloKRandroyd : Module {
             json_array_append_new(gw, e);
         }
         json_object_set_new(root, "grown", gw);
-        json_t* sl = json_array();
-        for (int b = 0; b < BANKS; b++) for (int t = 0; t < SPOTS; t++) {
-            const Slot& s = slots[b][t];
-            if (!s.used) continue;
-            json_t* j = json_object();
-            json_object_set_new(j, "bank", json_integer(b));
-            json_object_set_new(j, "track", json_integer(t));
-            json_object_set_new(j, "name", json_string(s.name.c_str()));
-            json_object_set_new(j, "genre", json_integer(s.genre));
-            json_object_set_new(j, "bpm", json_integer(s.bpm));
-            json_object_set_new(j, "key", json_integer(s.key));
-            json_object_set_new(j, "scale", json_integer(s.scale));
-            json_object_set_new(j, "named", json_boolean(s.named));
-            json_object_set_new(j, "modules", json_integer(s.modules));
-            json_object_set_new(j, "snap", json_string(s.snapshot.c_str()));
-            json_object_set_new(j, "date", json_string(s.date.c_str()));
-            json_array_append_new(sl, j);
-        }
-        json_object_set_new(root, "slots", sl);
-        json_t* st = json_array();
-        for (int i = 0; i < 8; i++) {
-            json_t* sj = json_object();
-            json_object_set_new(sj, "used", json_boolean(sets[i].used));
-            json_t* scs = json_array();
-            for (int k = 0; k < 8; k++) {
-                const Scene& c = sets[i].scenes[k];
-                json_t* cj = json_object();
-                json_object_set_new(cj, "used", json_boolean(c.used));
-                json_object_set_new(cj, "name", json_string(c.name.c_str()));
-                json_object_set_new(cj, "mask", json_integer(c.mask));
-                json_object_set_new(cj, "bars", json_integer(c.bars));
-                json_array_append_new(scs, cj);
-            }
-            json_object_set_new(sj, "scenes", scs);
-            json_array_append_new(st, sj);
-        }
-        json_object_set_new(root, "sets", st);
+        json_object_set_new(root, "slots", slotsJson());
+        json_object_set_new(root, "sets", setsJson());
         json_object_set_new(root, "midiIn", midiIn.toJson());
         json_object_set_new(root, "midiOut", midiOut.toJson());
         return root;
@@ -503,6 +620,7 @@ struct SynTHBloKRandroyd : Module {
         if (json_t* hp = json_object_get(root, "hProg")) for (int i = 0; i < 4; i++) hProg[i] = (int) json_integer_value(json_array_get(hp, i));
         { const char* v = json_string_value(json_object_get(root, "hLeadR")); hLeadR = v ? v : ""; }
         { json_t* j = json_object_get(root, "hBassT"); hBassT = j ? (int) json_integer_value(j) : -1; }
+        { json_t* j = json_object_get(root, "masterV"); masterV = j ? (int) json_integer_value(j) : 0; }
         { json_t* j = json_object_get(root, "hLeadT"); hLeadT = j ? (int) json_integer_value(j) : -1; }
         { const char* v = json_string_value(json_object_get(root, "hBassR")); hBassR = v ? v : ""; }
         if (json_t* rl = json_object_get(root, "roles")) for (int i = 0; i < 8; i++) trackRole[i] = rl && json_array_get(rl, i) ? (int) json_integer_value(json_array_get(rl, i)) : -1;
@@ -531,40 +649,8 @@ struct SynTHBloKRandroyd : Module {
             }
         }
         for (auto& b : slots) for (auto& s : b) s = Slot();
-        if (json_t* sl = json_object_get(root, "slots")) {
-            size_t i; json_t* j;
-            json_array_foreach(sl, i, j) {
-                int b = (int) json_integer_value(json_object_get(j, "bank"));
-                int t = (int) json_integer_value(json_object_get(j, "track"));
-                if (b < 0 || b >= BANKS || t < 0 || t >= SPOTS) continue;
-                Slot& s = slots[b][t];
-                s.used = true;
-                if (json_t* v = json_object_get(j, "name")) s.name = json_string_value(v);
-                s.genre = (int) json_integer_value(json_object_get(j, "genre"));
-                s.bpm = (int) json_integer_value(json_object_get(j, "bpm"));
-                s.key = json_object_get(j, "key") ? (int) json_integer_value(json_object_get(j, "key")) : -1;
-                s.scale = (int) json_integer_value(json_object_get(j, "scale"));
-                s.named = json_is_true(json_object_get(j, "named"));
-                s.modules = (int) json_integer_value(json_object_get(j, "modules"));
-                if (json_t* v = json_object_get(j, "snap")) s.snapshot = json_string_value(v);
-                if (json_t* v = json_object_get(j, "date")) s.date = json_string_value(v);
-            }
-        }
-        if (json_t* st = json_object_get(root, "sets")) {
-            for (int i = 0; i < 8 && i < (int) json_array_size(st); i++) {
-                json_t* sj = json_array_get(st, i);
-                sets[i].used = json_boolean_value(json_object_get(sj, "used"));
-                json_t* scs = json_object_get(sj, "scenes");
-                for (int k = 0; k < 8 && scs && k < (int) json_array_size(scs); k++) {
-                    json_t* cj = json_array_get(scs, k);
-                    Scene& c = sets[i].scenes[k];
-                    c.used = json_boolean_value(json_object_get(cj, "used"));
-                    if (json_t* v = json_object_get(cj, "name")) c.name = json_string_value(v);
-                    c.mask = (uint8_t) json_integer_value(json_object_get(cj, "mask"));
-                    c.bars = std::max(1, (int) json_integer_value(json_object_get(cj, "bars")));
-                }
-            }
-        }
+        slotsFrom(json_object_get(root, "slots"), false);
+        setsFrom(json_object_get(root, "sets"), false);
         if (json_t* v = json_object_get(root, "midiIn")) midiIn.fromJson(v);
         if (json_t* v = json_object_get(root, "midiOut")) midiOut.fromJson(v);
         sceneOut = scene;
@@ -758,7 +844,7 @@ static void rdBox(NVGcontext* vg, float x, float y, float w, float h, NVGcolor f
 // RED (NEW RACK), GREEN (MIDI). setTo >= 0: a selector cell (lit while the param holds that value).
 // ---------------------------------------------------------------------------
 struct RdButton : app::ParamWidget {
-    enum Style { ORANGE, DARK, RED };
+    enum Style { ORANGE, DARK, RED, GO, HALT };   // GO / HALT: RUN green, STOP red
     Module* module = NULL;
     std::string label;
     Style style = DARK;
@@ -783,9 +869,14 @@ struct RdButton : app::ParamWidget {
         bool on = lit();
         NVGcolor fill, stroke, ink;
         if (style == RED) { fill = on && held ? rdz::red(200) : oled::offFill(); stroke = rdz::red(200); ink = on && held ? oled::ink() : rdz::red(); }
+        else if (style == GO || style == HALT) {   // lit: filled green / red; unlit: a dim outline in that colour
+            NVGcolor c = style == GO ? rdz::green() : rdz::red();
+            NVGcolor cd = style == GO ? rdz::green(110) : rdz::red(110);
+            fill = on ? c : oled::offFill(); stroke = on ? c : cd; ink = on ? oled::ink() : c;
+        }
         else if (on) { fill = oled::litFill(); stroke = oled::amber(); ink = oled::ink(); }
         else { fill = oled::offFill(); stroke = oled::outline(120); ink = oled::amber(); }
-        if (held && style != RED) fill = nvgRGBA(255, 160, 60, 255);
+        if (held && style != RED && style != GO && style != HALT) fill = nvgRGBA(255, 160, 60, 255);
         rdBox(args.vg, 0.f, 0.f, W, H, fill, stroke, 0.9f, 1.8f);
         rdFont(args.vg);
         rdText(args.vg, W * 0.5f, H * 0.5f, label, fontSize, ink, NVG_ALIGN_CENTER);
@@ -1099,10 +1190,10 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         int knobs[3] = {SynTHBloKRandroyd::MUTATE_PARAM, SynTHBloKRandroyd::DENSITY_PARAM, SynTHBloKRandroyd::FX_PARAM};
         for (int i = 0; i < 3; i++)
             addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(RDL::KNOB_X[i], RDL::KNOB_Y)), module, knobs[i]));
-        RdButton* run = button(module, SynTHBloKRandroyd::RUN_PARAM, "RUN", RDL::TR_X[0], RDL::TR_Y, RDL::TR_W, RDL::TR_H, RdButton::DARK, 7.5f);
+        RdButton* run = button(module, SynTHBloKRandroyd::RUN_PARAM, "RUN", RDL::TR_X[0], RDL::TR_Y, RDL::TR_W, RDL::TR_H, RdButton::GO, 7.5f);
         run->onPress = [=]() { transport(true); };
         run->litFn = [=]() { return module->uiSong && module->uiRun; };
-        RdButton* stop = button(module, SynTHBloKRandroyd::STOP_PARAM, "STOP", RDL::TR_X[1], RDL::TR_Y, RDL::TR_W, RDL::TR_H, RdButton::DARK, 7.5f);
+        RdButton* stop = button(module, SynTHBloKRandroyd::STOP_PARAM, "STOP", RDL::TR_X[1], RDL::TR_Y, RDL::TR_W, RDL::TR_H, RdButton::HALT, 7.5f);
         stop->onPress = [=]() { transport(false); };
         stop->litFn = [=]() { return module->uiSong && !module->uiRun; };
         for (int i = 0; i < 4; i++) {
@@ -1511,7 +1602,9 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         SynTHBloKRandroyd* m = rd();
         app::RackWidget* rack = APP->scene->rack;
         if (findMw(m->composerId) && findMw(m->mixerId)) { ensureMastering(h); return true; }
-        float x = box.pos.x, y = box.pos.y + rowH();
+        // the MASTER row sits beside RANDROYD, on its own row: COMPOSER, MIX-8, AUDIO, BLOKMASTER; the tracks
+        // build on the rows below
+        float x = box.pos.x + box.size.x, y = box.pos.y;
         m->masterMods.clear();
         app::ModuleWidget* song = spawn("SynTHBloK", "MatrixSong", x, y, h, [&](engine::Module* mod) {
             setP(mod, "Tempo", (float) bpm);
@@ -1567,12 +1660,47 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
 
     // BloKMaster on the master bus, always: MIX-8 master -> BloKMaster -> audio. A rack built before it
     // was added gets it slotted in between (the mixer's cables to the audio module move to BloKMaster).
+    // THE MASTER: a subtle mastering touch, never a squash. A light glue (1.5:1 over a soft knee, slow attack
+    // so the kicks and snares come through, half parallel, the sub kept out of its detector so the bass
+    // doesn't pump, no auto makeup), a warm tape-ish saturation half mixed in, the low end lifted and mono,
+    // a little air on top, and a limiter that only catches the peaks.
+    static void masterTone(engine::Module* mod) {
+        setP(mod, "Input trim", 0.f);
+        setP(mod, "Low cut", 25.f);                 // clean: no sub-sonic rumble
+        setP(mod, "Low shelf (120 Hz)", 2.5f);      // thick
+        setP(mod, "Mid bell (1 kHz)", -0.5f);       // a hair out of the honk
+        setP(mod, "High shelf (6 kHz)", 1.f);
+        setP(mod, "Air (12 kHz shelf)", 0.2f);
+        setP(mod, "Tilt (dark to bright)", -0.05f); // warm
+        setP(mod, "Compressor threshold", -8.f);
+        setP(mod, "Compressor ratio", 1.5f);
+        setP(mod, "Compressor knee", 9.f);
+        setP(mod, "Compressor attack", 30.f);
+        setP(mod, "Compressor release", 220.f);
+        setP(mod, "Compressor mix (parallel)", 0.6f);
+        setP(mod, "Compressor sidechain high-pass", 90.f);
+        setP(mod, "Compressor auto makeup gain", 0.f);
+        setP(mod, "Punch", 0.12f);
+        setP(mod, "Saturation drive", 4.f);
+        setP(mod, "Saturation mix", 0.45f);
+        setP(mod, "Multiband leveler amount", 0.f);
+        setP(mod, "Mono bass below", 110.f);
+        setP(mod, "Stereo width", 1.05f);
+        setP(mod, "Limiter threshold", -0.5f);
+        setP(mod, "Limiter release", 80.f);
+        setP(mod, "Limiter ceiling", -0.5f);
+        setP(mod, "Output gain", 0.f);
+    }
     void ensureMastering(history::ComplexAction* h) {
         SynTHBloKRandroyd* m = rd();
         app::RackWidget* rack = APP->scene->rack;
         app::ModuleWidget* mix = findMw(m->mixerId);
         app::ModuleWidget* audio = findMw(m->audioId);
-        if (!mix || findMw(m->masterId)) return;
+        if (app::ModuleWidget* old = findMw(m->masterId)) {   // a master from before the gentle settings: once, to the new ones
+            if (m->masterV < 2 && old->module) { masterTone(old->module); m->masterV = 2; }
+            return;
+        }
+        if (!mix) return;
         app::PortWidget* ml = port(mix, true, "Master left");
         app::PortWidget* mr = port(mix, true, "Master right");
         // the mixer's own cables straight to the audio module go (BloKMaster sits between them now)
@@ -1588,22 +1716,14 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
                 delete cw;
             }
         }
-        float mx = mix->box.pos.x + mix->box.size.x;   // right of the mixer, before the audio module
-        app::ModuleWidget* mst = spawn("SynTHBloK", "BlokMaster", mx, mix->box.pos.y, h, [&](engine::Module* mod) {
-            // a gentle, safe master: glue, mono low end, a limiter just under 0 dB
-            setP(mod, "Compressor threshold", -14.f);
-            setP(mod, "Compressor ratio", 2.f);
-            setP(mod, "Compressor attack", 20.f);
-            setP(mod, "Compressor release", 150.f);
-            setP(mod, "Compressor auto makeup gain", 1.f);
-            setP(mod, "Punch", 0.15f);
-            setP(mod, "Mono bass below", 110.f);
-            setP(mod, "Limiter threshold", -2.f);
-            setP(mod, "Limiter ceiling", -0.3f);
-        });
+        // right of the audio module when it sits on the master row (COMPOSER, MIX-8, AUDIO, BLOKMASTER), else right of the mixer
+        bool audioBeside = audio && std::fabs(audio->box.pos.y - mix->box.pos.y) < 1.f;
+        float mx = audioBeside ? audio->box.pos.x + audio->box.size.x : mix->box.pos.x + mix->box.size.x;
+        app::ModuleWidget* mst = spawn("SynTHBloK", "BlokMaster", mx, mix->box.pos.y, h, [&](engine::Module* mod) { masterTone(mod); });
         if (!mst) { m->say("BLOKMASTER NOT FOUND: MIXER GOES STRAIGHT TO AUDIO"); }
         else {
             m->masterId = mst->module->id;
+            m->masterV = 2;
             m->masterMods.push_back(mst->module->id);
             wire(ml, port(mst, false, "Left in"), nvgRGB(0x00, 0xb5, 0x6e), h);
             wire(mr, port(mst, false, "Right in"), nvgRGB(0x36, 0x95, 0xef), h);
@@ -1776,7 +1896,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         const std::vector<int>& kits = rdz::KITS[g];
         kit = kits[std::uniform_int_distribution<int>(0, (int) kits.size() - 1)(rng)];
         if (perc) kit = percKit(g, rng);
-        float x = box.pos.x, y = box.pos.y + (2 + track) * rowH();
+        float x = box.pos.x, y = box.pos.y + (1 + track) * rowH();
         float variety = m->params[SynTHBloKRandroyd::DENSITY_PARAM].getValue();
         std::vector<std::string> pats = perc ? percPatterns(g, rng, variety) : drumPatterns(g, rng, variety);
         remapPats(pats, kit);
@@ -2050,7 +2170,97 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         }
         return lines;
     }
+    // BASS MUSIC (drum & bass, jungle, neurofunk, dubstep, mid-tempo, psy bass): the bass line runs 16 steps,
+    // two bars, a call and its answer
+    static bool longBass(int g) { return rdz::has(g, rdz::F_W) || g == 10 || g == 26 || g == 27; }
+    static int quadLen(int role, int g) { return role == 0 && longBass(g) ? 16 : 8; }
+    // A 16-step bass the way these genres write it: few notes, held (tied step to step), sliding between them,
+    // sitting on the root and landing with the kick. The sound moves (filter, wobble, drive), not the notes.
+    // Template letters: R root, 3 third, 5 fifth, b the scale step under the root, O the root an octave up
+    // (only the answer bar of a lifted line), '-' hold, '.' rest.
+    json_t* longBassData(int g, std::mt19937& rng, json_t* keepFirst) {
+        SynTHBloKRandroyd* m = rd();
+        auto uni = [&](float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); };
+        auto rnd = [&](int n) { return std::uniform_int_distribution<int>(0, n - 1)(rng); };
+        const int L = 16;
+        bool wob = m->hBassT == rdz::B_WOB;
+        bool halfTime = rdz::has(g, rdz::F_W);   // dubstep, mid-tempo, psy bass: half-time phrases
+        // DnB / jungle / neuro: a step is an 8th at the felt tempo, so 16 = 2 bars; the kick sits on 1 and the 'and' of 3
+        static const char* DNB[8] = {"R----.--R--5----", "R-------R---b---", "R----R--5-------", "R-----.-R--3--5-",
+                                     "R---------R-b-5-", "R----.R-----5-b-", "R-------5---R---", "R--.R---R-----b-"};
+        static const char* HALF[6] = {"R-------R-----5-", "R-----.-R-------", "R-------.---3-5-", "R-----R-5-------",
+                                      "R-------R---b---", "R---.---R-----b-"};
+        // wobble: held through, a rest or two cutting the wub into a phrase
+        static const char* WOB[6] = {"R---------------", "R-------R-------", "R------.R---5---", "R-----.-R-------",
+                                     "R-------5-----.-", "R---.---R-------"};
+        const char* const* pool = wob ? WOB : halfTime ? HALF : DNB;
+        int poolN = wob ? 6 : halfTime ? 6 : 8;
+        std::string tmpl = pool[rnd(poolN)];
+        std::string answer = pool[rnd(poolN)];   // the second bar may answer with another shape
+        if (uni(0, 1) < 0.5f) tmpl = tmpl.substr(0, 8) + answer.substr(8, 8);
+        int n = scaleLen();
+        std::vector<std::vector<int>> lines;
+        for (int p = 0; p < 8; p++) {
+            int c = p % 4;
+            bool lifted = p >= 4 && p < 7;
+            std::vector<int> tones = triad(m->hProg[c]);
+            int root = tones[0], below = root > 0 ? root - 1 : std::min(7, root + 1);
+            int oct = std::min(7, root + n);
+            std::string t = tmpl;
+            if (lifted) {   // the peak: one more push in the answer bar, now and then the root an octave up
+                int at = 9 + rnd(6);
+                if (t[at] == '-' || t[at] == '.') t[at] = uni(0, 1) < 0.4f ? 'O' : '5';
+            }
+            std::vector<int> line(L, 0);
+            int cur = 0;
+            for (int i = 0; i < L; i++) {
+                char ch = t[i];
+                if (ch == '.') { cur = 0; continue; }
+                if (ch == '-') { line[i] = cur; continue; }
+                int d = ch == 'R' ? root : ch == '3' ? tones[1] : ch == '5' ? tones[2] : ch == 'b' ? below : oct;
+                cur = 1 << clamp(d, 0, 7);
+                line[i] = cur;
+            }
+            lines.push_back(line);
+        }
+        json_t* d = json_object();
+        json_t* notes = json_array();
+        json_t* steps = json_array();
+        for (int p = 0; p < 8; p++) {
+            const std::vector<int>& line = lines[p];
+            std::string hx;
+            if (p == 0 && keepFirst) {
+                const char* old = json_string_value(json_array_get(json_object_get(keepFirst, "notes"), 0));
+                if (old && std::strlen(old) >= 2 * L) hx = std::string(old, 2 * L);
+            }
+            if (hx.empty()) for (int v : line) hx += string::f("%02x", v);
+            json_array_append_new(notes, json_string(hx.c_str()));
+            // a step "continues" when the template held it: the step before ties into it
+            std::vector<bool> start(L, false);
+            for (int i = 0; i < L; i++) start[i] = line[i] && (i == 0 || !line[i - 1] || tmpl[i] != '-');
+            for (int b = 0; b < 8; b++)
+                for (int i = 0; i < L; i++) {
+                    bool on = line[i] != 0, next = i + 1 < L && line[i + 1] && !start[i + 1];
+                    bool nextNew = i + 1 < L && line[i + 1] && start[i + 1];
+                    float v;
+                    if (b == 0) v = on && start[i] && (i % 8 == 0) ? 1.f : 0.f;                     // accent the downbeats
+                    else if (b == 1) v = 0.5f;                                                      // cutoff
+                    else if (b == 2) v = !on ? 0.5f : (next || nextNew) ? 1.f : 0.92f;             // gate: tied / legato into the next
+                    else if (b == 3) v = on && start[i] && i > 0 && line[i - 1] && line[i - 1] != line[i] ? 0.45f : 0.f;   // slide into a new note
+                    else if (b == 4) v = 1.f;                                                       // always plays
+                    else if (b == 5) v = 0.f;                                                       // no rolls on a sub
+                    else if (b == 6) v = 0.5f;                                                      // octave
+                    else v = 0.5f;                                                                  // resonance
+                    json_array_append_new(steps, json_real(v));
+                }
+        }
+        json_object_set_new(d, "notes", notes);
+        json_object_set_new(d, "steps", steps);
+        json_object_set_new(d, "justChords", json_true());
+        return d;
+    }
     json_t* quadData(int role, int g, std::mt19937& rng, json_t* keepFirst = NULL) {
+        if (role == 0 && longBass(g)) return longBassData(g, rng, keepFirst);
         SynTHBloKRandroyd* m = rd();
         auto uni = [&](float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); };
         json_t* d = json_object();
@@ -2308,13 +2518,13 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     bool buildQuad(int track, int g, std::mt19937& rng, history::ComplexAction* h, int role, int recipe = 0) {
         SynTHBloKRandroyd* m = rd();
         const rdz::GenreDrums& GD = rdz::GDRUMS[g];
-        float x = box.pos.x, y = box.pos.y + (2 + track) * rowH();
+        float x = box.pos.x, y = box.pos.y + (1 + track) * rowH();
         json_t* data = quadData(role, g, rng);
         app::ModuleWidget* q = spawn("SynTHBloK", "MtxQuad", x, y, h, [&](engine::Module* mod) {
             setP(mod, "Key", (float) m->hKey);
             setP(mod, "Scale", (float) m->hScale);
             setP(mod, "Grid octave (bottom row)", role <= 1 ? -1.f : 0.f);
-            setP(mod, "Pattern length (steps)", 8.f);
+            setP(mod, "Pattern length (steps)", (float) quadLen(role, g));
             setP(mod, "Run", 1.f);
             setP(mod, "Grid plays the synth", 1.f);
             quadTone(mod, role, g, rng, false);
@@ -2501,7 +2711,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     }
     bool buildRig(int track, int g, std::mt19937& rng, history::ComplexAction* h, bool broken, bool resKick = false) {
         SynTHBloKRandroyd* m = rd();
-        float x = box.pos.x, y = box.pos.y + (2 + track) * rowH();
+        float x = box.pos.x, y = box.pos.y + (1 + track) * rowH();
         float variety = m->params[SynTHBloKRandroyd::DENSITY_PARAM].getValue();
         app::ModuleWidget* eu = spawn("SynTHBloK", "Euclid", x, y, h, [&](engine::Module* mod) { rigSettings(mod, g, rng, broken, variety); });
         app::ModuleWidget* kick = spawn("SynTHBloK", "Kick", x, y, h, [&](engine::Module* mod) { rigTone(mod, NULL, g, rng); });
@@ -2577,7 +2787,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     }
     bool buildMetal(int track, int g, std::mt19937& rng, history::ComplexAction* h) {
         SynTHBloKRandroyd* m = rd();
-        float x = box.pos.x, y = box.pos.y + (2 + track) * rowH();
+        float x = box.pos.x, y = box.pos.y + (1 + track) * rowH();
         app::ModuleWidget* eu = spawn("SynTHBloK", "Euclid", x, y, h, [&](engine::Module* mod) { metalSettings(mod, rng); });
         app::ModuleWidget* sh = spawn("SynTHBloK", "SnareHat", x, y, h, [&](engine::Module* mod) { metalTone(mod, NULL, rng); });
         app::ModuleWidget* rs = spawn("SynTHBloK", "Resonator", x, y, h, [&](engine::Module* mod) { metalTone(NULL, mod, rng); });
@@ -2665,7 +2875,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     }
     bool buildDuo(int g, std::mt19937& rng, history::ComplexAction* h, int bassRole, bool followKick = false, bool bellLead = false, bool resKick = false) {
         SynTHBloKRandroyd* m = rd();
-        float x = box.pos.x, y = box.pos.y + (2 + 1) * rowH();
+        float x = box.pos.x, y = box.pos.y + (1 + 1) * rowH();
         json_t* data = duoData(bassRole, g, rng, NULL);
         app::ModuleWidget* duo = spawn("SynTHBloK", "Duo", x, y, h, [&](engine::Module* mod) {
             setP(mod, "Key", (float) m->hKey);
@@ -2769,7 +2979,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     }
     bool buildBoom(int track, int g, std::mt19937& rng, history::ComplexAction* h, bool resKick = false) {
         SynTHBloKRandroyd* m = rd();
-        float x = box.pos.x, y = box.pos.y + (2 + track) * rowH();
+        float x = box.pos.x, y = box.pos.y + (1 + track) * rowH();
         app::ModuleWidget* eu = spawn("SynTHBloK", "Euclid", x, y, h, [&](engine::Module* mod) { boomSettings(mod, rng); });
         app::ModuleWidget* kick = spawn("SynTHBloK", "Kick", x, y, h, [&](engine::Module* mod) { boomTone(mod, rng); });
         if (!eu || !kick) return false;
@@ -2806,7 +3016,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     }
     bool buildBells(int track, int g, std::mt19937& rng, history::ComplexAction* h) {
         SynTHBloKRandroyd* m = rd();
-        float x = box.pos.x, y = box.pos.y + (2 + track) * rowH();
+        float x = box.pos.x, y = box.pos.y + (1 + track) * rowH();
         app::ModuleWidget* eu = spawn("SynTHBloK", "Euclid", x, y, h, [&](engine::Module* mod) { bellSettings(mod, rng); });
         app::ModuleWidget* rs = spawn("SynTHBloK", "Resonator", x, y, h, [&](engine::Module* mod) { bellTone(mod, rng); });
         if (!eu || !rs) return false;
@@ -3532,7 +3742,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         app::ModuleWidget* drum = findMw(m->trackMods[0][0]);
         // 2 + 3 MTX-DUO: bass > MORPH (keytracked); lead > DUAL (gated envelope) > DELAY
         int bassRole = (rdz::GHARM[g].acid && chance(0.6f)) ? 1 : 0;
-        float x = box.pos.x, y = box.pos.y + 3 * rowH();
+        float x = box.pos.x, y = box.pos.y + 2 * rowH();
         json_t* data = duoData(bassRole, g, rng, NULL);
         app::ModuleWidget* duo = spawn("SynTHBloK", "Duo", x, y, h, [&](engine::Module* mod) {
             setP(mod, "Key", (float) m->hKey); setP(mod, "Scale", (float) m->hScale);
@@ -3561,7 +3771,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         m->trackRole[1] = bassRole; m->trackRole[2] = 2;
         m->trackGenre[1] = m->trackGenre[2] = g;
         // 4 CHORDS: MTX QUAD sequences > POLY > PHASER (side = the kick) > RESONATOR or DUAL
-        x = box.pos.x; y = box.pos.y + 5 * rowH();
+        x = box.pos.x; y = box.pos.y + 4 * rowH();
         json_t* qd = quadData(3, g, rng);
         app::ModuleWidget* q = spawn("SynTHBloK", "MtxQuad", x, y, h, [&](engine::Module* mod) {
             setP(mod, "Key", (float) m->hKey); setP(mod, "Scale", (float) m->hScale);
@@ -3589,7 +3799,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         m->trackMods[3] = {q->module->id, poly->module->id, phs->module->id, cfx->module->id};
         m->trackRecipe[3] = 12; m->trackRole[3] = 3; m->trackGenre[3] = g;
         // 5 PERC: K JAM > SNARE/HAT + a tom KICK > RESONATOR; JAM 6 glitches the drums, 7 jolts the bass filter
-        x = box.pos.x; y = box.pos.y + 6 * rowH();
+        x = box.pos.x; y = box.pos.y + 5 * rowH();
         json_t* jd = jamData(g, rng);
         app::ModuleWidget* jam = spawn("SynTHBloK", "Jam", x, y, h, [&](engine::Module* mod) {
             setP(mod, "Pattern length (steps)", 8.f); setP(mod, "Pattern", 1.f);
@@ -3614,7 +3824,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         m->trackRecipe[4] = 13; m->trackGenre[4] = g;
         // FULL: the texture (MTX-ECHO looper fed by the chords) and GRAIN-FORGE on the FX bus
         if (full) {
-            x = box.pos.x; y = box.pos.y + 7 * rowH();
+            x = box.pos.x; y = box.pos.y + 6 * rowH();
             app::ModuleWidget* tex = spawn("SynTHBloK", "Echo", x, y, h, [&](engine::Module* mod) { texTone(mod, rng); });
             if (tex) {
                 wire(port(cfx, true, cres ? "Out L" : "Left"), port(tex, false, "Left"), rdz::ramp(5), h);
@@ -3872,7 +4082,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             it = m->locks.erase(it);
         }
         if (!srcL) srcL = srcR;
-        float x = box.pos.x, y = box.pos.y + (2 + track) * rowH();
+        float x = box.pos.x, y = box.pos.y + (1 + track) * rowH();
         int g = clamp(m->trackGenre[track] >= 0 ? m->trackGenre[track] : 0, 0, rdz::NG - 1);
         app::ModuleWidget* fxm = spawn("SynTHBloK", growModel(kind), x, y, h, [&](engine::Module* mod) { growTone(mod, kind, g, rng); });
         const char *inL, *inR, *outL, *outR;
@@ -4059,6 +4269,12 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     bool saveTrack(int pad) {
         SynTHBloKRandroyd* m = rd();
         if (pad < 0 || pad >= SynTHBloKRandroyd::BANKS * RD_SPOTS || !anyLive()) return false;
+        return snapInto(m->slots[rdBankOf(pad)][rdSpotOf(pad)]);
+    }
+    // the playing track into a saved-track record (a spot, or the library's autosave)
+    bool snapInto(SynTHBloKRandroyd::Slot& sl) {
+        SynTHBloKRandroyd* m = rd();
+        if (!anyLive()) return false;
         json_t* root = json_object();
         json_t* layers = json_array();
         int mods = 0, g = -1;
@@ -4089,7 +4305,6 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         json_object_set_new(root, "arrKind", json_integer(m->arrKind));
         char* txt = json_dumps(root, JSON_COMPACT);
         json_decref(root);
-        SynTHBloKRandroyd::Slot& sl = m->slots[rdBankOf(pad)][rdSpotOf(pad)];
         sl.used = true;
         sl.date = rdToday();
         sl.snapshot = txt ? txt : "";
@@ -4107,7 +4322,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     int loadLayer(json_t* root, int c, history::ComplexAction* h) {
         SynTHBloKRandroyd* m = rd();
         int g = clamp((int) json_integer_value(json_object_get(root, "genre")), 0, rdz::NG - 1);
-        float x = box.pos.x, y = box.pos.y + (2 + c) * rowH();
+        float x = box.pos.x, y = box.pos.y + (1 + c) * rowH();
         std::vector<app::ModuleWidget*> made;
         json_t* mods = json_object_get(root, "modules");
         size_t i; json_t* mj;
@@ -4444,6 +4659,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             json_t* d = quadData(role, m->trackGenre[t], rng, cur);
             q->module->dataFromJson(d);
             json_decref(d);
+            setP(q->module, "Pattern length (steps)", (float) quadLen(role, clamp(m->trackGenre[t], 0, rdz::NG - 1)));
         }
         if (cur) json_decref(cur);
         if (!mutate) quadTone(q->module, m->trackRole[t], m->trackGenre[t], rng, true);
@@ -4543,6 +4759,44 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         if (infoTimer <= 0.f) { refreshInfo(); infoTimer = 0.25f; }
         followSong();
         syncTempo();
+        // THE LIBRARY: the saved tracks to the file now and then (only when they changed); an unsaved playing
+        // track is kept as the autosave every half minute, so closing by accident loses nothing
+        libTimer -= dt;
+        if (libTimer <= 0.f) {
+            libTimer = 2.f;
+            autoTimer -= 2.f;
+            if (autoTimer <= 0.f) {
+                autoTimer = 30.f;
+                if (m->curPad < 0 && anyLive()) {
+                    SynTHBloKRandroyd::Slot tmp;
+                    if (snapInto(tmp)) {
+                        m->autosaveSnap = tmp.snapshot; m->autosaveName = tmp.name; m->autosaveGenre = tmp.genre;
+                        m->autosaveBpm = tmp.bpm; m->autosaveKey = tmp.key; m->autosaveScale = tmp.scale;
+                    }
+                }
+            }
+            m->libraryWrite();
+        }
+    }
+    float libTimer = 2.f, autoTimer = 30.f;
+    // RECOVER: the last unsaved track (the library's autosave) into the first empty spot, then loaded
+    void recoverAutosave() {
+        SynTHBloKRandroyd* m = rd();
+        if (!m || m->autosaveSnap.empty()) return;
+        for (int b = 0; b < SynTHBloKRandroyd::BANKS; b++)
+            for (int t = 0; t < RD_SPOTS; t++) {
+                SynTHBloKRandroyd::Slot& sl = m->slots[b][t];
+                if (sl.used) continue;
+                sl = SynTHBloKRandroyd::Slot();
+                sl.used = true; sl.named = true; sl.name = "RECOVERED " + m->autosaveName;
+                sl.snapshot = m->autosaveSnap; sl.genre = m->autosaveGenre; sl.bpm = m->autosaveBpm;
+                sl.key = m->autosaveKey; sl.scale = m->autosaveScale; sl.date = rdToday();
+                int pad = b * RD_SPOTS + t;
+                loadTrack(pad);
+                m->say("RECOVERED THE LAST UNSAVED TRACK INTO " + rdSpotName(pad));
+                return;
+            }
+        m->say("NO EMPTY SPOT FOR THE RECOVERED TRACK: ERASE ONE FIRST");
     }
 
     void appendContextMenu(Menu* menu) override {
@@ -4559,6 +4813,8 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         menu->addChild(createMenuItem("Unlock mixer channels (cables stay, become yours)", "", [=]() { m->locks.clear(); }));
         menu->addChild(createMenuItem("Make rolled cables mine (stop tracking them)", "", [=]() { m->myCables.clear(); }));
         menu->addChild(createMenuItem("Clear all scenes and sets", "", [=]() { for (auto& s : m->sets) s = SynTHBloKRandroyd::Set(); m->scene = -1; }));
+        menu->addChild(createMenuItem("Recover the last unsaved track", m->autosaveSnap.empty() ? "none kept" : upperTrim(m->autosaveName, 16),
+                                      [=]() { recoverAutosave(); }, m->autosaveSnap.empty()));
         menu->addChild(createMenuItem("Delete all saved tracks", "", [=]() { for (auto& b : m->slots) for (auto& s : b) s = SynTHBloKRandroyd::Slot(); m->curPad = -1; }));
     }
 };
@@ -4851,6 +5107,9 @@ void RdOled::drawLayer(const DrawArgs& args, int layer) {
             nvgFillColor(vg, oled::amber(m && m->uiSong ? 150 : 60));
         }
         nvgFill(vg);
+        // the state in words, under the tempo: RUNNING (green) / STOPPED (red)
+        if (!m || m->uiSong)
+            rdText(vg, rx, hy + mm2px(3.8f), run ? "RUNNING" : "STOPPED", 6.f, run ? rdz::green() : rdz::red(), NVG_ALIGN_RIGHT);
     }
 
     if (t == 0) {   // ---- TRACK: the playing track's 8 layers ----

@@ -1516,6 +1516,7 @@ struct SynTHBloKMatrixFxWidget : ModuleWidget {
     SynTHBloKMatrixFxWidget(MX* module) {
         setModule(module);
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/SynTHBloKMatrixFx.svg")));
+        addChild(songlink::RowBadge::create(box.size, module));   // the Composer row conducting it
         using namespace rack::componentlibrary;
         const float PW = 223.52f;   // 44 HP
         addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(3.5f, 3.5f))));

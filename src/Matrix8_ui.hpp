@@ -283,6 +283,7 @@ template <class M>
 struct JLoopArrow : OpaqueWidget {
     M* module = NULL;
     int dir = 1;                  // +1 = UP (longer), -1 = DOWN (shorter)
+    int maxLen = 8;               // MTX QUAD: 16
     float flash = 0.f;
     void draw(const DrawArgs& args) override {
         float W = box.size.x, H = box.size.y;
@@ -308,7 +309,7 @@ struct JLoopArrow : OpaqueWidget {
         if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
             if (module) {
                 ParamQuantity* pq = module->paramQuantities[M::LEN_PARAM];
-                pq->setValue((float)clamp((int)pq->getValue() + dir, 1, 8));
+                pq->setValue((float)clamp((int)pq->getValue() + dir, 1, maxLen));
             }
             flash = 1.f;
             e.consume(this);
@@ -319,7 +320,9 @@ struct JLoopArrow : OpaqueWidget {
 template <class M>
 struct JLoopDisplay : OpaqueWidget {
     M* module = NULL;
-    int len() { return module ? clamp((int)module->params[M::LEN_PARAM].getValue(), 1, 8) : 6; }
+    int maxLen = 8;               // MTX QUAD: 16 (the 8 cells show the half the playhead is in)
+    int len() { return module ? clamp((int)module->params[M::LEN_PARAM].getValue(), 1, maxLen) : 6; }
+    int half() { return (maxLen > 8 && module && module->step >= 8) ? 8 : 0; }
     void draw(const DrawArgs& args) override {
         float W = box.size.x, H = box.size.y;
         nvgBeginPath(args.vg);
@@ -342,8 +345,9 @@ struct JLoopDisplay : OpaqueWidget {
         }
         // steps 1..8 top to bottom: lit = inside the loop, white = playhead
         float ch = (H - top - 2.f) / 8.f;
+        int off = half();
         for (int i = 0; i < 8; i++) {
-            bool in = i < n, head = run && step == i;
+            bool in = i + off < n, head = run && step == i + off;
             nvgBeginPath(args.vg);
             nvgRoundedRect(args.vg, 3.f, top + i * ch + 0.6f, W - 6.f, ch - 1.2f, 0.8f);
             nvgFillColor(args.vg, head ? nvgRGBA(255, 255, 255, 235) : in ? nvgRGBA(255, 112, 15, 220) : nvgRGBA(40, 25, 8, 255));
@@ -361,7 +365,8 @@ struct JLoopDisplay : OpaqueWidget {
             float top = 14.f, ch = (box.size.y - top - 2.f) / 8.f;
             if (module && e.pos.y >= top) {
                 int i = clamp((int)((e.pos.y - top) / ch), 0, 7);
-                module->paramQuantities[M::LEN_PARAM]->setValue((float)(i + 1));
+                // past 8: a click on the first cell of the other half reaches 9-16 (the cells show one half)
+                module->paramQuantities[M::LEN_PARAM]->setValue((float)(i + 1 + half()));
             }
             e.consume(this);
         }
