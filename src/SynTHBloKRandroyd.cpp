@@ -1,7 +1,7 @@
 // ============================================================================
 // SynTHBloK-R  RANDROYD RANDOMYZER  (40 HP track instrument)
 //
-//  MATRIX   8 banks (U1-U8) x 8 tracks (T1-T8). Each pad holds a stored track.
+//  BANKS    8 banks x 16 save spots, a fixed numbered list. Spots fill only when you press SAVE and pick one.
 //  SCENES   1-8 across the top: which tracks play. Edited in the SCENES tab.
 //  SETS     A-H along the bottom: 8 scenes each, a whole song.
 //  OLED     TRACKS / SCENES / BANKS / PATCH tabs.
@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <ctime>
 
 // MTX-DRUM: load a factory kit (SynTHBloKDrum.cpp)
 void randroydDrumKit(Module* m, int k);
@@ -124,13 +125,14 @@ struct SynTHBloKRandroyd : Module {
     midi::Output midiOut;
 
     // ---- state (UI thread; saved with the patch) ----
-    struct Slot { bool used = false; std::string name; bool named = false; int genre = 0; int bpm = 0; int key = -1; int scale = 0; int modules = 0; std::string snapshot; };
+    struct Slot { bool used = false; std::string name; bool named = false; int genre = 0; int bpm = 0; int key = -1; int scale = 0; int modules = 0; std::string snapshot; std::string date; };
     struct Scene { bool used = false; std::string name; uint8_t mask = 0; int bars = 8; };
     struct Set { bool used = false; Scene scenes[8]; };
-    Slot slots[8][8];      // [bank][track]
+    static const int BANKS = 8, SPOTS = 16;   // a pad number is bank * SPOTS + spot
+    Slot slots[BANKS][SPOTS];   // [bank][spot]
     Set sets[8];
     int bank = 0, set = 0, scene = -1, selTrack = -1;
-    int curPad = -1;       // the pad whose track is in the rack (row * 8 + column), -1 none
+    int curPad = -1;       // the spot whose track is in the rack (bank * SPOTS + spot), -1 none
     int mode = 0;          // 0 BUILD (recipes), 1 RACK (one rack, new songs, GROW)
     struct Grow { int64_t mod = -1; int track = 0; int ch = 0; int kind = 0; };
     std::vector<Grow> grown;   // modules GROW added, oldest first
@@ -165,7 +167,7 @@ struct SynTHBloKRandroyd : Module {
 
     SynTHBloKRandroyd() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
-        configButton(NEWTRACK_PARAM, "New track: every layer in the chosen genre, saved into the next empty pad");
+        configButton(NEWTRACK_PARAM, "New track: every layer in the chosen genre (plays unsaved: SAVE, then pick a spot, keeps it)");
         configButton(NEWRACK_PARAM, "Clear: empty the rack of RANDROYD's rows (your pads are kept)");
         configSwitch(SHIFT_PARAM, 0.f, 1.f, 0.f, "Shift (or hold the Shift key)", {"Off", "On"});
         std::vector<std::string> gn;
@@ -275,6 +277,7 @@ struct SynTHBloKRandroyd : Module {
         json_object_set_new(root, "scene", json_integer(scene));
         json_object_set_new(root, "selTrack", json_integer(selTrack));
         json_object_set_new(root, "curPad", json_integer(curPad));
+        json_object_set_new(root, "spots", json_integer(SPOTS));
         json_t* ar = json_array();
         for (int i = 0; i < 8; i++) json_array_append_new(ar, json_integer(this->arr[i]));
         json_object_set_new(root, "arr", ar);
@@ -289,7 +292,7 @@ struct SynTHBloKRandroyd : Module {
         }
         json_object_set_new(root, "grown", gw);
         json_t* sl = json_array();
-        for (int b = 0; b < 8; b++) for (int t = 0; t < 8; t++) {
+        for (int b = 0; b < BANKS; b++) for (int t = 0; t < SPOTS; t++) {
             const Slot& s = slots[b][t];
             if (!s.used) continue;
             json_t* j = json_object();
@@ -303,6 +306,7 @@ struct SynTHBloKRandroyd : Module {
             json_object_set_new(j, "named", json_boolean(s.named));
             json_object_set_new(j, "modules", json_integer(s.modules));
             json_object_set_new(j, "snap", json_string(s.snapshot.c_str()));
+            json_object_set_new(j, "date", json_string(s.date.c_str()));
             json_array_append_new(sl, j);
         }
         json_object_set_new(root, "slots", sl);
@@ -377,7 +381,9 @@ struct SynTHBloKRandroyd : Module {
         set = clamp(geti("set", 0), 0, 7);
         scene = clamp(geti("scene", -1), -1, 7);
         selTrack = clamp(geti("selTrack", -1), -1, 7);
-        curPad = clamp(geti("curPad", -1), -1, 63);
+        curPad = geti("curPad", -1);
+        if (curPad >= 0 && geti("spots", 8) == 8) curPad = (curPad / 8) * SPOTS + curPad % 8;   // saved before 16 spots per bank
+        curPad = clamp(curPad, -1, BANKS * SPOTS - 1);
         if (json_t* ar = json_object_get(root, "arr")) for (int i = 0; i < 8; i++) arr[i] = (uint8_t) json_integer_value(json_array_get(ar, i));
         arrKind = geti("arrKind", -1);
         mode = geti("mode", 0);
@@ -397,7 +403,7 @@ struct SynTHBloKRandroyd : Module {
             json_array_foreach(sl, i, j) {
                 int b = (int) json_integer_value(json_object_get(j, "bank"));
                 int t = (int) json_integer_value(json_object_get(j, "track"));
-                if (b < 0 || b > 7 || t < 0 || t > 7) continue;
+                if (b < 0 || b >= BANKS || t < 0 || t >= SPOTS) continue;
                 Slot& s = slots[b][t];
                 s.used = true;
                 if (json_t* v = json_object_get(j, "name")) s.name = json_string_value(v);
@@ -408,6 +414,7 @@ struct SynTHBloKRandroyd : Module {
                 s.named = json_is_true(json_object_get(j, "named"));
                 s.modules = (int) json_integer_value(json_object_get(j, "modules"));
                 if (json_t* v = json_object_get(j, "snap")) s.snapshot = json_string_value(v);
+                if (json_t* v = json_object_get(j, "date")) s.date = json_string_value(v);
             }
         }
         if (json_t* st = json_object_get(root, "sets")) {
@@ -442,6 +449,16 @@ struct RdInfo {
     int freeIns = 0, mine = 0;
 };
 
+static const int RD_SPOTS = SynTHBloKRandroyd::SPOTS;
+static int rdBankOf(int pad) { return pad / RD_SPOTS; }
+static int rdSpotOf(int pad) { return pad % RD_SPOTS; }
+static std::string rdSpotName(int pad) { return string::f("BANK %d SPOT %02d", rdBankOf(pad) + 1, rdSpotOf(pad) + 1); }
+static std::string rdToday() {   // the save date, MM/DD/YY
+    std::time_t t = std::time(nullptr);
+    char buf[16] = "";
+    if (std::tm* lt = std::localtime(&t)) std::strftime(buf, sizeof buf, "%m/%d/%y", lt);
+    return buf;
+}
 static std::string upperTrim(std::string s, size_t n) {
     for (char& c : s) c = (char) std::toupper((unsigned char) c);
     if (s.size() > n) s = s.substr(0, n);
@@ -766,45 +783,40 @@ struct RdCpu : TransparentWidget {
 struct SynTHBloKRandroydWidget;
 
 // ---------------------------------------------------------------------------
-// TRACKS OLED: the saved tracks. Click = play, right-click = rename / delete, wheel = scroll.
-// SAVE and CLEAR are soft buttons along its bottom edge.
+// TRACKS OLED: the bank's 16 save spots, a fixed numbered list (EMPTY, or name + date).
+// Click = play, right-click = rename / delete. SAVE and CLEAR are soft buttons along its bottom edge.
 // ---------------------------------------------------------------------------
 struct RdList : OpaqueWidget {
     SynTHBloKRandroyd* module = NULL;
     SynTHBloKRandroydWidget* owner = NULL;
     float scroll = 0.f;
     int flash = -1; float flashT = 0.f;   // a soft button lights while pressed
-    // SAVE mode: every spot of the bank shows and flashes (the playing track faster); click one to save there
+    // SAVE mode: every spot of the bank flashes (the playing track's own spot faster); click one to save there
     bool saveArm = false;
     float saveIdle = 0.f, blinkT = 0.f;
-    // CLEAR mode: the bank's tracks flash red; click one, then again, to delete it. The lit BANK button
+    // CLEAR mode: the bank's saved spots flash red; click one, then again, to delete it. The lit BANK button
     // (clicked twice) clears the whole bank. Deleting can't be undone, hence the second click.
     bool clearArm = false;
     int clearPad = -1, clearBank = -1;   // waiting for the second click
-    std::vector<int> pads() {
+    std::vector<int> pads() {   // always the bank's 16 spots, in order: the list never moves
         std::vector<int> v;
-        if (module && (saveArm || clearArm)) { int b = clamp(module->bank, 0, 7); for (int i = 0; i < 8; i++) v.push_back(b * 8 + i); return v; }
-        if (module) { int b = clamp(module->bank, 0, 7); for (int i = 0; i < 8; i++) if (module->slots[b][i].used) v.push_back(b * 8 + i); }
+        int b = module ? clamp(module->bank, 0, 7) : 0;
+        for (int i = 0; i < SynTHBloKRandroyd::SPOTS; i++) v.push_back(b * SynTHBloKRandroyd::SPOTS + i);
         return v;
     }
-    float rowH() { return mm2px(5.6f); }
+    float rowH() { return (box.size.y - top() - mm2px(9.6f)) / (float) SynTHBloKRandroyd::SPOTS; }   // all 16 fit
     float top() { return mm2px(13.6f); }
     Rect bankBtn(int b) {   // BANK 1-8, a row under the title
         float x0 = mm2px(2.f), gap = mm2px(0.8f), w = (box.size.x - mm2px(4.f) - 7.f * gap) / 8.f;
         return Rect(Vec(x0 + b * (w + gap), mm2px(7.2f)), Vec(w, mm2px(4.6f)));
     }
-    int visible() { return std::max(1, (int) ((box.size.y - top() - mm2px(9.6f)) / rowH())); }
+    int visible() { return SynTHBloKRandroyd::SPOTS; }
     Rect softBtn(int k) {   // 0 SAVE, 1 GROW, 2 MODE, 3 CLEAR
         float y = box.size.y - mm2px(5.4f), h = mm2px(4.4f), w = (box.size.x - mm2px(7.f)) / 4.f;
         return Rect(Vec(mm2px(2.f) + k * (w + mm2px(1.f)), y), Vec(w, h));
     }
     void drawLayer(const DrawArgs& args, int layer) override;
     void onButton(const ButtonEvent& e) override;
-    void onHoverScroll(const HoverScrollEvent& e) override {
-        int n = (int) pads().size();
-        scroll = clamp(scroll - e.scrollDelta.y / 50.f, 0.f, (float) std::max(0, n - visible()));
-        e.consume(this);
-    }
 };
 
 // ---------------------------------------------------------------------------
@@ -3282,16 +3294,16 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
 
     // ---- whole tracks: one pad = every layer, its tempo, key and progression ----
     bool anyLive() { for (int t = 0; t < 8; t++) if (trackLive(t)) return true; return false; }
-    // SAVE BANKS: 8 banks x 8 tracks. NEW TRACK and SAVE use the next empty track in the bank you're on.
+    // SAVE BANKS: 8 banks x 16 spots. Nothing is saved until you press SAVE and pick a spot.
     int nextFreePad() {
         SynTHBloKRandroyd* m = rd();
         int b = clamp(m->bank, 0, 7);
-        for (int i = 0; i < 8; i++) if (!m->slots[b][i].used) return b * 8 + i;
+        for (int i = 0; i < RD_SPOTS; i++) if (!m->slots[b][i].used) return b * RD_SPOTS + i;
         return -1;
     }
     bool bankFull() {
         if (nextFreePad() >= 0) return false;
-        rd()->say(string::f("BANK %d IS FULL (8 TRACKS): PICK ANOTHER BANK, OR RIGHT-CLICK A TRACK TO DELETE IT", clamp(rd()->bank, 0, 7) + 1));
+        rd()->say(string::f("BANK %d IS FULL (16 SPOTS): PICK ANOTHER BANK, OR CLEAR A SPOT", clamp(rd()->bank, 0, 7) + 1));
         return true;
     }
     void clearLayers() {
@@ -3391,10 +3403,10 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         return root;
     }
 
-    // SAVE: the whole playing track into pad (row * 8 + column)
+    // SAVE: the whole playing track into spot pad (bank * SPOTS + spot)
     bool saveTrack(int pad) {
         SynTHBloKRandroyd* m = rd();
-        if (pad < 0 || pad > 63 || !anyLive()) return false;
+        if (pad < 0 || pad >= SynTHBloKRandroyd::BANKS * RD_SPOTS || !anyLive()) return false;
         json_t* root = json_object();
         json_t* layers = json_array();
         int mods = 0, g = -1;
@@ -3421,8 +3433,9 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         json_object_set_new(root, "arrKind", json_integer(m->arrKind));
         char* txt = json_dumps(root, JSON_COMPACT);
         json_decref(root);
-        SynTHBloKRandroyd::Slot& sl = m->slots[pad / 8][pad % 8];
+        SynTHBloKRandroyd::Slot& sl = m->slots[rdBankOf(pad)][rdSpotOf(pad)];
         sl.used = true;
+        sl.date = rdToday();
         sl.snapshot = txt ? txt : "";
         free(txt);
         sl.genre = g;
@@ -3512,9 +3525,9 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     // PAD: bring back the whole track saved there (the playing one is saved first)
     void loadTrack(int pad) {
         SynTHBloKRandroyd* m = rd();
-        SynTHBloKRandroyd::Slot sl = m->slots[pad / 8][pad % 8];
-        if (!sl.used || sl.snapshot.empty()) { m->say(string::f("TRACK %02d IS EMPTY", pad + 1)); return; }
-        if (pad == m->curPad && anyLive()) { m->say(string::f("TRACK %02d IS PLAYING   ROLL = NEW SOUNDS   MUTATE = VARIATIONS", pad + 1)); return; }
+        SynTHBloKRandroyd::Slot sl = m->slots[rdBankOf(pad)][rdSpotOf(pad)];
+        if (!sl.used || sl.snapshot.empty()) { m->say(rdSpotName(pad) + " IS EMPTY"); return; }
+        if (pad == m->curPad && anyLive()) { m->say(rdSpotName(pad) + " IS PLAYING   ROLL = NEW SOUNDS   MUTATE = VARIATIONS"); return; }
         json_error_t err;
         json_t* root = json_loads(sl.snapshot.c_str(), 0, &err);
         if (!root) { m->say("THAT PAD'S DATA IS DAMAGED"); return; }
@@ -3530,7 +3543,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             for (int i = 0; i < 8; i++) m->arr[i] = ar ? (uint8_t) json_integer_value(json_array_get(ar, i)) : 255;
             m->arrKind = ar ? (int) json_integer_value(json_object_get(root, "arrKind")) : -1;
             history::ComplexAction* h = new history::ComplexAction;
-            h->name = string::f("RANDROYD load track %d", pad + 1);
+            h->name = "RANDROYD load " + rdSpotName(pad);
             for (int c = 0; c < 8; c++) {
                 json_t* lj = json_array_get(layers, c);
                 if (!json_is_object(lj)) continue;
@@ -3567,8 +3580,8 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             if (h->isEmpty()) delete h; else APP->history->push(h);
             if (modOf(5, "Echo")) texPhase = 1;
             m->curPad = pad;
-            m->bank = pad / 8;
-            m->say(string::f("TRACK %02d: %s  %d BPM", pad + 1, upperTrim(sl.name, 18).c_str(), bpm));
+            m->bank = rdBankOf(pad);
+            m->say(string::f("%s: %s  %d BPM", rdSpotName(pad).c_str(), upperTrim(sl.name, 18).c_str(), bpm));
             refreshInfo();
             return;
         }
@@ -3584,7 +3597,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         for (int i = 0; i < 8; i++) m->arr[i] = ar ? (uint8_t) json_integer_value(json_array_get(ar, i)) : 255;
         m->arrKind = ar ? (int) json_integer_value(json_object_get(root, "arrKind")) : -1;
         history::ComplexAction* h = new history::ComplexAction;
-        h->name = string::f("RANDROYD load pad %d", pad + 1);
+        h->name = "RANDROYD load " + rdSpotName(pad);
         int missing = 0;
         if (ensureMaster(h, g, bpm)) {
             setTempo(bpm);
@@ -3597,10 +3610,10 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         if (h->isEmpty()) delete h; else APP->history->push(h);
         writeArrangement();
         m->curPad = pad;
-        m->bank = pad / 8;
+        m->bank = rdBankOf(pad);
         m->selTrack = -1;
-        m->say(missing ? string::f("TRACK %02d LOADED (%d MODULE%s NOT INSTALLED)", pad + 1, missing, missing > 1 ? "S" : "")
-                       : string::f("TRACK %02d: %s  %d BPM", pad + 1, upperTrim(sl.name, 18).c_str(), bpm));
+        m->say(missing ? string::f("%s LOADED (%d MODULE%s NOT INSTALLED)", rdSpotName(pad).c_str(), missing, missing > 1 ? "S" : "")
+                       : string::f("%s: %s  %d BPM", rdSpotName(pad).c_str(), upperTrim(sl.name, 18).c_str(), bpm));
         refreshInfo();
     }
 
@@ -3781,41 +3794,39 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         return true;
     }
 
-    // SAVE: the playing track (with your tweaks) into its own slot, or a new one
+    // SAVE: the playing track (with your tweaks) back into its own spot (a new track needs SAVE on the list)
     void savePressed() {
         SynTHBloKRandroyd* m = rd();
         if (!m) return;
         if (!anyLive()) { m->say("NOTHING PLAYING TO SAVE: PRESS NEW TRACK"); return; }
-        int pad = m->curPad >= 0 ? m->curPad : nextFreePad();
-        if (pad < 0) { bankFull(); return; }
-        saveTrack(pad);
-        m->curPad = pad;
-        m->say(string::f("SAVED AS TRACK %02d", pad + 1));
+        if (m->curPad < 0) { m->say("PRESS SAVE ON THE TRACK LIST AND PICK A SPOT"); return; }   // the user always picks the spot
+        saveTrack(m->curPad);
+        m->say("SAVED: " + rdSpotName(m->curPad));
     }
 
     // SAVE mode: the playing track into the spot you clicked (any bank). A used spot is replaced.
     void saveTo(int pad) {
         SynTHBloKRandroyd* m = rd();
-        if (!m || pad < 0 || pad >= 64) return;
+        if (!m || pad < 0 || pad >= SynTHBloKRandroyd::BANKS * RD_SPOTS) return;
         if (!anyLive()) { m->say("NOTHING PLAYING TO SAVE: PRESS NEW TRACK"); return; }
-        bool replaced = m->slots[pad / 8][pad % 8].used && pad != m->curPad;
+        bool replaced = m->slots[rdBankOf(pad)][rdSpotOf(pad)].used && pad != m->curPad;
         saveTrack(pad);
         m->curPad = pad;
-        m->bank = pad / 8;
-        m->say(string::f("SAVED AS TRACK %02d (BANK %d)%s", pad + 1, pad / 8 + 1, replaced ? "  ·  REPLACED WHAT WAS THERE" : ""));
+        m->bank = rdBankOf(pad);
+        m->say("SAVED: " + rdSpotName(pad) + (replaced ? "  ·  REPLACED WHAT WAS THERE" : ""));
     }
 
     // ---- matrix / scene / set actions ----
     void padClicked(int r, int c) {
         SynTHBloKRandroyd* m = rd();
         if (!m) return;
-        int pad = r * 8 + c;
+        int pad = r * RD_SPOTS + c;
         if (rdShift(m)) {   // SHIFT + pad: erase it
             rdShiftDone(m);
-            if (!m->slots[r][c].used) { m->say(string::f("PAD %d IS ALREADY EMPTY", pad + 1)); return; }
+            if (!m->slots[r][c].used) { m->say(rdSpotName(pad) + " IS ALREADY EMPTY"); return; }
             m->slots[r][c] = SynTHBloKRandroyd::Slot();
             if (m->curPad == pad) m->curPad = -1;
-            m->say(string::f("PAD %d ERASED", pad + 1));
+            m->say(rdSpotName(pad) + " ERASED");
             return;
         }
         loadTrack(pad);
@@ -3895,15 +3906,19 @@ void RdList::drawLayer(const DrawArgs& args, int layer) {
     if (layer != 1) { Widget::drawLayer(args, layer); return; }
     NVGcontext* vg = args.vg;
     float W = box.size.x, H = box.size.y;
+    const int N = SynTHBloKRandroyd::SPOTS;
     oled::box(args, W, H);
     rdFont(vg);
-    struct Row { int pad; std::string name, key; int bpm; };
+    struct Row { int pad; bool used; std::string name, date; };
     std::vector<Row> rows;
-    int cur = module ? module->curPad : 3;
-    if (module) for (int p : pads()) {
-        const SynTHBloKRandroyd::Slot& s = module->slots[p / 8][p % 8];
-        if (s.used) rows.push_back({p, s.name, rdKeyName(s.key, s.scale), s.bpm});
-        else rows.push_back({p, "- EMPTY -", "", 0});
+    int cur = module ? module->curPad : 2;
+    if (module) for (int p : pads()) {   // the bank's 16 spots, always in place
+        const SynTHBloKRandroyd::Slot& s = module->slots[rdBankOf(p)][rdSpotOf(p)];
+        rows.push_back({p, s.used, s.used ? s.name : std::string(), s.used ? s.date : std::string()});
+    }
+    else {   // module browser preview
+        static const char* demo[4] = {"ACID TECHNO", "DUB TECHNO", "HOUSE", "TRANCE"};
+        for (int i = 0; i < N; i++) rows.push_back({i, i < 4, i < 4 ? demo[i] : "", i < 4 ? "11/07/26" : ""});
     }
     float dt = APP->window->getLastFrameDuration();
     blinkT += dt;
@@ -3911,20 +3926,17 @@ void RdList::drawLayer(const DrawArgs& args, int layer) {
         saveIdle += dt;
         if (saveIdle > 15.f) { saveArm = clearArm = false; clearPad = clearBank = -1; }
     }
-    else {
-        static const char* demo[8] = {"ACID TECHNO", "DUB TECHNO", "HOUSE", "ACID TECHNO", "TRANCE", "LO-FI", "DEEP HOUSE", "TECHNO"};
-        static const int bpm[8] = {132, 122, 124, 135, 138, 84, 121, 130};
-        for (int i = 0; i < 8; i++) rows.push_back({i, demo[i], rdKeyName((i * 5) % 12, i % 2), bpm[i]});
-    }
+    int used = 0;
+    for (const Row& r : rows) used += r.used;
     bool titleBlink = std::fmod(blinkT * 2.f, 1.f) < 0.5f;
     rdText(vg, mm2px(2.4f), mm2px(4.2f), saveArm ? "SAVE TO..." : clearArm ? "CLEAR..." : "TRACKS", 11.f,
            saveArm && titleBlink ? rdz::green() : clearArm && titleBlink ? rdz::red() : oled::amber(), NVG_ALIGN_LEFT);
     int curBank = module ? clamp(module->bank, 0, 7) : 0;
-    rdText(vg, W - mm2px(2.4f), mm2px(4.2f), string::f("BANK %d  ·  %d / 8", curBank + 1, (int) rows.size()), 6.f, oled::amber(140), NVG_ALIGN_RIGHT);
+    rdText(vg, W - mm2px(2.4f), mm2px(4.2f), string::f("BANK %d  ·  %d / %d", curBank + 1, used, N), 6.f, oled::amber(140), NVG_ALIGN_RIGHT);
     for (int b = 0; b < 8; b++) {   // lit = the bank you're on; brighter outline = it holds tracks
         Rect r = bankBtn(b);
         int n = 0;
-        if (module) for (int i = 0; i < 8; i++) n += module->slots[b][i].used;
+        if (module) for (int i = 0; i < N; i++) n += module->slots[b][i].used;
         bool on = b == curBank;
         NVGcolor c = n ? oled::amber() : oled::amber(90);
         if (clearArm && b == clearBank) {   // waiting for the second click: the whole bank goes
@@ -3935,50 +3947,42 @@ void RdList::drawLayer(const DrawArgs& args, int layer) {
         rdBox(vg, r.pos.x, r.pos.y, r.size.x, r.size.y, on ? oled::amber() : nvgRGBA(20, 14, 6, 255), c, 0.9f, on ? 1.8f : 1.f);
         rdText(vg, r.pos.x + r.size.x * 0.5f, r.pos.y + r.size.y * 0.5f, string::f("%d", b + 1), 6.5f, on ? oled::ink() : c, NVG_ALIGN_CENTER);
     }
-    int vis = visible(), first = clamp((int) scroll, 0, std::max(0, (int) rows.size() - vis));
-    for (int k = 0; k < vis && first + k < (int) rows.size(); k++) {
-        const Row& r = rows[first + k];
-        float y = top() + k * rowH(), yc = y + rowH() * 0.5f;
+    float rh = rowH(), fs = std::min(7.f, rh * 0.62f);
+    for (int k = 0; k < (int) rows.size(); k++) {
+        const Row& r = rows[k];
+        float y = top() + k * rh, yc = y + rh * 0.5f;
         bool play = r.pad == cur;
-        if (saveArm) {   // every spot flashes; the playing track's spot flashes fast
+        if (saveArm) {   // every spot flashes; the playing track's own spot flashes fast
             bool lit = std::fmod(blinkT * (play ? 6.f : 1.6f), 1.f) < 0.5f;
-            if (lit) rdBox(vg, mm2px(1.f), y + 1.f, W - mm2px(2.f), rowH() - 2.f, play ? nvgRGBA(70, 40, 8, 255) : nvgRGBA(40, 24, 6, 255),
+            if (lit) rdBox(vg, mm2px(1.f), y + 0.5f, W - mm2px(2.f), rh - 1.f, play ? nvgRGBA(70, 40, 8, 255) : nvgRGBA(40, 24, 6, 255),
                            play ? nvgRGB(255, 255, 255) : oled::amber(), 1.f, play ? 2.f : 1.2f);
         }
-        else if (clearArm) {   // saved tracks flash red (the playing one fast); the one waiting to go is solid red
-            bool used = module && module->slots[r.pad / 8][r.pad % 8].used;
-            if (r.pad == clearPad) rdBox(vg, mm2px(1.f), y + 1.f, W - mm2px(2.f), rowH() - 2.f, rdz::red(), rdz::red(), 1.f, 2.f);
-            else if (used && std::fmod(blinkT * (play ? 6.f : 1.6f), 1.f) < 0.5f)
-                rdBox(vg, mm2px(1.f), y + 1.f, W - mm2px(2.f), rowH() - 2.f, nvgRGBA(60, 10, 6, 255), rdz::red(), 1.f, play ? 2.f : 1.2f);
+        else if (clearArm) {   // saved spots flash red (the playing one fast); the one waiting to go is solid red
+            if (r.pad == clearPad) rdBox(vg, mm2px(1.f), y + 0.5f, W - mm2px(2.f), rh - 1.f, rdz::red(), rdz::red(), 1.f, 2.f);
+            else if (r.used && std::fmod(blinkT * (play ? 6.f : 1.6f), 1.f) < 0.5f)
+                rdBox(vg, mm2px(1.f), y + 0.5f, W - mm2px(2.f), rh - 1.f, nvgRGBA(60, 10, 6, 255), rdz::red(), 1.f, play ? 2.f : 1.2f);
         }
-        else if (play) rdBox(vg, mm2px(1.f), y + 1.f, W - mm2px(2.f), rowH() - 2.f, nvgRGBA(58, 32, 8, 255), nvgRGB(255, 255, 255), 1.f, 2.f);
+        else if (play) rdBox(vg, mm2px(1.f), y + 0.5f, W - mm2px(2.f), rh - 1.f, nvgRGBA(58, 32, 8, 255), nvgRGB(255, 255, 255), 1.f, 2.f);
         if (clearArm && r.pad == clearPad) {
-            rdText(vg, mm2px(2.6f), yc, "CLICK AGAIN = DELETE", 7.f, oled::ink(), NVG_ALIGN_LEFT);
+            rdText(vg, mm2px(2.6f), yc, "CLICK AGAIN = DELETE", fs, oled::ink(), NVG_ALIGN_LEFT);
             continue;
         }
-        rdText(vg, mm2px(2.6f), yc, string::f("%02d", r.pad + 1), 7.5f, rdz::ramp(r.pad % 8), NVG_ALIGN_LEFT);
-        rdText(vg, mm2px(9.f), yc, upperTrim(r.name, 13), 7.5f, play ? nvgRGB(255, 255, 255) : oled::amber(), NVG_ALIGN_LEFT);
-        if (play) {   // a green play triangle
-            float tx = mm2px(33.4f);
-            nvgBeginPath(vg); nvgMoveTo(vg, tx, yc - 3.f); nvgLineTo(vg, tx + 5.f, yc); nvgLineTo(vg, tx, yc + 3.f); nvgClosePath(vg);
-            nvgFillColor(vg, rdz::green()); nvgFill(vg);
+        int spot = rdSpotOf(r.pad);
+        rdText(vg, mm2px(2.6f), yc, string::f("%02d", spot + 1), fs, r.used ? rdz::ramp(spot / 2) : oled::amber(90), NVG_ALIGN_LEFT);
+        if (r.used) {
+            rdText(vg, mm2px(8.4f), yc, upperTrim(r.name, 14), fs, play ? nvgRGB(255, 255, 255) : oled::amber(), NVG_ALIGN_LEFT);
+            if (play) {   // a green play triangle
+                float tx = mm2px(36.2f), th = std::min(3.f, rh * 0.28f);
+                nvgBeginPath(vg); nvgMoveTo(vg, tx, yc - th); nvgLineTo(vg, tx + th * 1.6f, yc); nvgLineTo(vg, tx, yc + th); nvgClosePath(vg);
+                nvgFillColor(vg, rdz::green()); nvgFill(vg);
+            }
+            rdText(vg, W - mm2px(2.4f), yc, r.date.empty() ? std::string("--/--/--") : r.date, fs * 0.8f, oled::amber(150), NVG_ALIGN_RIGHT);
         }
-        rdText(vg, mm2px(36.f), yc, r.key, 5.6f, oled::amber(170), NVG_ALIGN_LEFT);
-        if (r.bpm > 0) rdText(vg, W - mm2px(2.4f), yc, string::f("%d", r.bpm), 5.6f, oled::amber(130), NVG_ALIGN_RIGHT);
-    }
-    if (rows.empty()) {
-        rdText(vg, W * 0.5f, top() + mm2px(10.f), string::f("BANK %d IS EMPTY", curBank + 1), 8.f, oled::amber(160), NVG_ALIGN_CENTER);
-        rdText(vg, W * 0.5f, top() + mm2px(15.f), "PICK A GENRE AND", 8.f, oled::amber(160), NVG_ALIGN_CENTER);
-        rdText(vg, W * 0.5f, top() + mm2px(20.f), "PRESS NEW TRACK", 8.f, oled::amber(160), NVG_ALIGN_CENTER);
-    }
-    if ((int) rows.size() > vis) {   // scroll bar
-        float bh = (H - top() - mm2px(9.6f)), th = std::max(mm2px(4.f), bh * vis / rows.size());
-        float ty = top() + (bh - th) * (first / std::max(1.f, (float) (rows.size() - vis)));
-        rdBox(vg, W - mm2px(1.0f), ty, mm2px(0.6f), th, oled::amber(120), oled::amber(120), 0.f, 1.f);
+        else rdText(vg, mm2px(8.4f), yc, "- EMPTY -", fs, oled::amber(saveArm ? 170 : 70), NVG_ALIGN_LEFT);
     }
     rdText(vg, W * 0.5f, H - mm2px(7.3f), saveArm ? "CLICK A SPOT = SAVE THERE   BANK 1-8 = OTHER BANK   SAVE = CANCEL"
-                                        : clearArm ? "TRACK x2 = DELETE   LIT BANK x2 = CLEAR BANK   CLEAR = DONE"
-                                                   : "CLICK = PLAY   RIGHT-CLICK = RENAME / DELETE   WHEEL = SCROLL", 4.4f,
+                                        : clearArm ? "SPOT x2 = DELETE   LIT BANK x2 = CLEAR BANK   CLEAR = DONE"
+                                                   : "CLICK = PLAY   RIGHT-CLICK = RENAME / DELETE   SAVE = KEEP THE TRACK", 4.4f,
            saveArm ? oled::amber() : clearArm ? rdz::red() : oled::dim(), NVG_ALIGN_CENTER);
     if (flashT > 0.f) flashT -= APP->window->getLastFrameDuration(); else flash = -1;
     bool rackMode = module && module->mode == 1;
@@ -4002,18 +4006,18 @@ void RdList::onButton(const ButtonEvent& e) {
                 clearPad = -1;
                 if (b != module->bank) {   // another bank: show it, still in CLEAR mode
                     module->bank = b; scroll = 0.f; clearBank = -1;
-                    module->say(string::f("CLEAR: BANK %d  ·  CLICK A TRACK TWICE, OR THIS BANK TWICE TO CLEAR IT ALL", b + 1));
+                    module->say(string::f("CLEAR: BANK %d  ·  CLICK A SPOT TWICE, OR THIS BANK TWICE TO CLEAR IT ALL", b + 1));
                 }
                 else if (clearBank != b) {   // the lit bank, once: arm the whole-bank clear
                     clearBank = b;
-                    module->say(string::f("CLICK BANK %d AGAIN TO DELETE ALL ITS TRACKS (NO UNDO)", b + 1));
+                    module->say(string::f("CLICK BANK %d AGAIN TO DELETE ALL 16 SPOTS (NO UNDO)", b + 1));
                 }
                 else {   // twice: every track in the bank goes
                     int n = 0;
-                    for (int i = 0; i < 8; i++) {
+                    for (int i = 0; i < SynTHBloKRandroyd::SPOTS; i++) {
                         if (!module->slots[b][i].used) continue;
                         module->slots[b][i] = SynTHBloKRandroyd::Slot();
-                        if (module->curPad == b * 8 + i) module->curPad = -1;
+                        if (module->curPad == b * SynTHBloKRandroyd::SPOTS + i) module->curPad = -1;
                         n++;
                     }
                     clearBank = -1;
@@ -4027,9 +4031,9 @@ void RdList::onButton(const ButtonEvent& e) {
             scroll = 0.f;
             if (saveArm) { saveIdle = 0.f; module->say(string::f("SAVE: PICK A SPOT IN BANK %d", b + 1)); e.consume(this); return; }
             int n = 0;
-            for (int i = 0; i < 8; i++) n += module->slots[b][i].used;
-            module->say(n ? string::f("BANK %d: %d TRACK%s  ·  NEW TRACK SAVES HERE", b + 1, n, n > 1 ? "S" : "")
-                          : string::f("BANK %d IS EMPTY  ·  NEW TRACK SAVES HERE", b + 1));
+            for (int i = 0; i < SynTHBloKRandroyd::SPOTS; i++) n += module->slots[b][i].used;
+            module->say(n ? string::f("BANK %d: %d OF 16 SPOTS SAVED", b + 1, n)
+                          : string::f("BANK %d IS EMPTY  ·  SAVE, THEN PICK A SPOT, TO KEEP A TRACK", b + 1));
             e.consume(this);
             return;
         }
@@ -4050,7 +4054,7 @@ void RdList::onButton(const ButtonEvent& e) {
                 else if (!owner->anyLive()) module->say("NOTHING PLAYING TO SAVE: PRESS NEW TRACK");
                 else {
                     saveArm = true; saveIdle = 0.f; blinkT = 0.f; scroll = 0.f;
-                    if (module->curPad >= 0) module->bank = module->curPad / 8;   // start on the playing track's bank
+                    if (module->curPad >= 0) module->bank = rdBankOf(module->curPad);   // start on the playing track's bank
                     module->say("SAVE: CLICK A SPOT (THE FAST ONE IS THIS TRACK'S OWN)  ·  BANK 1-8 = OTHER BANK");
                 }
             }
@@ -4060,7 +4064,7 @@ void RdList::onButton(const ButtonEvent& e) {
                 if (clearArm) { clearArm = false; clearPad = clearBank = -1; module->say("CLEAR DONE"); }
                 else {
                     clearArm = true; saveIdle = 0.f; blinkT = 0.f; scroll = 0.f; clearPad = clearBank = -1;
-                    module->say("CLEAR: CLICK A TRACK TWICE TO DELETE IT  ·  THE LIT BANK TWICE = THE WHOLE BANK  ·  RIGHT-CLICK CLEAR = EMPTY THE RACK");
+                    module->say("CLEAR: CLICK A SPOT TWICE TO DELETE IT  ·  THE LIT BANK TWICE = THE WHOLE BANK  ·  RIGHT-CLICK CLEAR = EMPTY THE RACK");
                 }
             }
             e.consume(this);
@@ -4068,9 +4072,8 @@ void RdList::onButton(const ButtonEvent& e) {
         }
     std::vector<int> ps = pads();
     int k = (int) std::floor((e.pos.y - top()) / rowH());
-    int first = clamp((int) scroll, 0, std::max(0, (int) ps.size() - visible()));
-    if (e.pos.y >= top() && k >= 0 && k < visible() && first + k < (int) ps.size()) {
-        int pad = ps[first + k];
+    if (e.pos.y >= top() && k >= 0 && k < (int) ps.size()) {
+        int pad = ps[k];
         if (saveArm) {   // SAVE mode: any click on a spot saves there
             saveArm = false;
             owner->saveTo(pad);
@@ -4080,14 +4083,14 @@ void RdList::onButton(const ButtonEvent& e) {
         if (clearArm) {   // CLEAR mode: a track, clicked twice, is deleted
             saveIdle = 0.f;
             clearBank = -1;
-            SynTHBloKRandroyd::Slot& sl = module->slots[pad / 8][pad % 8];
-            if (!sl.used) { clearPad = -1; module->say(string::f("TRACK %02d IS ALREADY EMPTY", pad + 1)); }
-            else if (clearPad != pad) { clearPad = pad; module->say(string::f("CLICK TRACK %02d AGAIN TO DELETE IT (NO UNDO)", pad + 1)); }
+            SynTHBloKRandroyd::Slot& sl = module->slots[rdBankOf(pad)][rdSpotOf(pad)];
+            if (!sl.used) { clearPad = -1; module->say(rdSpotName(pad) + " IS ALREADY EMPTY"); }
+            else if (clearPad != pad) { clearPad = pad; module->say("CLICK " + rdSpotName(pad) + " AGAIN TO DELETE IT (NO UNDO)"); }
             else {
                 sl = SynTHBloKRandroyd::Slot();
                 if (module->curPad == pad) module->curPad = -1;
                 clearPad = -1;
-                module->say(string::f("TRACK %02d DELETED", pad + 1));
+                module->say(rdSpotName(pad) + " DELETED");
             }
             e.consume(this);
             return;
@@ -4095,9 +4098,9 @@ void RdList::onButton(const ButtonEvent& e) {
         if (e.button == GLFW_MOUSE_BUTTON_LEFT) owner->loadTrack(pad);
         else if (e.button == GLFW_MOUSE_BUTTON_RIGHT) {
             SynTHBloKRandroyd* m = module;
-            SynTHBloKRandroyd::Slot* sl = &m->slots[pad / 8][pad % 8];
+            SynTHBloKRandroyd::Slot* sl = &m->slots[rdBankOf(pad)][rdSpotOf(pad)];
             ui::Menu* menu = createMenu();
-            menu->addChild(createMenuLabel(string::f("TRACK %02d", pad + 1)));
+            menu->addChild(createMenuLabel(rdSpotName(pad)));
             struct NameField : ui::TextField {
                 SynTHBloKRandroyd::Slot* sl = NULL;
                 void onChange(const ChangeEvent& ev) override { if (sl) { sl->name = getText(); sl->named = !sl->name.empty(); } ui::TextField::onChange(ev); }
@@ -4112,7 +4115,7 @@ void RdList::onButton(const ButtonEvent& e) {
             menu->addChild(createMenuItem("Delete this track", "", [=]() {
                 *sl = SynTHBloKRandroyd::Slot();
                 if (m->curPad == pad) m->curPad = -1;
-                m->say(string::f("TRACK %02d DELETED", pad + 1));
+                m->say(rdSpotName(pad) + " DELETED");
             }));
         }
         e.consume(this);
@@ -4148,12 +4151,12 @@ void RdOled::drawLayer(const DrawArgs& args, int layer) {
         }
     }
     else {
-        rdText(vg, mm2px(2.5f), hy, cur >= 0 ? string::f("%02d", cur + 1) : std::string("--"), 14.f,
-               cur >= 0 ? rdz::ramp(cur % 8) : oled::amber(140), NVG_ALIGN_LEFT);
+        rdText(vg, mm2px(2.5f), hy, cur >= 0 ? string::f("%02d", rdSpotOf(cur) + 1) : std::string("--"), 14.f,
+               cur >= 0 ? rdz::ramp(rdSpotOf(cur) / 2) : oled::amber(140), NVG_ALIGN_LEFT);
         std::string name = "PRESS NEW TRACK", sub;
         if (!m) { name = "ACID TECHNO"; sub = "135 BPM  ·  E MIN  ·  BUILD + DROP"; }
-        else if (cur >= 0 && m->slots[cur / 8][cur % 8].used) {
-            const SynTHBloKRandroyd::Slot& sl = m->slots[cur / 8][cur % 8];
+        else if (cur >= 0 && m->slots[rdBankOf(cur)][rdSpotOf(cur)].used) {
+            const SynTHBloKRandroyd::Slot& sl = m->slots[rdBankOf(cur)][rdSpotOf(cur)];
             name = sl.name;
             sub = string::f("%d BPM  ·  %s", sl.bpm, rdKeyName(m->hKey, m->hScale).c_str());
             if (m->arrKind >= 0) sub += std::string("  ·  ") + SynTHBloKRandroydWidget::arrName(m->arrKind);
@@ -4248,19 +4251,19 @@ void RdOled::drawLayer(const DrawArgs& args, int layer) {
             float y = mm2px(OLED_TOP + b * 7.2f) + mm2px(2.6f);
             int n = 0;
             std::string names;
-            for (int c = 0; c < 8; c++) if (m && m->slots[b][c].used) {
+            for (int c = 0; c < RD_SPOTS; c++) if (m && m->slots[b][c].used) {
                 n++;
                 if (names.size() < 60) names += (names.empty() ? "" : " / ") + upperTrim(m->slots[b][c].name, 10);
             }
-            int curRow = cur >= 0 ? cur / 8 : -1;
+            int curRow = cur >= 0 ? rdBankOf(cur) : -1;
             if (b == curRow) rdBox(vg, 3.f, y - mm2px(3.2f), W - 6.f, mm2px(6.4f), nvgRGBA(255, 255, 255, 16), nvgRGBA(0, 0, 0, 0), 0.f, 2.f);
-            rdText(vg, mm2px(3.f), y, string::f("%d-%d", b * 8 + 1, b * 8 + 8), 7.f, b == curRow ? nvgRGB(255, 255, 255) : oled::amber(), NVG_ALIGN_LEFT);
-            for (int c = 0; c < 8; c++) {
+            rdText(vg, mm2px(3.f), y, string::f("BANK %d", b + 1), 7.f, b == curRow ? nvgRGB(255, 255, 255) : oled::amber(), NVG_ALIGN_LEFT);
+            for (int c = 0; c < RD_SPOTS; c++) {
                 bool used = m && m->slots[b][c].used;
-                rdBox(vg, mm2px(13.f + c * 3.4f), y - mm2px(1.4f), mm2px(2.8f), mm2px(2.8f), used ? rdz::ramp(c) : nvgRGBA(26, 18, 8, 255), rdz::ramp(c, used ? 255 : 70), 0.5f, 0.8f);
+                rdBox(vg, mm2px(15.f + c * 1.7f), y - mm2px(1.4f), mm2px(1.4f), mm2px(2.8f), used ? rdz::ramp(c / 2) : nvgRGBA(26, 18, 8, 255), rdz::ramp(c / 2, used ? 255 : 70), 0.3f, 0.6f);
             }
             rdText(vg, mm2px(43.f), y, n ? names : "EMPTY", 6.5f, oled::amber(n ? 230 : 90), NVG_ALIGN_LEFT);
-            rdText(vg, W - mm2px(4.f), y, string::f("%d / 8", n), 6.5f, oled::amber(n ? 220 : 90), NVG_ALIGN_RIGHT);
+            rdText(vg, W - mm2px(4.f), y, string::f("%d / 16", n), 6.5f, oled::amber(n ? 220 : 90), NVG_ALIGN_RIGHT);
         }
     }
     else {   // ---- PATCH: modules and cables RANDROYD sees ----
