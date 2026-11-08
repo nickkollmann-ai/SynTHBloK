@@ -7,6 +7,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b10">
 <title>SynTHBloK Workbench</title>
 <script>
 // A phone goes to the phone workbench (tools/mobile.html). Its DESKTOP link comes back with ?desktop=1,
@@ -22,7 +23,47 @@
 <style>
 :root{--bg:#0d0d14;--card:#0d161d;--line:#0e2f39;--cy:#00e5ff;--mg:#ff00aa;--or:#ff7a00;--tx:#e8f4f8;--mut:#5a7a8a;--ok:#3dff9a;--bad:#ff3b5c}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--tx);font:12px/1.5 ui-monospace,Consolas,monospace;height:100vh;display:grid;grid-template-rows:auto 1fr auto}
+html{overflow:hidden}
+/* SCROLLBARS everywhere: thin, dark track, a glowing cyan thumb (magenta over the PATCHES pop-up, green in
+   THINKING), like the OLED panels. Firefox: scrollbar-color; Edge / Chrome: the ::-webkit-scrollbar parts. */
+*{scrollbar-width:thin;scrollbar-color:rgba(0,229,255,.5) rgba(0,229,255,.06)}
+#patch *{scrollbar-color:rgba(255,0,170,.55) rgba(255,0,170,.06)}
+#think *{scrollbar-color:rgba(61,255,154,.5) rgba(61,255,154,.05)}
+::-webkit-scrollbar{width:7px;height:7px}
+::-webkit-scrollbar-track{background:rgba(0,229,255,.05);border-radius:4px}
+::-webkit-scrollbar-thumb{background:rgba(0,229,255,.45);border-radius:4px;box-shadow:0 0 6px rgba(0,229,255,.55)}
+::-webkit-scrollbar-thumb:hover{background:rgba(0,229,255,.75)}
+::-webkit-scrollbar-corner{background:transparent}
+#patch ::-webkit-scrollbar-track{background:rgba(255,0,170,.05)}
+#patch ::-webkit-scrollbar-thumb{background:rgba(255,0,170,.5);box-shadow:0 0 6px rgba(255,0,170,.55)}
+#think ::-webkit-scrollbar-track{background:rgba(61,255,154,.04)}
+#think ::-webkit-scrollbar-thumb{background:rgba(61,255,154,.45);box-shadow:0 0 6px rgba(61,255,154,.5)}
+body{margin:0;background:var(--bg);color:var(--tx);font:12px/1.5 ui-monospace,Consolas,monospace;height:100vh;width:100vw;overflow:hidden;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;grid-template-columns:minmax(0,1fr)}
+/* THE TABS: one row under the top bar. WORKBENCH (this page, with its VIEW chips), PATCH MAP, PATCHES, THINKING */
+#wbtabs{display:flex;align-items:flex-end;gap:2px;padding:6px 14px 0;background:#05080c;border-bottom:1px solid var(--line);min-width:0}
+#wbtabs .tab{background:#070b10;border:1px solid var(--line);border-bottom:0;color:var(--mut);font:inherit;font-size:11px;letter-spacing:.14em;padding:5px 14px 6px;cursor:pointer;border-radius:6px 6px 0 0;position:relative;top:1px;max-width:32vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#wbtabs .tab b{color:var(--tx);font-weight:500;margin-left:6px}
+#wbtabs .tab:hover{color:var(--tx)}
+#wbtabs .tab.on{background:var(--bg);color:var(--cy);border-color:#0f5566;box-shadow:inset 0 2px 0 var(--cy)}
+#wbtabs #think-btn.on{color:var(--ok);box-shadow:inset 0 2px 0 var(--ok)}
+#wbtabs #patch-btn.on,#wbtabs #lib-btn.on{color:var(--mg);box-shadow:inset 0 2px 0 var(--mg)}
+#wbtabs .sp{flex:1}
+#wbtabs .views{display:flex;gap:3px;align-items:center;padding-bottom:5px}
+#wbtabs .views i{font-style:normal;font-size:9px;letter-spacing:.18em;color:var(--mut);margin-right:4px}
+#wbtabs .views button{background:#03111a;border:1px solid #0f3b46;color:var(--mut);font:inherit;font-size:9px;letter-spacing:.14em;padding:2px 8px;cursor:pointer;border-radius:2px}
+#wbtabs .views button.on{background:var(--cy);color:#011;border-color:var(--cy)}
+/* WORKBENCH views */
+main.v-design{grid-template-columns:minmax(0,.9fr) minmax(0,1.3fr);grid-template-areas:"design draw" "design draw"}
+main.v-code{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);grid-template-areas:"asm comp" "asm comp"}
+main.v-feeds{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"comp draw" "comp draw"}
+main.v-design #p-asm,main.v-design #p-comp,main.v-code #p-design,main.v-code #p-draw,main.v-feeds #p-design,main.v-feeds #p-asm{display:none!important}
+main.v-code #p-comp,main.v-feeds #p-comp{border-top:0!important}
+/* the pop-ups sit under the tab row, so the tabs stay in reach */
+body:not(.popup) #patch{top:calc(var(--tabs-h,80px) + 6px)!important}
+#think{top:var(--tabs-h,80px)!important}
+#patch-bg{top:var(--tabs-h,80px)!important}
+/* everything stays inside the window: long lines wrap or clip, they never widen the page */
+body>*{min-width:0;max-width:100vw}
 header{display:flex;align-items:center;gap:14px;padding:8px 14px;border-bottom:1px solid var(--line);background:#070b10}
 header b{color:var(--mg);letter-spacing:.16em;font-weight:600}
 header span{color:var(--mut)}
@@ -394,8 +435,8 @@ footer .nav:hover{border-color:var(--cy)}
 #think>.head b{color:var(--ok);letter-spacing:.16em;font-weight:600}
 #think>.head span{color:var(--mut)}
 #think-x{background:none;border:1px solid var(--line);color:var(--tx);font:inherit;font-size:16px;line-height:1;padding:2px 9px;cursor:pointer}
-#think-body{display:grid;grid-template-columns:minmax(260px,.9fr) minmax(0,1.4fr) minmax(280px,1fr);grid-template-rows:minmax(420px,66vh) minmax(0,1fr);gap:0;min-height:0}
-@media(max-width:1000px){#think-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(220px,45vh) auto auto minmax(0,1fr);overflow:auto}#t-mind,#t-plan,#t-log{grid-column:1!important;grid-row:auto!important}}
+#think-body{display:grid;grid-template-columns:minmax(240px,.8fr) minmax(0,1.3fr) minmax(300px,1.1fr);grid-template-rows:minmax(420px,1fr) minmax(170px,30vh);gap:0;min-height:0}
+@media(max-width:1000px){#think-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(220px,45vh) auto auto minmax(0,1fr);overflow:auto}#t-mind,#t-brief,#t-sys,#t-term{grid-column:1!important;grid-row:auto!important}#t-term{min-height:320px}}
 /* MIND: a living painting of the work (WebGL field + planets for the plan + bursts for decisions) */
 #t-mind{grid-column:1/-1;grid-row:1;position:relative;overflow:hidden;border-bottom:1px solid var(--line);background:#02030a}
 #t-mind canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
@@ -404,7 +445,11 @@ footer .nav:hover{border-color:var(--cy)}
 #t-mind .label b{color:#fff;font-weight:600}
 #think-body .card{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:12px 14px;min-height:0;overflow:auto}
 #think-body h4{margin:0 0 8px;font-size:10px;letter-spacing:.18em;color:var(--mut);font-weight:500}
-#t-goal{font-size:14px;color:var(--tx)}
+#t-goal{font-size:12px;color:var(--tx)}
+#t-brief h4{margin:6px 0 2px!important;font-size:8.5px!important}
+#t-brief .step .txt{padding-bottom:4px}#t-brief .step .txt span{font-size:10px}#t-brief .step .dot{width:10px;height:10px;margin-top:2px}
+#t-brief .step{grid-template-columns:18px minmax(0,1fr);gap:6px}#t-brief .step .rail{min-height:6px}
+#t-entries .e{padding:2px 0!important;grid-template-columns:44px 46px minmax(0,1fr)!important;gap:6px!important;font-size:10.5px}
 #t-now{position:absolute;left:14px;bottom:14px;max-width:min(560px,60%);padding:12px 14px;background:#070b10cc;border:1px solid #ffffff22;backdrop-filter:blur(6px);border-radius:3px;box-shadow:0 10px 40px #000a}
 #t-now .title{font-size:16px;color:var(--ok);margin:4px 0 8px}
 #t-now .title::before{content:'';display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--ok);margin-right:8px;box-shadow:0 0 10px var(--ok);animation:tpulse 1.4s ease-in-out infinite}
@@ -412,7 +457,36 @@ footer .nav:hover{border-color:var(--cy)}
 #t-now .why{margin-top:10px;color:var(--or);white-space:pre-wrap}
 #t-now .why::before{content:'WHY  ';color:var(--mut);letter-spacing:.14em}
 #t-q div{border-left:2px solid var(--mg);padding:3px 8px;margin:6px 0;color:#f6d0e8}
-#t-plan{grid-column:2;grid-row:2}
+/* the row under the READOUT: BRIEF (goal / plan / decisions), SYSTEM, MSYS2, each an OLED */
+#t-brief{grid-column:1;grid-row:2}#t-sys{grid-column:2;grid-row:2}#t-term{grid-column:3;grid-row:2;display:flex;flex-direction:column;padding:0!important}
+#think-body .card.oled{padding:8px 10px;font-size:11px;line-height:1.35;background:radial-gradient(120% 90% at 50% 0%,#04161c 0%,#010407 70%);box-shadow:inset 0 0 0 1px #0f3b46,inset 0 0 24px #00e5ff10;position:relative}
+#think-body .card.oled::after{content:'';position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,#00000022 0 1px,transparent 1px 3px)}
+.ob-tabs{display:flex;gap:4px;margin:0 0 6px}
+.ob-tabs button{background:#03111a;border:1px solid #0f3b46;color:var(--mut);font:inherit;font-size:9px;letter-spacing:.16em;padding:1px 7px;cursor:pointer;border-radius:2px;position:relative}
+.ob-tabs button.on{color:#011;background:var(--cy);border-color:var(--cy);box-shadow:0 0 10px #00e5ff66}
+#t-qled{display:none;position:absolute;top:-3px;right:-3px;width:7px;height:7px;border-radius:50%;background:var(--mg);box-shadow:0 0 8px var(--mg);animation:tpulse 1.2s infinite}
+#t-qled.on{display:block}
+.ob-pane{display:none}.ob-pane.on{display:block}
+.ob-head{display:flex;gap:8px;align-items:center;margin:0 0 5px;font-size:9px;letter-spacing:.16em;color:var(--mut)}
+.ob-head b{color:var(--cy);font-weight:600}.ob-head span{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#t-term .ob-head{padding:7px 10px 0}
+#term-clear{background:none;border:1px solid #0f3b46;color:var(--mut);font:inherit;font-size:9px;letter-spacing:.14em;padding:1px 6px;cursor:pointer}
+#term-out{flex:1;min-height:0;overflow:auto;margin:0;padding:4px 10px;font:11px/1.3 Consolas,'Cascadia Mono',monospace;color:#9fe3bb;white-space:pre-wrap;word-break:break-all}
+#term-out .cmd{color:var(--cy)}#term-out .err{color:var(--bad)}#term-out .dim{color:var(--mut)}
+#term-in{display:flex;gap:6px;align-items:center;padding:4px 10px 6px;border-top:1px solid #0f3b46;font:11px Consolas,'Cascadia Mono',monospace}
+#term-ps{color:var(--ok);white-space:nowrap}
+#term-cmd{flex:1;background:transparent;border:0;outline:0;color:var(--tx);font:inherit;caret-color:var(--cy)}
+#sys-body{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 12px;font-size:10.5px}
+#sys-body h5{margin:2px 0 1px;font-size:8.5px;letter-spacing:.18em;color:var(--mut);font-weight:500}
+#sys-body .r{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;line-height:1.3}
+#sys-body .r span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#cfe2ea}
+#sys-body .r b{font-weight:500;color:var(--cy)}#sys-body .r b.w{color:var(--or)}#sys-body .r b.h{color:var(--bad)}
+#sys-body .bar{height:3px;background:#0a1a20;margin:0 0 3px;position:relative}
+#sys-body .bar i{position:absolute;inset:0 auto 0 0;background:var(--cy)}#sys-body .bar i.w{background:var(--or)}#sys-body .bar i.h{background:var(--bad)}
+#sys-body .full{grid-column:1/-1}
+#sys-body .hint{color:var(--mut);font-size:9.5px}
+#sys-body .tags{display:flex;flex-wrap:wrap;gap:3px}#sys-body .tags i{font-style:normal;font-size:9px;border:1px solid #0f3b46;padding:0 4px;color:#9fc7d2}
+#sys-body .tags i.on{border-color:var(--ok);color:var(--ok)}
 .flow{display:flex;flex-direction:column;gap:0}
 .step{display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;align-items:start}
 .step .dot{width:14px;height:14px;border-radius:50%;border:2px solid var(--line);margin:3px auto 0;position:relative;background:var(--bg)}
@@ -429,13 +503,11 @@ footer .nav:hover{border-color:var(--cy)}
 .step.next .dot{border-color:var(--or)}
 .step.later .txt b{color:var(--mut)}
 .step.blocked .dot{border-color:var(--bad);background:var(--bad)}
-#t-log{grid-column:3;grid-row:2}
-#t-goalc{grid-column:1;grid-row:2}
-#t-log .e{display:grid;grid-template-columns:52px 54px minmax(0,1fr);gap:8px;padding:4px 0;border-bottom:1px solid #0e2f3966}
-#t-log .e time{color:var(--mut)}
-#t-log .e i{font-style:normal;font-size:10px;letter-spacing:.1em;text-align:center;border:1px solid currentColor;border-radius:2px;height:fit-content;padding:0 3px}
-#t-log .e.think i{color:var(--cy)}#t-log .e.do i{color:var(--or)}#t-log .e.check i{color:var(--ok)}#t-log .e.fix i{color:var(--bad)}#t-log .e.ask i{color:var(--mg)}
-#t-log .e.new{animation:tnew 1.6s ease}
+#t-entries .e{display:grid;grid-template-columns:52px 54px minmax(0,1fr);gap:8px;padding:4px 0;border-bottom:1px solid #0e2f3966}
+#t-entries .e time{color:var(--mut)}
+#t-entries .e i{font-style:normal;font-size:10px;letter-spacing:.1em;text-align:center;border:1px solid currentColor;border-radius:2px;height:fit-content;padding:0 3px}
+#t-entries .e.think i{color:var(--cy)}#t-entries .e.do i{color:var(--or)}#t-entries .e.check i{color:var(--ok)}#t-entries .e.fix i{color:var(--bad)}#t-entries .e.ask i{color:var(--mg)}
+#t-entries .e.new{animation:tnew 1.6s ease}
 @keyframes tnew{0%{background:#00e5ff22}100%{background:transparent}}
 /* PC pill: the live machine in the top bar (tools/pc_stats.json); click opens CLAUDE · THINKING */
 #pc-pill{display:none;align-items:center;gap:8px;background:transparent;border:1px solid var(--line);color:var(--mut);font:inherit;font-size:11px;letter-spacing:.08em;padding:2px 10px;cursor:pointer;white-space:nowrap;transition:border-color .3s,box-shadow .3s}
@@ -493,12 +565,17 @@ header button:hover,.modes button:hover,footer .nav:hover{box-shadow:0 0 10px #0
 <body>
 <header><b>SYNTHBLOK.WORKBENCH</b><span>panel art + compiler, live</span>
   <div class="modes"><button type="button" class="on" data-s="mod">MODULES <span id="nmod"></span></button><button type="button" data-s="file">FILES</button></div>
-  <button type="button" id="patch-btn" title="Rack's live patch">PATCH MAP<b id="patch-n"></b></button>
-  <button type="button" id="lib-btn" title="Saved patches: patches/ and Rack's patches folder">PATCHES<b id="lib-n"></b></button>
   <div id="git"><span id="g-commit">COMMIT<b>-</b></span><i>→</i><span id="g-push">PUSH<b>-</b></span></div>
   <button type="button" id="pc-pill" title="This PC, live (tools/pc_stats.json): click for CLAUDE · THINKING"><span class="spark" id="pc-spark"></span><span id="pc-txt"></span></button>
-  <button type="button" id="think-btn" class="idle" title="What Claude is doing and why (tools/claude_thinking.json)"><i></i>THINKING<b id="think-now">-</b></button>
   <span id="live">● watching</span></header>
+<nav id="wbtabs" aria-label="Workbench pages">
+  <button type="button" class="tab on" id="tab-wb" title="The workbench: design, live assembly, compiler, drawing">WORKBENCH</button>
+  <button type="button" id="patch-btn" class="tab" title="Rack's live patch">PATCH MAP<b id="patch-n"></b></button>
+  <button type="button" id="lib-btn" class="tab" title="Saved patches: patches/ and Rack's patches folder">PATCHES<b id="lib-n"></b></button>
+  <button type="button" id="think-btn" class="tab idle" title="What Claude is doing and why (tools/claude_thinking.json)"><i></i>THINKING<b id="think-now">-</b></button>
+  <span class="sp"></span>
+  <div class="views" id="wb-views" title="What the WORKBENCH page shows"><i>VIEW</i><button type="button" data-v="all" class="on">ALL</button><button type="button" data-v="design">DESIGN</button><button type="button" data-v="code">CODE</button><button type="button" data-v="feeds">FEEDS + CHAT</button></div>
+</nav>
 <main>
   <section class="pane" id="p-design">
     <div class="head"><span>DESIGN <b id="name">-</b></span><span id="pin">FOLLOWING LATEST</span></div>
@@ -535,9 +612,13 @@ header button:hover,.modes button:hover,footer .nav:hover{box-shadow:0 0 10px #0
   <div id="think-body">
     <div id="t-mind"><canvas id="mind-2d"></canvas>
       <div id="t-now"><h4>RIGHT NOW</h4><div class="title" id="t-title">-</div><div class="detail" id="t-detail"></div><div class="why" id="t-why"></div></div></div>
-    <div class="card" id="t-goalc"><h4>GOAL</h4><div id="t-goal">-</div><h4 style="margin-top:14px">OPEN QUESTIONS FOR YOU</h4><div id="t-q"><div style="border:0;color:var(--mut)">none</div></div></div>
-    <div class="card" id="t-plan"><h4>PLAN</h4><div class="flow" id="t-flow"></div></div>
-    <div class="card" id="t-log"><h4>DECISIONS · NEWEST FIRST</h4><div id="t-entries"></div></div>
+    <div class="card oled" id="t-brief"><div class="ob-tabs"><button type="button" data-tab="goal" class="on">GOAL<i id="t-qled" title="open questions for you"></i></button><button type="button" data-tab="plan">PLAN</button><button type="button" data-tab="log">DECISIONS</button></div>
+      <div class="ob-pane on" data-pane="goal"><div id="t-goal">-</div><h4 style="margin-top:14px">OPEN QUESTIONS FOR YOU</h4><div id="t-q"><div style="border:0;color:var(--mut)">none</div></div></div>
+      <div class="ob-pane" data-pane="plan"><div class="flow" id="t-flow"></div></div>
+      <div class="ob-pane" data-pane="log"><div id="t-entries"></div></div></div>
+    <div class="card oled" id="t-sys"><div class="ob-head"><b>SYSTEM</b><span id="sys-at">waiting for tools/pc_stats.json</span></div><div id="sys-body"></div></div>
+    <div class="card oled" id="t-term"><div class="ob-head"><b>MSYS2</b><span id="term-st">MINGW64</span><button type="button" id="term-clear" title="Clear the screen">CLEAR</button></div>
+      <pre id="term-out"></pre><div id="term-in"><span id="term-ps"></span><input id="term-cmd" autocomplete="off" spellcheck="false" placeholder="a command: make, git status, ls ..." /></div></div>
   </div></div>
 <div id="csig" role="status" aria-live="polite" title="Click for CLAUDE · THINKING"><i></i><b id="csig-k">CLAUDE</b><span id="csig-t"></span><u id="csig-x" title="Hide until it changes">&times;</u></div>
 <div id="zoom"><img alt=""><span id="zoom-cap">click the image for actual size · click outside or press Esc to close</span></div>
@@ -1413,8 +1494,29 @@ function closePatches() {
   if (patchFrom && patchFrom.focus) patchFrom.focus();
 }
 const popupMode = new URLSearchParams(location.search).get('patches');
-document.getElementById('patch-btn').onclick = () => openPatches('live');
-document.getElementById('lib-btn').onclick = () => openPatches('lib');
+// ---- THE TABS: which page is up (the patches pop-up, THINKING, or the workbench itself) ----
+function syncTabs() {
+  const pOn = document.getElementById('patch').classList.contains('on'), tOn = document.getElementById('think').classList.contains('on');
+  const live = pOn && typeof pShown !== 'undefined' && pShown && pShown.live;
+  document.getElementById('tab-wb').classList.toggle('on', !pOn && !tOn);
+  document.getElementById('patch-btn').classList.toggle('on', pOn && !tOn && !!live);
+  document.getElementById('lib-btn').classList.toggle('on', pOn && !tOn && !live);
+  document.getElementById('think-btn').classList.toggle('on', tOn);
+  document.getElementById('wb-views').style.visibility = !pOn && !tOn ? 'visible' : 'hidden';
+  const h = document.getElementById('wbtabs').getBoundingClientRect().bottom;
+  document.documentElement.style.setProperty('--tabs-h', h + 'px');
+}
+setInterval(syncTabs, 300); window.addEventListener('resize', syncTabs);
+document.getElementById('tab-wb').onclick = () => { closePatches(); try { thinkOpen(false); } catch (e) {} syncTabs(); };
+document.querySelectorAll('#wb-views button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#wb-views button').forEach(x => x.classList.toggle('on', x === b));
+  const m = document.querySelector('main'); m.classList.remove('v-design', 'v-code', 'v-feeds');
+  if (b.dataset.v !== 'all') m.classList.add('v-' + b.dataset.v);
+  try { localStorage.setItem('wb-view', b.dataset.v); } catch (e) {}
+});
+try { const v = localStorage.getItem('wb-view'); if (v) { const b = document.querySelector(`#wb-views button[data-v="${v}"]`); if (b) b.click(); } } catch (e) {}
+document.getElementById('patch-btn').onclick = () => { try { thinkOpen(false); } catch (e) {} openPatches('live'); syncTabs(); };
+document.getElementById('lib-btn').onclick = () => { try { thinkOpen(false); } catch (e) {} openPatches('lib'); syncTabs(); };
 document.getElementById('patch-bg').onmousedown = closePatches;
 if (popupMode !== null) {
   document.body.classList.add('popup');
@@ -1454,6 +1556,11 @@ const Mind = (() => {
   ].map(([id, d], i) => ({id, d, lv: 0, n: 0, last: 0, hist: new Float32Array(48), pid: (0x1A3F + i * 0x2D7).toString(16).toUpperCase()}));
   const proc = id => P.find(p => p.id === id);
   const hit = (id, a = 1) => { const p = proc(id); p.lv = Math.min(1, p.lv + a); p.n++; p.last = Date.now(); };
+  // LIVE INFO per process: what it is doing right now, from the real sources (jobs/, plugin.dll, pc_stats,
+  // the thinking file, the feeds). line = under the name, st = the state word, right = under the state
+  const setInfo = (id, o) => { const p = proc(id); if (p) p.info = Object.assign(p.info || {}, o, { at: Date.now() }); };
+  const ago = ms => { const s = Math.max(0, (Date.now() - ms) / 1000); return s < 60 ? `${s.toFixed(0)}s ago` : s < 3600 ? `${(s / 60).toFixed(0)}m ago` : `${(s / 3600).toFixed(1)}h ago`; };
+  const fit = (txt, w) => { if (ctx.measureText(txt).width <= w) return txt; while (txt.length > 3 && ctx.measureText(txt + '…').width > w) txt = txt.slice(0, -1); return txt + '…'; };
 
   const stream = [], spikes = [], hist = new Float32Array(300);
   let act = .3, energy = .3, heat = 0, logHot = false, thinkHot = false, compiling = false;
@@ -1468,7 +1575,13 @@ const Mind = (() => {
   // ---- the alien script ----
   const H = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
   const SEG = [[0,0,1,0],[1,0,2,0],[0,0,0,1],[2,0,2,1],[0,1,1,1],[1,1,2,1],[0,1,0,2],[2,1,2,2],[0,2,1,2],[1,2,2,2],[0,0,1,1],[2,0,1,1],[1,1,0,2],[1,1,2,2],[1,0,1,1],[1,1,1,2]];
+  // the alien lettering is retired: glyph() now draws a small status LED (the theme stays, the script goes)
   function glyph(x, y, s, code, col, a = 1) {
+    const r = Math.max(2, s * .28), cx = x + s * .5, cy = y + s * .5;
+    ctx.globalAlpha = a; ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = a > .8 ? 8 : 0;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.2832); ctx.fill(); ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+  }
+  function glyphOld(x, y, s, code, col, a = 1) {
     ctx.strokeStyle = col; ctx.globalAlpha = a; ctx.lineWidth = Math.max(1, s * .13); ctx.beginPath();
     let n = 0;
     for (let i = 0; i < 16; i++) if (code >> i & 1 && n < 5) { const g = SEG[i]; ctx.moveTo(x + g[0] * s / 2, y + g[1] * s / 2); ctx.lineTo(x + g[2] * s / 2, y + g[3] * s / 2); n++; }
@@ -1476,7 +1589,8 @@ const Mind = (() => {
     if (code >> 17 & 1) { ctx.fillStyle = col; ctx.fillRect(x + s * .45, y - s * .25, s * .12, s * .12); }
     ctx.globalAlpha = 1;
   }
-  function alien(x, y, s, str, col, a = 1, max = 99) {
+  function alien(x, y, s, str, col, a = 1, max = 99) { return x; }   // retired with the lettering
+  function alienOld(x, y, s, str, col, a = 1, max = 99) {
     let cx = x;
     for (const ch of String(str).toUpperCase().slice(0, max)) {
       if (ch === ' ') { cx += s * .7; continue; }
@@ -1646,12 +1760,20 @@ const Mind = (() => {
       const y = top + 24 + i * rh, live = p.lv > .04;
       const col = p.id === 'FORGE' || p.id === 'LINKER' ? C.am : p.id === 'RELAY' ? C.mg : p.id === 'DEPLOY' || p.id === 'ARCHIVE' ? C.gr : C.cy;
       glyph(22, y + 2, 10, H(p.id) | 0x101, live ? col : C.dim, live ? 1 : .6);
-      font(10, 700); ctx.fillStyle = live ? col : '#3d6c78'; ctx.fillText(p.id, 40, y + 10);
-      font(8); ctx.fillStyle = '#4b7f8c'; ctx.fillText(`PID ${p.pid}  ${p.d}`, 40, y + 21);
-      const st = p.lv > .6 ? 'HOT' : p.lv > .2 ? 'RUN' : live ? 'IDLE' : 'SLEEP';
-      ctx.textAlign = 'right'; font(9, 700); ctx.fillStyle = st === 'HOT' ? C.rd : st === 'RUN' ? col : '#3d6c78';
-      ctx.fillText(st, 14 + lw - 10, y + 10);
-      font(8); ctx.fillStyle = '#4b7f8c'; ctx.fillText(`${String(p.n).padStart(4, '0')} OPS`, 14 + lw - 10, y + 21); ctx.textAlign = 'left';
+      const inf = p.info || {};
+      const fresh = inf.at && Date.now() - inf.at < 10 * 60 * 1000;
+      font(10, 700); ctx.fillStyle = live || (fresh && inf.hot) ? col : '#3d6c78'; ctx.fillText(p.id, 40, y + 10);
+      // the live line: what this process is doing now (falls back to what it is)
+      font(8); ctx.fillStyle = fresh && inf.line ? (inf.hot ? col : '#7fb7c4') : '#4b7f8c';
+      ctx.fillText(fit(fresh && inf.line ? inf.line : `PID ${p.pid}  ${p.d}`, lw - 120), 40, y + 21);
+      const stLive = p.lv > .6 ? 'HOT' : p.lv > .2 ? 'RUN' : null;
+      const st = stLive || (inf.st || (live ? 'IDLE' : 'SLEEP'));
+      const stCol = st === 'HOT' || st === 'FAIL' || st === 'OFF' ? C.rd : st === 'RUN' || st === 'BUSY' || st === 'QUEUED' ? col : st === 'OK' || st === 'ON' || st === 'LIVE' ? C.gr : '#3d6c78';
+      ctx.textAlign = 'right'; font(9, 700); ctx.fillStyle = stCol;
+      if (st === 'RUN' || st === 'BUSY') ctx.globalAlpha = .65 + .35 * Math.sin(t * 6);
+      ctx.fillText(st, 14 + lw - 10, y + 10); ctx.globalAlpha = 1;
+      font(8); ctx.fillStyle = '#4b7f8c';
+      ctx.fillText(inf.right || (p.last ? `${String(p.n).padStart(4, '0')} OPS · ${ago(p.last)}` : `${String(p.n).padStart(4, '0')} OPS`), 14 + lw - 10, y + 21); ctx.textAlign = 'left';
       // level cells and a sparkline of the last ~50 s
       const bx = 40, bw = lw - 120, by = y + 25;
       if (rh > 34) bar(bx, by, bw * .45, 4, p.lv, col, 12);
@@ -1848,7 +1970,13 @@ const Mind = (() => {
       warn('z', z && z.c, 92, z ? z.name : 'CPU'); warn('g', j.gpu && j.gpu.temp, 83, 'GPU');
       if ((j.cpu || {}).load > 85) hit('FORGE', .2);
     },
-    setNow(j) { nowT = (j.now && j.now.title) || j.task || ''; if (j.mode) mode = j.mode; },
+    setNow(j) {
+      nowT = (j.now && j.now.title) || j.task || ''; if (j.mode) mode = j.mode;
+      const q = (j.questions || []).length;
+      setInfo('CORTEX', { line: (mode || 'idle').toUpperCase() + (nowT ? ' · ' + nowT : ''), hot: mode !== 'idle', st: q ? 'ASK' : mode !== 'idle' ? 'BUSY' : null,
+                          right: (plan.length ? `${plan.filter(x => x.state === 'done').length}/${plan.length} STEPS` : '') + (j.updated ? ` · ${ago(j.updated)}` : '') });
+    },
+    setInfo,
     pulse(a) { act = Math.min(1, Math.max(act, a)); },
     rest() { act = 0; mode = 'idle'; },
     compile(on, src = 'log') {
@@ -1864,7 +1992,7 @@ const Mind = (() => {
     note(src, msg) {
       const m = strip(msg);
       if (src === 'git') { hit('ARCHIVE'); push('git', m); return; }
-      if (src === 'chat') { hit('RELAY'); push('chat', m); return; }
+      if (src === 'chat') { hit('RELAY'); setInfo('RELAY', { line: m, hot: true }); push('chat', m); return; }
       if (src === 'rack') { hit('RACK-LINK'); push('rack', m); return; }
       if (/^compiler:/i.test(m)) {
         const ok = /OK/.test(m);
@@ -1872,9 +2000,9 @@ const Mind = (() => {
         push(ok ? 'check' : /FAIL/.test(m) ? 'fix' : 'build', m);
         return;
       }
-      if (/\.(svg|png|jpe?g)\b|res\/|web-images|screenshot/i.test(m)) { hit('OPTIC'); push('file', m); return; }
+      if (/\.(svg|png|jpe?g)\b|res\/|web-images|screenshot/i.test(m)) { hit('OPTIC'); setInfo('OPTIC', { line: m, hot: true }); push('file', m); return; }
       if (/\.vcv\b|patch/i.test(m)) { hit('RACK-LINK'); push('rack', m); return; }
-      hit('SYNTHESIS'); push('file', m);
+      hit('SYNTHESIS'); setInfo('SYNTHESIS', { line: m, hot: true }); push('file', m);
     },
     build(lines) {
       // each g++ line that compiles one source file is one unit of work; the link line hits the LINKER
@@ -1918,6 +2046,7 @@ async function scanThink() {
   thinkEl('t-why').style.display = now.why ? '' : 'none';
   const q = j.questions || [];
   thinkEl('t-q').innerHTML = q.length ? q.map(x => `<div>${esc(x)}</div>`).join('') : '<div style="border:0;color:var(--mut)">none</div>';
+  thinkEl('t-qled').classList.toggle('on', q.length > 0);
   thinkEl('t-flow').innerHTML = (j.plan || []).map((p, i, a) =>
     `<div class="step ${esc(p.state || 'later')}"><div class="col"><div class="dot"></div>${i < a.length - 1 ? '<div class="rail"></div>' : ''}</div>` +
     `<div class="txt"><b>${esc(p.title || '')}</b>${p.note ? `<span>${esc(p.note)}</span>` : ''}</div></div>`).join('');
@@ -1945,6 +2074,7 @@ async function scanHW() {
   if (j.t === hwSeen) { if (!live) thinkEl('pc-txt').innerHTML = '<span class="warm">PC telemetry paused</span>'; return; }
   hwSeen = j.t;
   try { Mind.setHW(j); } catch (e) {}
+  try { drawSys(j); } catch (e) {}
   { const z = (j.zones || []).slice().sort((a, b) => b.c - a.c)[0], g = j.gpu;
     const parts = []; if (z && z.c >= 95) parts.push(`${z.name} ${z.c.toFixed(0)}°C`); if (g && g.temp >= 85) parts.push(`GPU ${g.temp}°C`);
     csig.hot = live && parts.length ? parts.join(' · ') : null; drawSignal(); }
@@ -1961,10 +2091,154 @@ async function scanHW() {
     (g ? `\n${g.name} · ${g.load}% · ${g.temp}°C · ${g.memUsed}/${g.memTotal} MiB · ${g.power} W · fan ${g.fan}%` : '') +
     `\nRAM ${(j.ram.usedMB / 1024).toFixed(1)} / ${(j.ram.totalMB / 1024).toFixed(1)} GB · C: ${j.disk.cFreeGB} GB free` +
     (j.rack ? `\nRack ${j.rack.cpu ?? '…'}% CPU · ${j.rack.ramMB} MB` : '\nRack not running') + '\nclick: CLAUDE · THINKING';
+  // RACK-LINK: Rack itself, live (its patch, CPU, memory)
+  try {
+    if (j.rack) {
+      const ttl = (j.rack.title || '').replace(/^VCV Rack( Pro)? [\d.]+ - /, '').replace(/^\*/, '✱ ');
+      Mind.setInfo('RACK-LINK', { line: ttl || 'Rack running', st: 'LIVE', hot: true, right: `${j.rack.cpu ?? '…'}% CPU · ${j.rack.ramMB} MB` });
+    } else Mind.setInfo('RACK-LINK', { line: 'Rack is closed', st: 'OFF', hot: false, right: 'no patch' });
+  } catch (e) {}
   // the signal under the top bar flows faster as the PC works harder
   document.documentElement.style.setProperty('--flow', (7 - 5.5 * Math.min(1, (c.load || 0) / 100)).toFixed(2) + 's');
 }
 thinkEl('pc-pill').onclick = () => thinkOpen(true);
+// ---- SYSTEM OLED: top processes, drives, network, boot + startup, sensors (tools/pc_stats.json) ----
+const fmtDur = ms => { const m = Math.floor(ms / 60000), h = Math.floor(m / 60), d = Math.floor(h / 24); return d ? `${d}d ${h % 24}h` : h ? `${h}h ${m % 60}m` : `${m}m`; };
+const escS = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function drawSys(j) {
+  const el = thinkEl('sys-body'); if (!el) return;
+  thinkEl('sys-at').textContent = `${j.host || ''} · up ${fmtDur((j.uptime || 0) * 1000)}`;
+  const cls = (v, w, h) => v >= h ? 'h' : v >= w ? 'w' : '';
+  const row = (name, val, c = '', tip = '') => `<div class="r"${tip ? ` title="${escS(tip)}"` : ''}><span>${escS(name)}</span><b class="${c}">${val}</b></div>`;
+  const kb = v => v >= 1024 ? (v / 1024).toFixed(1) + 'M' : v.toFixed(0) + 'K';
+  const pr = j.procs || {};
+  const cpuL = (pr.cpu || []).slice(0, 3).map(p => row(p.n, p.p.toFixed(0) + '%', cls(p.p, 25, 60))).join('') || '<div class="hint">measuring…</div>';
+  const memL = (pr.mem || []).slice(0, 3).map(p => row(p.n, p.mb >= 1024 ? (p.mb / 1024).toFixed(1) + 'G' : p.mb + 'M', cls(p.mb, 1500, 4000))).join('');
+  const drv = (j.drives || []).map(d => {
+    const used = d.sizeGB ? 1 - d.freeGB / d.sizeGB : 0, c = used > .9 ? 'h' : used > .8 ? 'w' : '';
+    return row(`${d.d} ${kb(d.rKBs || 0)}↓ ${kb(d.wKBs || 0)}↑`, `${d.freeGB.toFixed(0)}G free`, c, `${d.d} ${d.label || ''} · ${d.freeGB} of ${d.sizeGB} GB free`) +
+           `<div class="bar"><i class="${c}" style="width:${(used * 100).toFixed(1)}%"></i></div>`;
+  }).join('') || '<div class="hint">reading…</div>';
+  const nx = j.netx || {}, ts = nx.tailscale, n = j.net || {};
+  const ping = nx.pingMs == null ? '…' : nx.pingMs < 0 ? 'DOWN' : nx.pingMs + 'ms';
+  const net = row(`net ${kb(n.rxKBs || 0)}↓ ${kb(n.txKBs || 0)}↑`, `site ${ping}`, nx.pingMs < 0 ? 'h' : nx.pingMs > 150 ? 'w' : '', 'download / upload per second · ping to liquidnick.com') +
+    (ts ? row('tailscale', `${ts.online}/${ts.total}`, ts.online ? '' : 'w', (ts.peers || []).map(p => `${p.n}: ${p.on ? 'online' : 'offline'}`).join('\n')) : '');
+  const b = j.boot;
+  const boot = b ? row(`boot ${new Date(b.at).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`,
+                       b.sec ? b.sec.toFixed(0) + 's' : '—', b.sec > 60 ? 'h' : b.sec > 30 ? 'w' : '', b.sec ? 'boot duration' : 'the boot duration needs admin rights to read') +
+                   row('startup apps', b.count, b.count > 12 ? 'w' : '', (b.items || []).join('\n'))
+    : '<div class="hint">reading…</div>';
+  const sn = j.sensors;
+  const hot = sn ? (sn.temps || []).filter(t => /core|package|cpu/i.test(t.n)).sort((x, y) => y.c - x.c)[0] : null;
+  const sens = sn ? (hot ? row(hot.n, hot.c.toFixed(0) + '°', cls(hot.c, 75, 90)) : '') + ((sn.fans || [])[0] ? row(sn.fans[0].n, sn.fans[0].rpm + 'rpm') : '')
+    : '<div class="hint" title="Install LibreHardwareMonitor (free) for per-core temperatures and fans">cores + fans: needs LibreHardwareMonitor</div>';
+  el.innerHTML = `<div><h5>TOP CPU</h5>${cpuL}<h5>TOP MEMORY</h5>${memL}</div>` +
+    `<div><h5>DRIVES</h5>${drv}<h5>NETWORK</h5>${net}</div>` +
+    `<div><h5>BOOT</h5>${boot}<h5>SENSORS</h5>${sens}</div>`;
+}
+// ---- BRIEF tabs: GOAL / PLAN / DECISIONS in one OLED ----
+document.querySelectorAll('#t-brief .ob-tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#t-brief .ob-tabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('#t-brief .ob-pane').forEach(x => x.classList.toggle('on', x.dataset.pane === b.dataset.tab));
+});
+// ---- MSYS2 terminal: commands go to tools/rack_open_server.py (port 8767), which runs them in MSYS2 bash ----
+const Term = (() => {
+  const out = thinkEl('term-out'), cmd = thinkEl('term-cmd'), ps = thinkEl('term-ps'), st = thinkEl('term-st');
+  const SRV = 'http://127.0.0.1:8767';
+  let token = '', cwd = '~/SynTHBloK', busy = false, hist = [], hi = 0, from = 0;
+  const put = (txt, c = '') => { const s = document.createElement('span'); if (c) s.className = c; s.textContent = txt; out.appendChild(s); out.scrollTop = out.scrollHeight; };
+  const prompt = () => { ps.textContent = `${cwd} $`; };
+  const short = p => p.replace(/\\/g, '/').replace(/^[A-Z]:\/msys64\/home\/[^/]+/i, '~');
+  async function getToken() {
+    if (token) return token;
+    const r = await fetch('/tools/.shell_token?t=' + Date.now(), { cache: 'no-store' }).catch(() => null);
+    token = r && r.ok ? (await r.text()).trim() : '';
+    return token;
+  }
+  async function run(c) {
+    if (!c.trim() || busy) return;
+    hist.push(c); hi = hist.length;
+    put(`${cwd} $ ${c}\n`, 'cmd');
+    if (c.trim() === 'clear') { out.textContent = ''; return; }
+    const tk = await getToken();
+    if (!tk) { put('the terminal server is not running (tools/rack_open_server.py, started with the workbench)\n', 'err'); return; }
+    const r = await fetch(SRV + '/sh', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Token': tk }, body: JSON.stringify({ cmd: c }) }).catch(() => null);
+    if (!r) { put('could not reach the terminal server on port 8767\n', 'err'); return; }
+    const j = await r.json().catch(() => ({}));
+    if (!j.ok) { if (r.status === 403) token = ''; put((j.error || 'refused') + '\n', 'err'); return; }
+    busy = true; from = 0; st.textContent = 'RUNNING'; poll();
+  }
+  async function poll() {
+    const r = await fetch(`${SRV}/sh/out?from=${from}`, { headers: { 'X-Token': token } }).catch(() => null);
+    const j = r && r.ok ? await r.json().catch(() => null) : null;
+    if (!j) { busy = false; st.textContent = 'MINGW64'; put('lost the terminal server\n', 'err'); return; }
+    if (j.text) put(j.text);
+    from = j.next;
+    if (j.done) {
+      busy = false; cwd = short(j.cwd || cwd); prompt();
+      st.textContent = j.code ? `EXIT ${j.code}` : 'MINGW64';
+      if (j.code) put(`[exit ${j.code}]\n`, 'err');
+      return;
+    }
+    setTimeout(poll, 250);
+  }
+  cmd.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { const c = cmd.value; cmd.value = ''; run(c); }
+    else if (e.key === 'ArrowUp') { if (hi > 0) cmd.value = hist[--hi] || ''; e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { if (hi < hist.length) cmd.value = hist[++hi] || ''; e.preventDefault(); }
+    else if (e.key === 'c' && e.ctrlKey && busy) { fetch(SRV + '/sh/kill', { method: 'POST', headers: { 'X-Token': token } }); put('^C\n', 'err'); e.preventDefault(); }
+    e.stopPropagation();   // the workbench's own keys (arrows, Esc) stay out of the terminal
+  });
+  thinkEl('term-clear').onclick = () => { out.textContent = ''; cmd.focus(); };
+  out.onclick = () => cmd.focus();
+  prompt();
+  put('MSYS2 · MINGW64 · commands run in your SynTHBloK folder (cd carries over).\nOne command at a time; Ctrl+C stops it; no interactive programs (vim, less).\n', 'dim');
+  return { run };
+})();
+// ---- THE JOB RUNNER, live (jobs/: NNNN-kind.job queued, .log written as it runs, .done when finished) ----
+// FORGE = compile jobs, DEPLOY = installs, ARCHIVE = saves to GitHub, RACK-LINK opens; LINKER = plugin.dll itself
+const jobLogs = {};
+async function scanJobs() {
+  const r = await fetch('/jobs/?t=' + Date.now(), { cache: 'no-store' }).catch(() => null);
+  if (!r || !r.ok) return;
+  const html = await r.text();
+  const names = [...html.matchAll(/href="(\d{4}-[\w.-]+?)\.(job|log|done)"/g)].map(m => ({ id: m[1], ext: m[2] }));
+  const jobs = {};
+  for (const n of names) (jobs[n.id] = jobs[n.id] || {})[n.ext] = true;
+  const latest = {};   // kind -> newest job id
+  for (const id of Object.keys(jobs).sort()) { const kind = id.slice(5); latest[kind] = id; }
+  const total = k => Object.keys(jobs).filter(id => id.slice(5) === k).length;
+  const show = async (proc, kinds, label) => {
+    const ids = kinds.map(k => latest[k]).filter(Boolean).sort();
+    if (!ids.length) return;
+    const id = ids[ids.length - 1], jb = jobs[id];
+    let st = jb.done ? 'OK' : jb.log ? 'RUN' : 'QUEUED', line = `${id} ${label}`, tail = '';
+    if (jb.log && (!jobLogs[id] || !jb.done || !jobLogs[id].final)) {   // read the log while it runs, once when it is done
+      const lr = await fetch(`/jobs/${id}.log?t=${Date.now()}`, { cache: 'no-store' }).catch(() => null);
+      const at = lr && lr.ok ? Date.parse(lr.headers.get('Last-Modified') || '') : 0;
+      jobLogs[id] = { text: lr && lr.ok ? await lr.text() : '', final: !!jb.done, at };
+    }
+    const L = jobLogs[id] || { text: '' };
+    const T = L.text || '';
+    if (/error|FAILED|BUILD FAILED|fatal/i.test(T) && !/COMPILE OK|BUILD OK|PUSH DONE/.test(T)) st = jb.done ? 'FAIL' : st;
+    if (proc === 'FORGE') { const files = (T.match(/-c\s+src\/\w+\.cpp|src\/\w+\.cpp:\d+:\d+: warning/g) || []).length; tail = /COMPILE OK/.test(T) ? 'compiled clean' : jb.done ? 'see the log' : `compiling… ${files} steps`; }
+    if (proc === 'DEPLOY') tail = /BUILD OK/.test(T) ? 'installed in Rack' : jb.done ? 'not installed' : 'installing…';
+    if (proc === 'ARCHIVE') { const sv = T.match(/SAVED (\w{7}) (.*)/); tail = sv ? `${sv[1]} ${sv[2]}` : jb.done ? 'nothing new' : 'pushing…'; }
+    if (proc === 'RACK-LINK') return;   // pc_stats has Rack live; the open job only starts it
+    Mind.setInfo(proc, { line: `${line} · ${tail}`, st, hot: !jb.done, right: `${total(kinds[0])} RUNS${L.at ? ' · ' + (Date.now() - L.at < 60000 ? Math.round((Date.now() - L.at) / 1000) + 's ago' : Math.round((Date.now() - L.at) / 60000) + 'm ago') : ''}` });
+  };
+  await show('FORGE', ['compile'], 'compile');
+  await show('DEPLOY', ['install'], 'install');
+  await show('ARCHIVE', ['save'], 'save');
+  // LINKER: the built plugin.dll (its size, and how fresh it is)
+  const d = await fetch('/plugin.dll', { method: 'HEAD', cache: 'no-store' }).catch(() => null);
+  if (d && d.ok) {
+    const mb = (+d.headers.get('Content-Length') || 0) / 1048576, at = Date.parse(d.headers.get('Last-Modified') || '');
+    const age = at ? (Date.now() - at) / 60000 : 0;
+    Mind.setInfo('LINKER', { line: `plugin.dll · ${mb.toFixed(1)} MB`, st: age < 2 ? 'RUN' : 'OK', hot: age < 2, right: at ? `linked ${age < 1 ? Math.round(age * 60) + 's' : age < 60 ? Math.round(age) + 'm' : (age / 60).toFixed(1) + 'h'} ago` : '' });
+  }
+}
+scanJobs(); setInterval(scanJobs, 3000);
 // ---- CLAUDE SIGNAL: what THINKING wants you to see, as a beacon over the whole workbench ----
 const csig = { think: null, hot: null, hidden: '' };
 function drawSignal() {
@@ -1991,7 +2265,7 @@ thinkEl('csig').onclick = e => {
 };
 setInterval(drawSignal, 5000);   // 'working' fades on its own once THINKING goes quiet
 const thinkOpen = on => { thinkEl('think').classList.toggle('on', on); on ? (Mind.start(), Mind.event('think', 'READOUT online · listening to every process')) : Mind.stop(); };
-thinkEl('think-btn').onclick = () => thinkOpen(true);
+thinkEl('think-btn').onclick = () => { closePatches(); thinkOpen(true); syncTabs(); };
 thinkEl('think-x').onclick = () => thinkOpen(false);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') thinkOpen(false); });
 thinkEl('t-mind').onclick = () => Mind.event('ask', 'operator probe: ping from the workbench');

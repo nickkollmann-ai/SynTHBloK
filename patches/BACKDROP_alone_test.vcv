@@ -1,0 +1,18 @@
+{
+ "version": "2.6.6",
+ "zoom": 1.0,
+ "modules": [
+  {
+   "id": 1,
+   "plugin": "SynTHBloK",
+   "model": "Backdrop",
+   "version": "2.1.0",
+   "params": [],
+   "pos": [
+    0,
+    0
+   ]
+  }
+ ],
+ "cables": []
+}

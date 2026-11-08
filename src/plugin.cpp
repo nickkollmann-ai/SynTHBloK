@@ -28,4 +28,5 @@ void init(Plugin* p) {
     p->addModel(modelSynTHBloKMatrixSong);
     p->addModel(modelSynTHBloKJam);
     p->addModel(modelSynTHBloKRandroyd);
+    p->addModel(modelSynTHBloKBackdrop);
 }

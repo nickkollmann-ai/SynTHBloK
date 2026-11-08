@@ -4,7 +4,7 @@
 #   - tools/chat_feed.py (CHAT), tools/patch_feed.py (PATCH MAP + PATCHES) and tools/rack_open_server.py (OPEN IN RACK)
 #   - tools/pc_stats.ps1 (THIS PC: CPU, GPU, temps for THINKING and the top bar)
 #   - tools/claude_jobs.ps1 (Claude runs the repo's scripts hidden, via jobs\)
-# then opens the workbench in Firefox unless a Firefox window already shows it.
+# then opens the workbench in its own app window (tools/workbench_app.ps1) unless one already shows it.
 $ErrorActionPreference = 'SilentlyContinue'
 $repo = Split-Path -Parent $PSScriptRoot
 $py = 'C:\msys64\mingw64\bin\python3.exe'
@@ -43,11 +43,10 @@ if ($psRunning -notmatch 'claude_jobs\.ps1') {
     $done += 'claude_jobs.ps1'
 }
 
-$ff = Get-Process firefox | Where-Object Path | Select-Object -First 1
-if (-not (Get-Process firefox | Where-Object { $_.MainWindowTitle -like 'SynTHBloK Workbench*' })) {
-    $exe = if ($ff) { $ff.Path } else { 'C:\Program Files\Mozilla Firefox\firefox.exe' }
+# the workbench in its own app window (Edge app mode, styled by the page); a window already open is left alone
+if (-not (Get-Process msedge, firefox | Where-Object { $_.MainWindowTitle -like 'SynTHBloK Workbench*' })) {
     Start-Sleep -Milliseconds 600
-    & $exe 'http://127.0.0.1:8766/tools/design_watch.html'
-    $done += 'opened in Firefox'
+    & (Join-Path $PSScriptRoot 'workbench_app.ps1') | Out-Null
+    $done += 'opened the workbench app'
 }
 if ($done) { "Workbench: " + ($done -join ', ') } else { 'Workbench already open and running.' }

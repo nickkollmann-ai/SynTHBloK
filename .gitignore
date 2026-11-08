@@ -27,3 +27,5 @@ tools/claude_thinking.json
 jobs/
 tools/pc_stats.json
 site/
+tools/.shell_token
+tools/.wb-app/

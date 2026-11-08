@@ -40,6 +40,7 @@ SOURCES += src/SynTHBloKMatrixFx.cpp
 SOURCES += src/SynTHBloKEcho.cpp
 SOURCES += src/SynTHBloKLoop.cpp
 SOURCES += src/SynTHBloKMatrixSong.cpp
+SOURCES += src/SynTHBloKBackdrop.cpp
 SOURCES += src/ModulePictures.cpp
 SOURCES += src/SynTHBloKJam.cpp
 SOURCES += src/SynTHBloKRandroyd.cpp

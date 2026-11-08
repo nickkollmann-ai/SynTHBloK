@@ -132,6 +132,15 @@
         "Random",
         "Utility"
       ]
+    },
+    {
+      "slug": "Backdrop",
+      "name": "SynTHBloK-B BACKDROP",
+      "description": "Dresses the whole rack: a background (colour, SynTHBloK looks or your image), a case around the modules from a library of case styles, and the patch title",
+      "tags": [
+        "Visual",
+        "Utility"
+      ]
     }
   ]
 }

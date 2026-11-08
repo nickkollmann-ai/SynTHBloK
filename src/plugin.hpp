@@ -9,6 +9,7 @@ using namespace rack;
 extern Plugin* pluginInstance;
 
 extern Model* modelSynTHBloK;
+extern Model* modelSynTHBloKBackdrop;
 extern Model* modelSynTHBloKPoly;
 extern Model* modelSynTHBloKStereo;
 extern Model* modelSynTHBloKFX;
