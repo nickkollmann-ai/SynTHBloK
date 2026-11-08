@@ -1,4 +1,4 @@
-# PC telemetry for the workbench (CLAUDE · THINKING's HARDWARE band and the top bar's PC pill).
+﻿# PC telemetry for the workbench (CLAUDE · THINKING's HARDWARE band and the top bar's PC pill).
 # Every 2 s writes tools/pc_stats.json: CPU load per thread + clock, ACPI thermal zones, the NVIDIA GPU (nvidia-smi),
 # RAM, C: space, disk + network activity, and Rack's own CPU and RAM. No admin rights, nothing to install.
 # Also: the top processes (CPU and memory), every drive's read / write and free space, Tailscale peers and a
@@ -108,15 +108,55 @@ while ($true) {
         $bootInfo = [ordered]@{ at = ([DateTimeOffset]$boot).ToUnixTimeMilliseconds(); sec = $bootSec; count = $startup.Count; items = $startup }
     }
     # per-core temperatures and fans (LibreHardwareMonitor / OpenHardwareMonitor, if running)
+    if (-not $script:selfT) { $script:selfT = (Get-Item $PSCommandPath).LastWriteTime }
+    elseif ((Get-Item $PSCommandPath).LastWriteTime -ne $script:selfT) {   # this script was updated: start the new copy, stop this one
+        Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $PSCommandPath -WindowStyle Hidden; exit }
     $sensors = $null
+    if (-not $script:lhmNext) { $script:lhmNext = Get-Date }
     foreach ($ns in @('root/LibreHardwareMonitor', 'root/OpenHardwareMonitor')) {
         $sn = Get-CimInstance -Namespace $ns -ClassName Sensor -ErrorAction SilentlyContinue
         if ($sn) {
             $sensors = [ordered]@{ src = ($ns -replace 'root/', '')
-                temps = @($sn | Where-Object { $_.SensorType -eq 'Temperature' } | Sort-Object Name | ForEach-Object { [ordered]@{ n = $_.Name; c = [math]::Round($_.Value, 1) } })
-                fans = @($sn | Where-Object { $_.SensorType -eq 'Fan' } | ForEach-Object { [ordered]@{ n = $_.Name; rpm = [math]::Round($_.Value) } }) }
+                temps = @($sn | Where-Object { $_.SensorType -eq 'Temperature' } | Sort-Object Name | ForEach-Object { [ordered]@{ n = $_.Name; c = [math]::Round($_.Value, 1); id = $_.Identifier } })
+                fans = @($sn | Where-Object { $_.SensorType -eq 'Fan' } | ForEach-Object { [ordered]@{ n = $_.Name; rpm = [math]::Round($_.Value); id = $_.Identifier } }) }
             break
         }
+    }
+    # LibreHardwareMonitor 0.9.x: its Remote Web Server (Options > Remote Web Server > Run, port 8085) serves /data.json
+    if (-not $sensors -and (Get-Date) -ge $script:lhmNext) {
+        try {
+            $tree = Invoke-RestMethod -Uri 'http://127.0.0.1:8085/data.json' -TimeoutSec 1
+            $tl = New-Object System.Collections.ArrayList; $fl = New-Object System.Collections.ArrayList
+            $walk = { param($n) foreach ($k in @($n.Children)) {
+                    if ($k.SensorId -and $k.Value -match '^\s*(-?[\d.,]+)') { $v = [double]($matches[1] -replace ',', '.')
+                        if ($k.Type -eq 'Temperature' -or $k.SensorId -match '/temperature/') { [void]$tl.Add([ordered]@{ n = $k.Text; c = [math]::Round($v, 1); id = $k.SensorId }) }
+                        elseif ($k.Type -eq 'Fan' -or $k.SensorId -match '/fan/') { [void]$fl.Add([ordered]@{ n = $k.Text; rpm = [math]::Round($v); id = $k.SensorId }) } }
+                    & $walk $k } }
+            & $walk $tree
+            $sensors = [ordered]@{ src = 'LibreHardwareMonitor web'; temps = @($tl | Sort-Object { $_.n }); fans = @($fl) }
+            try {   # the full readout for the workbench's LIBRE tab: hardware > group > sensor (value, min, max, unit)
+            $hwl = New-Object System.Collections.ArrayList
+            foreach ($pc in @($tree.Children)) { foreach ($h in @($pc.Children)) {
+                $groups = New-Object System.Collections.ArrayList
+                $addG = { param($node, $hwName)
+                    foreach ($g in @($node.Children)) {
+                        $ss = @($g.Children | Where-Object { $_.SensorId })
+                        if ($ss.Count) {
+                            $rows = foreach ($k in $ss) {
+                                $num = { param($t) if ("$t" -match '^\s*(-?[\d.,]+)\s*(.*)$') { @([double]($matches[1] -replace ',', '.'), ($matches[2] -replace 'Â', '').Trim()) } else { @($null, '') } }
+                                $v = & $num $k.Value; $mn = & $num $k.Min; $mx = & $num $k.Max
+                                [ordered]@{ n = $k.Text; t = $k.Type; id = $k.SensorId; v = $v[0]; u = $v[1]; min = $mn[0]; max = $mx[0] } }
+                            [void]$groups.Add([ordered]@{ g = $g.Text; hw = $hwName; s = @($rows) })
+                        }
+                        # sub-hardware (a chip on the motherboard, a second fan controller ...)
+                        if (@($g.Children | Where-Object { -not $_.SensorId -and $_.Children }).Count -and -not $ss.Count) { & $addG $g ($hwName + ' / ' + $g.Text) }
+                    } }
+                & $addG $h $h.Text
+                if ($groups.Count) { [void]$hwl.Add([ordered]@{ name = $h.Text; img = $h.ImageURL; groups = @($groups) }) }
+            } }
+            ([ordered]@{ t = [DateTimeOffset]::Now.ToUnixTimeMilliseconds(); hw = @($hwl) } | ConvertTo-Json -Depth 8 -Compress) | Set-Content -Path (Join-Path $PSScriptRoot 'lhm.json') -Encoding UTF8
+            } catch {}
+        } catch { $script:lhmNext = (Get-Date).AddSeconds(30) }   # not running / web server off: look again in 30 s
     }
 
     $o = Get-CimInstance Win32_OperatingSystem

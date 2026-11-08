@@ -438,7 +438,7 @@ footer .nav:hover{border-color:var(--cy)}
 #think>.head span{color:var(--mut)}
 #think-x{background:none;border:1px solid var(--line);color:var(--tx);font:inherit;font-size:16px;line-height:1;padding:2px 9px;cursor:pointer}
 #think-body{display:grid;grid-template-columns:minmax(240px,.8fr) minmax(0,1.3fr) minmax(300px,1.1fr);grid-template-rows:minmax(420px,1fr) minmax(170px,30vh);gap:0;min-height:0}
-@media(max-width:1000px){#think-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(220px,45vh) auto auto minmax(0,1fr);overflow:auto}#t-mind,#t-brief,#t-sys,#t-term{grid-column:1!important;grid-row:auto!important}#t-term{min-height:320px}}
+@media(max-width:1000px){#think-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(220px,45vh) auto auto minmax(0,1fr);overflow:auto}#t-mind,#core-space,#t-brief,#t-sys,#t-term{grid-column:1!important;grid-row:auto!important}#t-term{min-height:320px}}
 /* MIND: a living painting of the work (WebGL field + planets for the plan + bursts for decisions) */
 #t-mind{grid-column:1/-1;grid-row:1;position:relative;overflow:hidden;border-bottom:1px solid var(--line);background:#02030a}
 #t-mind canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
@@ -484,6 +484,250 @@ footer .nav:hover{border-color:var(--cy)}
 #t-inbox .il a.f{background:transparent;color:var(--mg);border:1px solid var(--mg)}
 #t-inbox .ok{margin-top:8px;background:none;border:1px solid #ff3fa466;color:var(--mut);font:inherit;font-size:9.5px;letter-spacing:.16em;padding:1px 8px;cursor:pointer;border-radius:2px}
 #t-inbox .st{color:var(--mut);font-size:10px;margin-top:4px}
+/* CLEANER: the PC cleanup, step by step (tools/cleaner.json from Claude; tools/cleaner_inbox.json from you) */
+#cln{position:fixed;inset:0;top:var(--tabs-h,80px);z-index:11;display:none;grid-template-rows:auto auto minmax(0,1fr);background:var(--bg)}
+#cln.on{display:grid}
+#cln>.head{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);background:#070b10}
+#cln>.head b{color:#ffbe5a;letter-spacing:.16em;font-weight:600}#cln>.head span{color:var(--mut)}
+#cln-x{background:none;border:1px solid var(--line);color:var(--tx);font:inherit;font-size:16px;line-height:1;padding:2px 9px;cursor:pointer}
+#cln-steps{display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px;border-bottom:1px solid var(--line);background:#050a0e}
+#cln-steps div{flex:1;min-width:120px;border:1px solid #3a2a12;padding:5px 8px;border-radius:2px;color:var(--mut);font-size:10.5px;line-height:1.35}
+#cln-steps div b{display:block;font-size:9.5px;letter-spacing:.16em;color:var(--mut);font-weight:600}
+#cln-steps div.done{border-color:#1d6b4a}#cln-steps div.done b{color:var(--ok)}
+#cln-steps div.now{border-color:#ffbe5a;box-shadow:0 0 12px #ffbe5a44}#cln-steps div.now b{color:#ffbe5a}#cln-steps div.now b::after{content:' ●';animation:tpulse 1.2s infinite}
+#cln-steps div.wait{border-color:#ff7a3a}#cln-steps div.wait b{color:#ff7a3a}#cln-steps div.wait b::after{content:' · NEEDS YOUR OK'}
+#cln-body{display:grid;grid-template-columns:minmax(260px,1fr) minmax(0,1.3fr) minmax(300px,1.1fr);grid-template-rows:minmax(0,1.2fr) minmax(0,1fr);min-height:0}
+#cln-body .card{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:8px 10px;min-height:0;overflow:auto;font-size:11px;line-height:1.4;
+  background:radial-gradient(120% 90% at 50% 0%,#1a1206 0%,#060402 70%);box-shadow:inset 0 0 0 1px #3a2a12,inset 0 0 24px #ffbe5a0d}
+#cln-body .ob-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;font-size:10px;letter-spacing:.16em}
+#cln-body .ob-head b{color:#ffbe5a;font-weight:600}#cln-body .ob-head span{color:var(--mut);letter-spacing:.06em}
+#cln-start{grid-column:1;grid-row:1/3}#cln-ok{grid-column:2;grid-row:1}#cln-disk{grid-column:2;grid-row:2}#cln-comm{grid-column:3;grid-row:1/3;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+.cln-row{display:grid;grid-template-columns:52px minmax(0,1fr);gap:6px;padding:3px 0;border-bottom:1px solid #2a1e0c;align-items:baseline}
+.cln-row i{font-style:normal;font-size:9px;letter-spacing:.12em;text-align:center;border-radius:2px;padding:1px 0}
+.cln-row i.off{background:#123a26;color:var(--ok)}.cln-row i.kept{background:#1d2a33;color:#9fb6c0}.cln-row i.ask{background:#3a1d0c;color:#ff9a5a}.cln-row i.on{background:#3a300c;color:#ffbe5a}
+.cln-row span{color:#e8dccb}.cln-row em{display:block;font-style:normal;color:var(--mut);font-size:10px}
+.cln-grp{margin:8px 0 3px;font-size:9.5px;letter-spacing:.16em;color:#ffbe5a}
+.cln-card{border:1px solid #3a2a12;border-radius:2px;padding:7px 9px;margin-bottom:8px}
+.cln-card.wait{border-color:#ff7a3a;box-shadow:0 0 10px #ff7a3a22}.cln-card.ok{border-color:#1d6b4a;opacity:.75}
+.cln-card h5{margin:0 0 3px;font-size:11.5px;color:#ffe2b0;font-weight:500}.cln-card p{margin:0 0 6px;color:#cdbfa8}
+.cln-card ul{margin:0 0 6px 16px;padding:0;color:#cdbfa8}.cln-card .gain{color:var(--ok);font-size:10.5px}
+.cln-card .btns{display:flex;gap:6px;align-items:center}
+.cln-card button,#cln-send{background:#1a1206;border:1px solid #6b4a1a;color:#ffbe5a;font:inherit;font-size:10px;letter-spacing:.14em;padding:3px 12px;cursor:pointer;border-radius:2px}
+.cln-card button.go{background:#123a26;border-color:#1d6b4a;color:var(--ok)}.cln-card button:hover,#cln-send:hover{filter:brightness(1.4)}
+.cln-card .said{color:var(--mut);font-size:10px}
+#cln-bar{height:14px;border:1px solid #3a2a12;border-radius:2px;position:relative;overflow:hidden;margin:4px 0 2px}
+#cln-bar i{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,#ff5a3a,#ffbe5a);}
+#cln-big div{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #2a1e0c;color:#e8dccb}#cln-big div b{color:#ffbe5a;font-weight:500}
+#cln-log{overflow:auto;min-height:0;padding-right:4px}
+#cln-log .m{margin:0 0 8px;padding:6px 8px;border-radius:3px;max-width:92%;white-space:pre-wrap}
+#cln-log .m.c{background:#20180b;border:1px solid #3a2a12;color:#f0e2c8}
+#cln-log .m.u{background:#0b2018;border:1px solid #1d6b4a;color:#d8f5e6;margin-left:auto}
+#cln-log .m small{display:block;font-size:9px;letter-spacing:.12em;color:var(--mut);margin-bottom:2px}
+#cln-in{display:flex;gap:6px;margin-top:6px}#cln-in textarea{flex:1;resize:none;height:54px;background:#0a0703;border:1px solid #3a2a12;color:#f0e2c8;font:inherit;font-size:11px;padding:5px}
+#cln-note{font-size:9.5px;color:var(--mut);margin-top:3px}
+#cln-views{display:flex;gap:4px;padding:6px 14px;border-bottom:1px solid var(--line);background:#050a0e}
+#cln-views button{background:#1a1206;border:1px solid #3a2a12;color:var(--mut);font:inherit;font-size:10px;letter-spacing:.16em;padding:3px 12px;cursor:pointer;border-radius:2px}
+#cln-views button.on{color:#120a00;background:#ffbe5a;border-color:#ffbe5a;box-shadow:0 0 10px #ffbe5a55}
+#cln{grid-template-rows:auto auto auto minmax(0,1fr)!important}
+#cln-map{display:none;min-height:0;grid-template-columns:minmax(0,1fr) 320px;grid-template-rows:auto minmax(0,1fr);background:radial-gradient(120% 90% at 50% 0%,#1a1206 0%,#060402 70%)}
+#cln.map{grid-template-rows:auto auto minmax(0,1fr)!important}#cln.map #cln-map{display:grid}#cln.map #cln-body,#cln.map #cln-steps{display:none}
+#map-crumbs{grid-column:1/-1;padding:7px 14px;border-bottom:1px solid #3a2a12;font-size:11px;color:var(--mut);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+#map-crumbs a{color:#ffbe5a;cursor:pointer;text-decoration:none}#map-crumbs a:hover{text-decoration:underline}#map-crumbs .sum{margin-left:auto;color:#cdbfa8}
+#map-tree{position:relative;margin:10px;min-height:0;overflow:hidden}
+#map-side{border-left:1px solid #3a2a12;padding:8px 10px;overflow:auto;font-size:11px}
+#map-side .ob-head{display:flex;justify-content:space-between;margin-bottom:6px;font-size:10px;letter-spacing:.16em}#map-side .ob-head b{color:#ffbe5a;font-weight:600}#map-side .ob-head span{color:var(--mut)}
+#map-list div{padding:3px 0;border-bottom:1px solid #2a1e0c;cursor:pointer}#map-list div:hover{background:#ffbe5a10}
+#map-list div p{margin:0;display:flex;justify-content:space-between;color:#e8dccb}#map-list div p b{color:#ffbe5a;font-weight:500}
+#map-list div i{display:block;height:3px;margin-top:2px;border-radius:2px}
+#map-legend{margin-top:10px;font-size:9.5px;color:var(--mut);line-height:1.8}#map-legend i{display:inline-block;width:9px;height:9px;margin:0 4px 0 8px;vertical-align:-1px;border-radius:2px}
+#map-note{margin-top:8px;font-size:10px;color:var(--mut)}
+#map-list div{display:grid;grid-template-columns:18px minmax(0,1fr);gap:4px;align-items:start}
+#map-list input{margin:2px 0 0;accent-color:#ff7a3a;cursor:pointer}
+#map-list div.sel p span{color:#ff9a5a;text-decoration:line-through}
+#map-pick{margin-top:10px;border:1px solid #6b2a12;border-radius:2px;padding:7px 8px;display:none}#map-pick.on{display:block}
+#map-pick h6{margin:0 0 4px;font-size:10px;letter-spacing:.16em;color:#ff9a5a;font-weight:600}
+#map-pick ul{margin:0 0 6px 14px;padding:0;color:#e8dccb;font-size:10.5px;max-height:160px;overflow:auto}
+#map-pick button{background:#1a1206;border:1px solid #6b4a1a;color:#ffbe5a;font:inherit;font-size:10px;letter-spacing:.14em;padding:3px 10px;cursor:pointer;border-radius:2px;margin-right:4px}
+#map-pick button.go{background:#3a140a;border-color:#ff7a3a;color:#ffb08a}
+/* SPACE MAP: the workbench look (dark glass tiles, neon edges) */
+#map-tree,#cln-mini{border-radius:6px;background:radial-gradient(120% 90% at 50% 0%,#04161c 0%,#010407 75%);box-shadow:inset 0 0 0 1px #0f3b46,inset 0 0 30px #00e5ff0d}
+#map-tree{margin:12px}
+#map-tree.zoom>.tm{animation:tmIn .35s cubic-bezier(.2,.8,.2,1) both}
+@keyframes tmIn{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+.tm{position:absolute;box-sizing:border-box;border-radius:4px;overflow:hidden;padding:6px 8px;cursor:pointer;line-height:1.2;
+  background:linear-gradient(160deg,rgba(var(--rgb),.20),rgba(var(--rgb),.05) 70%);border:1px solid rgba(var(--rgb),.55);
+  box-shadow:inset 0 0 16px rgba(var(--rgb),.12);color:rgb(var(--rgb));transition:box-shadow .15s,background .15s}
+.tm:hover{background:linear-gradient(160deg,rgba(var(--rgb),.30),rgba(var(--rgb),.09) 70%);box-shadow:inset 0 0 22px rgba(var(--rgb),.22),0 0 14px rgba(var(--rgb),.45);z-index:3}
+.tm b{display:block;font-weight:600;letter-spacing:.06em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 8px rgba(var(--rgb),.6);position:relative;z-index:1}
+.tm .sz{display:block;color:#e6f4f8;opacity:.85;white-space:nowrap;position:relative;z-index:1}
+.tm .pc{position:absolute;right:7px;bottom:5px;font-size:9.5px;letter-spacing:.1em;opacity:.7;z-index:1}
+.tm .sub{position:absolute;border-radius:2px;border:1px solid rgba(var(--rgb),.22);background:rgba(var(--rgb),.05);pointer-events:none}
+.tm.leaf{cursor:default}
+.tm.free{--rgb:61,255,154;background:repeating-linear-gradient(135deg,rgba(61,255,154,.06) 0 8px,transparent 8px 16px);border-style:dashed;cursor:default}
+.tm.rest{--rgb:120,140,150;background:repeating-linear-gradient(45deg,rgba(120,140,150,.06) 0 5px,transparent 5px 10px);cursor:default}
+.tm.sel{border:2px solid #ff4d3a;box-shadow:0 0 16px #ff4d3a88,inset 0 0 18px #ff4d3a33}.tm.sel::after{content:'✕';position:absolute;right:6px;top:3px;color:#ff4d3a;font-weight:700}
+#map-tip{position:fixed;z-index:40;pointer-events:none;display:none;background:#020b10f2;border:1px solid #0f3b46;border-radius:4px;padding:8px 10px;font-size:11px;color:#cfe2ea;box-shadow:0 0 18px #00e5ff22,0 8px 24px #000c;max-width:340px}
+#map-tip b{display:block;color:var(--cy);font-size:12px;margin-bottom:2px;letter-spacing:.06em}#map-tip i{font-style:normal;color:var(--mut);display:block;word-break:break-all;margin-bottom:4px}
+#map-tip .row{display:flex;justify-content:space-between;gap:14px}
+#map-donut{display:grid;grid-template-columns:120px minmax(0,1fr);gap:10px;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #2a1e0c}
+#map-donut svg{width:120px;height:120px}#map-donut .cats div{display:flex;align-items:center;gap:6px;font-size:10.5px;color:#cfe2ea;padding:1px 0}
+#map-donut .cats i{width:9px;height:9px;border-radius:2px;flex:none;box-shadow:0 0 6px currentColor}#map-donut .cats b{margin-left:auto;color:#ffbe5a;font-weight:500}
+#map-list div p span::before{content:'';display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:6px;background:var(--c);box-shadow:0 0 5px var(--c)}
+#map-list div i{height:3px;border-radius:2px;box-shadow:0 0 6px var(--c)}
+#map-legend{display:none}
+/* the small map on the CLEANER main screen */
+#cln-mini{position:relative;height:calc(100% - 46px);min-height:120px;margin-top:6px;cursor:zoom-in;overflow:hidden}
+#cln-mini .tm{padding:3px 5px;font-size:9.5px;cursor:zoom-in}#cln-mini .tm .sz{font-size:9px}
+#cln-disk .ob-head a{color:var(--cy);cursor:pointer;letter-spacing:.12em;margin-left:8px}
+/* CLEANER gauges (main screen) */
+#cln-gauges{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:4px}
+.gg{position:relative;text-align:center;border-radius:6px;padding:4px 2px 6px;background:radial-gradient(120% 100% at 50% 0%,#04161c 0%,#010407 80%);box-shadow:inset 0 0 0 1px #0f3b46,inset 0 0 22px #00e5ff0a}
+.gg svg{width:100%;max-width:150px;height:auto;display:block;margin:0 auto;overflow:visible}
+.gg .arc{transition:stroke-dasharray .9s cubic-bezier(.2,.8,.2,1),stroke .6s}
+.gg .ndl{transition:transform .9s cubic-bezier(.3,1.4,.4,1);transform-origin:60px 62px}
+.gg .val{font:600 17px/1 inherit;fill:#e6f4f8}.gg .unit{font-size:7.5px;letter-spacing:.14em;fill:#6f8a94}
+.gg b{display:block;font-size:9.5px;letter-spacing:.18em;color:#8fb3bf;font-weight:600;margin-top:-4px}
+.gg small{display:block;font-size:9.5px;color:#6f8a94;margin-top:1px}
+.gg.hot{box-shadow:inset 0 0 0 1px #ff5a3a66,inset 0 0 24px #ff5a3a22}
+#cln-meters{margin-top:8px;display:grid;gap:4px}
+.mt{display:grid;grid-template-columns:110px minmax(0,1fr) 58px;gap:8px;align-items:center;font-size:10px;color:#cfe2ea}
+.mt span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mt b{text-align:right;color:#ffbe5a;font-weight:500}
+.mt .seg{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;height:9px}
+.mt .seg i{border-radius:1px;background:rgba(var(--rgb),.08);transition:background .4s,box-shadow .4s}
+.mt .seg i.on{background:rgb(var(--rgb));box-shadow:0 0 5px rgba(var(--rgb),.7)}
+@keyframes ggPulse{0%,100%{opacity:1}50%{opacity:.55}}.gg.busy .arc{animation:ggPulse 1.4s infinite}
+/* CLEANER · UNINSTALL view */
+#cln.apps{grid-template-rows:auto auto minmax(0,1fr)!important}#cln.apps #cln-steps,#cln.apps #cln-body,#cln.apps #cln-map{display:none!important}
+#cln-apps{display:none;min-height:0;grid-template-rows:auto minmax(0,1fr);background:radial-gradient(120% 90% at 50% 0%,#04161c 0%,#010407 75%)}#cln.apps #cln-apps{display:grid}
+#apps-bar{display:flex;gap:8px;align-items:center;padding:8px 14px;border-bottom:1px solid #0f3b46;font-size:10.5px;color:#8fb3bf;flex-wrap:wrap}
+#apps-bar input,#apps-bar select{background:#020b10;border:1px solid #0f3b46;color:#e6f4f8;font:inherit;font-size:11px;padding:4px 8px;border-radius:3px}
+#apps-bar input{width:260px}#apps-bar button{background:#04161c;border:1px solid #0f6b7a;color:var(--cy);font:inherit;font-size:10px;letter-spacing:.14em;padding:4px 10px;cursor:pointer;border-radius:3px}
+#apps-bar button:hover{box-shadow:0 0 10px #00e5ff55}#apps-bar .cnt{margin-left:auto}
+#apps-list{overflow:auto;padding:6px 14px 14px}
+.ap{display:grid;grid-template-columns:minmax(0,1fr) 90px 80px 150px 132px;gap:10px;align-items:center;padding:6px 8px;border-bottom:1px solid #0b2a33;font-size:11px}
+.ap:hover{background:#00e5ff08}.ap .nm{color:#e6f4f8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ap .nm em{display:block;font-style:normal;color:#6f8a94;font-size:9.5px}
+.ap .sz{text-align:right;color:#ffbe5a}.ap .dt{color:#8fb3bf;font-size:10px}
+.ap .tag{font-size:8.5px;letter-spacing:.12em;padding:2px 6px;border-radius:2px;justify-self:start}
+.ap .tag.keep{background:#0b3a26;color:#3dff9a}.ap .tag.sec{background:#3a2a0b;color:#ffbe5a}.ap .tag.big{background:#3a140a;color:#ff9a6a}
+.ap button{background:#1a0806;border:1px solid #7a2a1a;color:#ff9a7a;font:inherit;font-size:9.5px;letter-spacing:.14em;padding:4px 8px;cursor:pointer;border-radius:3px;justify-self:end}
+.ap button:hover{box-shadow:0 0 10px #ff5a3a66}.ap button.yes{background:#3a0e08;border-color:#ff5a3a;color:#ffd0c0}.ap button.no{background:#04161c;border-color:#0f6b7a;color:var(--cy)}
+.ap .btns{display:flex;gap:4px;justify-content:flex-end;align-items:center}.ap .msg{font-size:9.5px;color:#3dff9a;text-align:right}
+.ap.gone{opacity:.35}
+#cln-uf{margin-top:9px}
+#cln-uf .lbl{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.12em;margin-bottom:3px}
+#cln-uf .lbl b{color:#ffbe5a;font-weight:600}#cln-uf .lbl span{color:#3dff9a}
+#cln-uf .track{position:relative;height:14px;border-radius:7px;overflow:hidden;background:repeating-linear-gradient(135deg,rgba(61,255,154,.10) 0 6px,rgba(61,255,154,.03) 6px 12px);box-shadow:inset 0 0 0 1px #1d6b4a}
+#cln-uf .used{position:absolute;inset:0 auto 0 0;border-radius:7px 0 0 7px;background:linear-gradient(90deg,#3dff9a,#ffbe5a 70%,#ff4d3a);box-shadow:0 0 10px #ffbe5a66;transition:width .9s cubic-bezier(.2,.8,.2,1)}
+#cln-uf .used::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,#ffffff40,transparent 60%)}
+#cln-uf .pct{position:absolute;right:8px;top:0;line-height:14px;font-size:9px;letter-spacing:.12em;color:#e6f4f8;text-shadow:0 0 4px #000}
+#apps-now{display:none;margin:8px 14px 0;padding:9px 12px;border-radius:5px;border:1px solid #ff7a3a;background:linear-gradient(90deg,#2a0e06,#140804);box-shadow:0 0 18px #ff5a3a33;font-size:11px;color:#ffd8c8}
+#apps-now.on{display:flex;gap:12px;align-items:center}#apps-now.done{border-color:#1d6b4a;background:linear-gradient(90deg,#062a18,#04140c);color:#c8ffe0;box-shadow:0 0 18px #3dff9a22}
+#apps-now .spin{width:14px;height:14px;border-radius:50%;border:2px solid #ff7a3a44;border-top-color:#ff7a3a;animation:spin 1s linear infinite;flex:none}#apps-now.done .spin{animation:none;border-color:#3dff9a}
+@keyframes spin{to{transform:rotate(360deg)}}#apps-now b{letter-spacing:.14em;font-size:10px;color:#ff9a6a}#apps-now.done b{color:#3dff9a}
+#cln-apps{grid-template-rows:auto auto minmax(0,1fr)!important}
+/* split left column: STARTS WITH WINDOWS on top, UNINSTALL below */
+#cln{grid-template-rows:auto auto minmax(0,1fr)!important}#cln-views{display:none!important}
+#cln-start{grid-row:1!important}#cln-uninst{grid-column:1;grid-row:2;display:grid;grid-template-rows:auto auto auto minmax(0,1fr);overflow:hidden!important}
+#cln-uninst #apps-bar{display:flex;gap:5px;align-items:center;padding:0 0 6px;border:none;flex-wrap:nowrap}
+#cln-uninst #apps-bar input{flex:1;min-width:0;width:auto;padding:3px 7px;font-size:10.5px}#cln-uninst #apps-bar select{padding:3px 4px;font-size:10px}
+#cln-uninst #apps-bar button{padding:3px 8px;font-size:10px}
+#cln-uninst #apps-list{overflow:auto;padding:0;min-height:0}
+#cln-uninst #apps-now{margin:0 0 6px;padding:6px 9px;font-size:10px}
+#cln-uninst .ap{grid-template-columns:minmax(0,1fr) 54px 92px;gap:6px;padding:5px 2px;font-size:10.5px}
+#cln-uninst .ap .dt{display:none}#cln-uninst .ap>.tag{display:none}
+#cln-uninst .ap .nm .tag{display:inline-block;margin-left:5px;vertical-align:1px}
+#cln-uninst .ap button{padding:3px 6px;font-size:9px}#cln-uninst .ap .msg{font-size:9px;line-height:1.2}
+#cln-uninst.flash{animation:unFlash 1.2s ease 3}@keyframes unFlash{50%{box-shadow:inset 0 0 0 2px #ff7a3a,0 0 18px #ff7a3a66}}
+/* NI COPY progress (tools/ni_copy.json) */
+#ni-copy{display:none;margin:2px 0 8px;border:1px solid #0f6b7a;border-radius:5px;padding:7px 9px;background:linear-gradient(90deg,#04161c,#020b10);box-shadow:0 0 14px #00e5ff1a}
+#ni-copy.on{display:block}#ni-copy .hd{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.14em;margin-bottom:5px}
+#ni-copy .hd b{color:var(--cy);font-weight:600}#ni-copy .hd span{color:#cfe2ea}
+#ni-copy .bar{height:10px;border-radius:5px;background:#0b2a33;overflow:hidden;position:relative}
+#ni-copy .bar i{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,#00e5ff,#3dff9a);box-shadow:0 0 10px #00e5ff88;transition:width .8s}
+#ni-copy .bar i::after{content:'';position:absolute;inset:0;background:repeating-linear-gradient(135deg,#ffffff22 0 6px,transparent 6px 12px);animation:niMove 1s linear infinite}
+@keyframes niMove{to{background-position:24px 0}}#ni-copy.done .bar i::after{animation:none}
+#ni-copy .cells{display:grid;grid-template-columns:repeat(32,1fr);gap:2px;margin-top:6px}
+#ni-copy .cells i{height:6px;border-radius:1px;background:#0b2a33}#ni-copy .cells i.copied{background:#3dff9a;box-shadow:0 0 4px #3dff9a99}
+#ni-copy .cells i.copying{background:#00e5ff;animation:ggPulse .8s infinite}#ni-copy .cells i.bad{background:#ff4d3a}
+#ni-copy .now{font-size:10px;color:#8fb3bf;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* left column: UNINSTALL takes the top 3/4, STARTS WITH WINDOWS the last 1/4 */
+#cln-body{grid-template-rows:repeat(4,minmax(0,1fr))!important}
+#cln-uninst{grid-column:1!important;grid-row:1/4!important}#cln-start{grid-column:1!important;grid-row:4/5!important}
+#cln-ok{grid-row:1/3!important}#cln-disk{grid-row:3/5!important}#cln-comm{grid-row:1/5!important}
+/* ACID BEDROCK tab: the private developer copy in private_acid/ (git-ignored, never public) */
+#acid{position:fixed;inset:0;top:var(--tabs-h,80px);z-index:12;display:none;grid-template-rows:auto minmax(0,1fr);background:#05050a}
+#acid.on{display:grid}
+#acid>.head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:7px 14px;border-bottom:1px solid #3a1046;background:linear-gradient(90deg,#120616,#05050a 60%)}
+#acid>.head b{color:#ff4fd8;letter-spacing:.18em;font-weight:600;text-shadow:0 0 10px #ff4fd866}#acid>.head span{color:var(--mut);font-size:10.5px}
+#acid>.head .lock{color:#3dff9a;letter-spacing:.12em;font-size:9.5px;border:1px solid #1d6b4a;border-radius:2px;padding:2px 6px;margin-left:8px}
+#acid>.head button{background:#140616;border:1px solid #6b1a7a;color:#ff8ae8;font:inherit;font-size:10px;letter-spacing:.14em;padding:3px 10px;cursor:pointer;border-radius:3px}
+#acid iframe{width:100%;height:100%;border:0;background:#0d0d14}
+#acid .none{padding:30px;color:var(--mut);font-size:12px;line-height:1.6}
+#acid-btn::after{background:#ff4fd8;box-shadow:0 0 7px #ff4fd8}
+/* ===== CORE: THINKING + live diagnostics (gauges, fans, the living map). tools/pc_stats.json ===== */
+#think{grid-template-rows:auto auto auto!important;overflow-y:auto;align-content:start}
+#think-body{grid-template-rows:minmax(440px,calc(100vh - var(--tabs-h,80px) - 260px)) minmax(190px,28vh)!important;min-height:640px}
+#core-deck{display:grid;grid-template-columns:minmax(380px,1.15fr) minmax(0,1.6fr) minmax(250px,.7fr);border-bottom:1px solid var(--line);min-height:0}
+#core-deck .cd{position:relative;padding:8px 12px 10px;border-right:1px solid var(--line);background:radial-gradient(120% 90% at 50% 0%,#04161c 0%,#010407 70%);box-shadow:inset 0 0 0 1px #0f3b46,inset 0 0 24px #00e5ff10;overflow:hidden}
+#core-deck .cd::after{content:'';position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,#00000022 0 1px,transparent 1px 3px)}
+#core-deck h4{margin:0 0 6px;font-size:10px;letter-spacing:.18em;color:var(--mut);font-weight:500}
+#core-deck h4 b{color:var(--ok);font-weight:600}
+#core-deck h4::after{content:"";display:inline-block;width:5px;height:5px;margin-left:8px;border-radius:50%;background:var(--cy);opacity:.6;vertical-align:middle;animation:tpulse 2.4s ease-in-out infinite}
+#cm-svg{width:100%;height:190px;display:block}
+#cm-svg .node rect{fill:#020b10;stroke:#0f6b7a;stroke-width:1.2;transition:stroke .6s}
+#cm-svg .node .glow{transition:opacity .6s}
+#cm-svg .node text{font:600 9px var(--mono,monospace);letter-spacing:.12em;fill:#8fb3bf}
+#cm-svg .node .v{font:600 11px var(--mono,monospace);fill:#e6f4f8;letter-spacing:.02em}
+#cm-svg .link{stroke:#0f3b46;stroke-width:1.4;fill:none}
+#core-gg{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+#core-gg .gg{padding:2px 2px 4px}#core-gg .gg svg{max-width:112px}#core-gg .gg b{font-size:8.5px;margin-top:-6px}#core-gg .gg small{font-size:8.5px}
+#core-fanlist{display:grid;gap:8px}
+.fan{display:grid;grid-template-columns:54px minmax(0,1fr);gap:10px;align-items:center}
+.fan svg{width:54px;height:54px;overflow:visible}
+.fan .rot{transform-origin:27px 27px;animation:fanspin 1s linear infinite}
+.fan.off .rot{animation:none;opacity:.35}
+@keyframes fanspin{to{transform:rotate(360deg)}}
+.fan b{display:block;font-size:10px;letter-spacing:.16em;color:var(--cy);font-weight:600}.fan span{display:block;font-size:10px;color:#cfe2ea}.fan em{display:block;font-style:normal;font-size:9px;color:var(--mut)}
+.heat{display:grid;grid-template-columns:72px minmax(0,1fr) 44px;gap:6px;align-items:center;font-size:9.5px;color:#8fb3bf;margin-top:2px}
+.heat i{height:6px;border-radius:3px;background:#0b2a33;position:relative;overflow:hidden}.heat i u{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,#3dff9a,#ffbe5a,#ff4d3a);transition:width .8s}
+.heat b{text-align:right;color:#e6f4f8;font-weight:500}.heat.hot b{color:#ff6a4a}
+/* ===== CLEANER in the THINKING look ===== */
+#cln>.head b{color:var(--ok)!important}
+#cln-steps div{border-color:#0f3b46;background:#020b10}#cln-steps div.now{border-color:var(--cy);box-shadow:0 0 12px #00e5ff33}#cln-steps div.now b{color:var(--cy)}
+#cln-body .card,#cln-uninst{background:radial-gradient(120% 90% at 50% 0%,#04161c 0%,#010407 70%)!important;box-shadow:inset 0 0 0 1px #0f3b46,inset 0 0 24px #00e5ff10!important}
+#cln-body .ob-head b{color:var(--ok)!important}
+#cln-body .ob-head b::after{content:"";display:inline-block;width:5px;height:5px;margin-left:8px;border-radius:50%;background:var(--cy);opacity:.6;vertical-align:middle;animation:tpulse 2.4s ease-in-out infinite}
+.cln-grp{color:var(--cy)!important}.cln-row{border-bottom-color:#0b2a33!important}.cln-row span{color:#cfe2ea!important}
+.cln-card{border-color:#0f3b46!important;background:#020b1088}.cln-card h5{color:#e6f4f8!important}.cln-card p,.cln-card ul{color:#9fb6c0!important}
+.cln-card button,#cln-send{background:#04161c!important;border-color:#0f6b7a!important;color:var(--cy)!important}
+.cln-card button.go{background:#062a18!important;border-color:#1d6b4a!important;color:var(--ok)!important}
+#cln-log .m.c{background:#04161c!important;border-color:#0f3b46!important;color:#cfe2ea!important}
+#cln-in textarea{background:#020b10!important;border-color:#0f3b46!important;color:#e6f4f8!important}
+#cln *{scrollbar-color:rgba(61,255,154,.5) rgba(61,255,154,.05)!important}
+.mt b,#cln-uf .lbl b{color:var(--cy)!important}
+/* CORE v2: THINKING-style dials, fans in a row, everything on one screen */
+#think{grid-template-rows:auto auto minmax(0,1fr)!important}
+#think-body{grid-template-rows:minmax(340px,1fr) 132px!important;min-height:0!important}
+#think-body .card{padding:8px 10px!important;font-size:10.5px}
+#core-deck{grid-template-columns:minmax(330px,1fr) minmax(0,2.1fr) minmax(250px,.75fr)!important}
+#core-deck .cd{padding:6px 10px 6px!important}
+#cm-svg{height:150px!important}
+#core-gg{grid-template-columns:repeat(8,minmax(0,1fr))!important;gap:4px!important}
+.gk{text-align:center}.gk svg{width:100%;max-width:118px;height:auto;display:block;margin:0 auto;overflow:visible}
+.gk .va{transition:stroke-dasharray .9s cubic-bezier(.2,.8,.2,1),stroke .6s}
+.gk .nd{transition:transform .9s cubic-bezier(.3,1.4,.4,1);transform-origin:60px 58px}
+.gk .num{font:600 15px var(--mono,monospace);fill:#e6f4f8;letter-spacing:.02em}
+.gk .unit{font:500 6.5px var(--mono,monospace);fill:var(--cy);letter-spacing:.16em}
+.gk b{display:block;font-size:8.5px;letter-spacing:.18em;color:#8fb3bf;font-weight:600;margin-top:-2px;white-space:nowrap}
+.gk small{display:block;font-size:8.5px;color:#5f7d88;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gk.hot .num{fill:#ffb08a}.gk.hot b{color:#ff8a6a}
+#core-fanlist{grid-template-columns:repeat(3,1fr)!important;gap:6px!important}
+.fan{grid-template-columns:1fr!important;justify-items:center;text-align:center;gap:2px!important}
+.fan svg{width:46px!important;height:46px!important}
+.fan b{font-size:9px!important}.fan span,.fan em{font-size:9px!important}
+#core-heat{margin-top:6px}
+#cln-btn::after{background:#ffbe5a;box-shadow:0 0 7px #ffbe5a}
+#cln *{scrollbar-color:rgba(255,190,90,.5) rgba(255,190,90,.05)}
 /* BACKDROP LAB: the build process for the themes and cases (tools/backdrop_lab.json), in the THINKING look */
 #lab{position:fixed;inset:0;top:var(--tabs-h,80px);z-index:10;display:none;grid-template-rows:auto minmax(0,1fr);background:var(--bg)}
 #lab.on{display:grid}
@@ -551,8 +795,7 @@ footer .nav:hover{border-color:var(--cy)}
 @keyframes tbusy{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.8);opacity:.35}}
 #wbtabs .tab.flash{animation:tflash .9s ease}
 @keyframes tflash{0%{box-shadow:0 0 0 #0000}25%{box-shadow:0 0 14px #ffffff55,inset 0 0 10px #ffffff22}100%{box-shadow:0 0 0 #0000}}
-#wbtabs #think-btn.mail{border-color:var(--mg);box-shadow:0 0 10px #ff3fa466}
-#wbtabs #think-btn.mail i{background:var(--mg);box-shadow:0 0 8px var(--mg)}
+
 .ob-pane{display:none}.ob-pane.on{display:block}
 .ob-head{display:flex;gap:8px;align-items:center;margin:0 0 5px;font-size:9px;letter-spacing:.16em;color:var(--mut)}
 .ob-head b{color:var(--cy);font-weight:600}.ob-head span{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
@@ -695,6 +938,221 @@ header b{color:var(--ok)}header>b{text-shadow:0 0 10px #3dff9a55}
 header::after{background:linear-gradient(90deg,transparent,var(--cy),var(--ok),transparent)!important}
 .modes button.on{background:var(--ok)!important;border-color:var(--ok)!important;color:#011!important}
 #sbank button.on{background:var(--ok);color:#011;border-color:#8dffc4}
+
+/* CORE · STORAGE + COPY (mirrors CLEANER's copy progress, used/free bar and folder meters) */
+#t-mind{grid-column:1/3!important}
+#core-space{grid-column:3;grid-row:1;position:relative;min-height:0;overflow:hidden;padding:8px 12px;border-bottom:1px solid var(--line);border-left:1px solid var(--line);background:radial-gradient(120% 90% at 50% 0%,#04161c 0%,#010407 70%);box-shadow:inset 0 0 0 1px #0f3b46,inset 0 0 24px #00e5ff10;display:flex;flex-direction:column;gap:9px}
+#core-space h4{margin:0;font-size:10px;letter-spacing:.18em;color:var(--mut);font-weight:500}#core-space h4 b{color:var(--ok);font-weight:600}
+#cs-copy{border:1px solid #0f6b7a;border-radius:5px;padding:7px 9px;background:linear-gradient(90deg,#04161c,#020b10);box-shadow:0 0 14px #00e5ff1a}
+#cs-copy.cs-none{color:var(--mut);font-size:10px;border-style:dashed;box-shadow:none}
+#cs-copy .hd{display:flex;justify-content:space-between;gap:8px;font-size:9.5px;letter-spacing:.1em;margin-bottom:5px}#cs-copy .hd b{color:var(--cy);font-weight:600;white-space:nowrap}#cs-copy .hd span{color:#cfe2ea;text-align:right}
+#cs-copy .bar{height:9px;border-radius:5px;background:#0b2a33;overflow:hidden;position:relative}
+#cs-copy .bar i{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,#00e5ff,#3dff9a);box-shadow:0 0 10px #00e5ff88}
+#cs-copy .bar i::after{content:'';position:absolute;inset:0;background:repeating-linear-gradient(135deg,#ffffff22 0 6px,transparent 6px 12px);animation:niMove 1s linear infinite}
+#cs-copy .cells{display:grid;grid-template-columns:repeat(32,1fr);gap:2px;margin-top:5px}
+#cs-copy .cells i{height:5px;border-radius:1px;background:#0b2a33}#cs-copy .cells i.copied{background:#3dff9a;box-shadow:0 0 4px #3dff9a99}
+#cs-copy .cells i.copying{background:#00e5ff;animation:ggPulse .8s infinite}#cs-copy .cells i.bad{background:#ff4d3a}
+#cs-copy .now{font-size:9.5px;color:#8fb3bf;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#cs-uf .lbl{display:flex;justify-content:space-between;font-size:9.5px;letter-spacing:.12em;margin-bottom:3px}#cs-uf .lbl b{color:var(--cy);font-weight:600}#cs-uf .lbl span{color:#3dff9a}
+#cs-uf .track{position:relative;height:12px;border-radius:6px;overflow:hidden;background:repeating-linear-gradient(135deg,rgba(61,255,154,.10) 0 6px,rgba(61,255,154,.03) 6px 12px);box-shadow:inset 0 0 0 1px #1d6b4a}
+#cs-uf .used{position:absolute;inset:0 auto 0 0;border-radius:6px 0 0 6px;background:linear-gradient(90deg,#3dff9a,#ffbe5a 70%,#ff4d3a);box-shadow:0 0 10px #ffbe5a66}
+#cs-uf .pct{position:absolute;right:8px;top:0;line-height:12px;font-size:8.5px;letter-spacing:.12em;color:#e6f4f8;text-shadow:0 0 4px #000}
+#cs-meters{display:grid;gap:5px}#cs-meters .mt{grid-template-columns:96px minmax(0,1fr) 52px;font-size:9.5px}
+#cs-meters .mt .seg{height:8px}
+/* SYSTEM readout: four tight columns so it fits without a scroll bar */
+#sys-body{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:0 10px!important;font-size:10px!important}
+#sys-body .r{line-height:1.22!important}#sys-body h5{margin:1px 0 0!important;font-size:8px!important}#sys-body .bar{margin:0 0 2px!important;height:2px!important}
+#t-sys .ob-head{margin-bottom:2px!important}
+
+/* ===== CORE · HUD frames (same chamfered border + accent ticks as the OPERATOR TELEMETRY panels) ===== */
+.hud{--hc:#5ff6ff;position:relative}
+.hud>.hf{position:absolute;inset:4px;pointer-events:none;z-index:2}
+.hud>.hf::before{content:'';position:absolute;inset:0;background:var(--hc);opacity:.35;
+  clip-path:polygon(evenodd,9px 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%,0 9px,9px 0,9.4px 1px,1px 9.4px,1px calc(100% - 1px),calc(100% - 9.4px) calc(100% - 1px),calc(100% - 1px) calc(100% - 9.4px),calc(100% - 1px) 1px,9.4px 1px)}
+.hud>.hf::after{content:'';position:absolute;inset:0;background:linear-gradient(var(--hc),var(--hc)) 0 9px/2px 18px no-repeat,linear-gradient(var(--hc),var(--hc)) right 0 bottom 9px/2px 18px no-repeat;box-shadow:none}
+#core-deck .cd.hud,#core-space.hud,#think-body .card.hud{box-shadow:none!important;border:0!important;background:#010407!important;padding:14px 16px 10px!important}
+#core-deck{gap:0}
+#core-fans.hud{--hc:#7dffb2}#t-brief.hud{--hc:#ffb347}#t-term.hud{--hc:#7dffb2;padding:6px 8px 6px!important}
+.hud h4,#core-deck .hud h4{margin:0 0 6px!important;font-size:9px!important;letter-spacing:.2em!important;color:#5f8792!important;font-weight:500}
+.hud h4 b,#core-deck .hud h4 b{color:var(--hc)!important;font-weight:600}
+/* bottom row: GOAL | MSYS2 (SYSTEM moved up into STORAGE + SYSTEM) */
+#t-brief{grid-column:1!important}#t-term{grid-column:2/4!important}
+#t-mind{grid-column:1/3!important}
+/* STORAGE + SYSTEM */
+#core-space{display:flex;flex-direction:column;gap:7px;overflow:hidden}
+#core-space .lab{display:flex;justify-content:space-between;gap:8px;font-size:9px;letter-spacing:.16em;color:#5f8792;margin-bottom:3px}
+#core-space .lab b{color:var(--hc);font-weight:600}#core-space .lab span{color:#cfe2ea;letter-spacing:.06em;text-align:right}
+#core-space .cells{display:grid;gap:2px;height:7px}#core-space .cells i{background:#0a1a20}
+#core-space .cells i.on{background:#5ff6ff;box-shadow:0 0 4px #5ff6ff88}#core-space .cells i.am{background:#ffb347;box-shadow:0 0 4px #ffb34788}#core-space .cells i.rd{background:#ff4466;box-shadow:0 0 4px #ff446688}
+#core-space .cells i.gr{background:#7dffb2;box-shadow:0 0 4px #7dffb288}#core-space .cells i.now{background:#5ff6ff;animation:ggPulse .8s infinite}#core-space .cells i.bad{background:#ff4466}
+#cs-copy{border:0!important;background:none!important;box-shadow:none!important;padding:0!important}
+#cs-copy.cs-none{color:#5f8792;font-size:9.5px;letter-spacing:.12em}
+#cs-copy .now{font-size:9.5px;color:#7aa3ae;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#cs-copy .cells.lib{height:4px;margin-top:3px}
+#cs-meters{display:grid;gap:3px!important}
+#cs-meters .row{display:grid;grid-template-columns:96px minmax(0,1fr) 54px;gap:8px;align-items:center;font-size:9.5px}
+#cs-meters .row span{color:#cfe2ea;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#cs-meters .row b{text-align:right;color:#5ff6ff;font-weight:500}
+#cs-meters .cells{height:6px}
+#core-space #t-sys{border-top:1px solid #0f3b46;padding-top:6px;min-height:0}
+#core-space .cs-h{display:flex;gap:10px;align-items:baseline;font-size:9px;letter-spacing:.2em;color:#5f8792;margin-bottom:2px}#core-space .cs-h b{color:var(--hc);font-weight:600}
+#core-space #sys-body{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:0 16px!important}
+#sys-body .r b{color:#5ff6ff}#sys-body .r b.w{color:#ffb347}#sys-body .r b.h{color:#ff4466}#sys-body .bar i{background:#5ff6ff}
+
+/* ===== TAB LEDs: one light left of each tab name =====
+   dim = quiet · teal = the page you are on · blue blink = working · steady green = changed, ready to look
+   pulsing green = Claude needs you · amber blink = warning · red blink = problem / PC running hot */
+#wbtabs .tab::after{display:none!important}
+#csig{display:none!important}
+#wbtabs .tab .led{display:inline-block;vertical-align:middle;width:7px;height:7px;border-radius:50%;margin:-2px 8px 0 0;background:#1d3440;box-shadow:inset 0 0 0 1px #2c4c58;animation:none;transition:background .3s,box-shadow .3s}
+#wbtabs .tab.on .led{background:#00e5ff;box-shadow:0 0 6px #00e5ff99}
+#wbtabs .tab.news .led{background:#3dff9a;box-shadow:0 0 8px #3dff9a}
+#wbtabs .tab.busy .led{background:#4da3ff;box-shadow:0 0 8px #4da3ff;animation:ledBlink .5s steps(1) infinite}
+#wbtabs .tab.ask .led{background:#3dff9a;box-shadow:0 0 10px #3dff9a,0 0 18px #3dff9a88;animation:ledPulse 1.1s ease-in-out infinite}
+#wbtabs .tab.warn .led{background:#ffb347;box-shadow:0 0 9px #ffb347;animation:ledBlink .8s steps(1) infinite}
+#wbtabs .tab.hot .led{background:#ff4466;box-shadow:0 0 10px #ff4466;animation:ledBlink .45s steps(1) infinite}
+@keyframes ledBlink{0%{opacity:1}50%{opacity:.15}}
+@keyframes ledPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.45);opacity:.45}}
+#wbtabs #think-btn{color:var(--mut)}#wbtabs #think-btn.on{color:var(--ok)}
+#think-btn.hot{animation:none!important;border-color:var(--line)}
+
+/* ===== CORE layout: readout left | STORAGE+SYSTEM / MSYS2 / GOAL right (lined up with HARDWARE + ACTIVITY) | TELEMETRY STREAM along the bottom ===== */
+#think-body{grid-template-columns:minmax(0,2fr) minmax(420px,1fr)!important;grid-template-rows:minmax(340px,1fr) 104px!important}
+#t-mind{grid-column:1!important;grid-row:1!important}
+#core-right{grid-column:2;grid-row:1;display:grid;grid-template-rows:minmax(0,1fr) var(--hwH,110px) var(--scH,80px);row-gap:8px;padding-bottom:10px;min-height:0;border-left:1px solid var(--line);background:#010407}
+#core-right>*{grid-column:1!important;grid-row:auto!important;min-height:0}
+#core-space{border:0!important}
+#t-term.hud{padding:8px 10px 6px!important}#t-term .ob-head{padding:4px 6px 0!important}
+#t-brief.hud{padding:8px 12px 6px!important;overflow:auto}#t-brief #t-goal{font-size:10.5px}
+
+/* ===== CORE: full-width telemetry banner (title · live event · mode · clock), readout + right column below ===== */
+#think-body{grid-template-columns:minmax(0,1.85fr) minmax(500px,1.15fr)!important;grid-template-rows:30px minmax(340px,1fr)!important}
+#t-mind{grid-column:1!important;grid-row:2!important}#core-right{grid-row:2!important}
+#t-bar{grid-column:1/-1;grid-row:1;display:grid;grid-template-columns:auto minmax(0,1fr) auto minmax(0,.35fr) auto;align-items:center;gap:16px;padding:0 14px;background:#02030a;border-bottom:1px solid #5ff6ff66;font-size:10px;min-width:0}
+#t-bar b{color:#5ff6ff;letter-spacing:.06em;font-weight:600;white-space:nowrap}
+#tb-now{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#e8fbff;font-size:10px}#tb-now u{text-decoration:none;color:#3d6c78;margin-right:8px}#tb-now b{margin-right:8px;font-weight:700}
+#tb-mode{font-style:normal;font-weight:700;letter-spacing:.08em;padding:1px 11px;border:1px solid var(--mc,#1d4450);color:var(--mc,#1d4450);background:color-mix(in srgb,var(--mc,#1d4450) 22%,transparent);animation:tbm 2s ease-in-out infinite}
+#tb-mode.fast{animation-duration:.7s}@keyframes tbm{50%{background:color-mix(in srgb,var(--mc,#1d4450) 8%,transparent)}}
+#tb-clock{font-style:normal;color:#5ff6ff;font-size:9.5px;white-space:pre;letter-spacing:.02em}
+/* STORAGE + SYSTEM, tighter so MSYS2 + GOAL fit under it */
+#core-space{gap:5px!important;padding:12px 14px 6px!important}
+#core-space h4{margin:0!important}
+#cs-copy .cells:not(.lib){display:none}#cs-copy .cells.lib{height:6px;margin-top:2px}#cs-copy .now{margin-top:2px}
+#cs-meters .row{grid-template-columns:96px minmax(0,1fr) 52px;gap:8px;font-size:9.5px}#cs-meters .cells{height:6px}
+#core-space #t-sys{padding-top:4px}
+#core-space #sys-body{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:0 12px!important;font-size:9.5px!important}
+
+/* ===================== HUD SKIN: the CORE look on every page =====================
+   panels (.hp): chamfered top-left + bottom-right corners, thin border, short bright accent ticks
+   buttons + readouts (.hb set below): the same chamfer at button size                                  */
+.hp{--hc:#5ff6ff;--hb:color-mix(in srgb,var(--hc) 40%,transparent);position:relative;border:1px solid var(--hb)!important;border-radius:0!important;box-shadow:none!important;
+  clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);
+  background-color:#010407!important;background-image:linear-gradient(135deg,transparent 50%,var(--hb) 50%,var(--hb) calc(50% + 1.2px),transparent calc(50% + 1.2px)),linear-gradient(135deg,transparent calc(50% - 1.2px),var(--hb) calc(50% - 1.2px),var(--hb) 50%,transparent 50%),linear-gradient(var(--hc),var(--hc)),linear-gradient(var(--hc),var(--hc))!important;
+  background-size:10px 10px,10px 10px,2px 18px,2px 18px!important;background-position:0 0,100% 100%,0 12px,100% calc(100% - 12px)!important;background-repeat:no-repeat!important;background-origin:border-box!important}
+.hp.am{--hc:#ffb347}.hp.gr{--hc:#7dffb2}.hp.mg{--hc:#ff4fd8}
+.hl{--hc:#5ff6ff}.hl.am{--hc:#ffb347}.hl>.head b,.hl .ob-head>b,.hl>.head>span>b{color:var(--hc)!important;letter-spacing:.18em}
+.hp::after{display:none!important}
+.hp>.head,.hp .ob-head{border-color:color-mix(in srgb,var(--hc) 25%,transparent)!important}
+.hp>.head b,.hp .ob-head>b,.hp>.head span>b{color:var(--hc)!important;letter-spacing:.18em}
+section.pane.hp{margin:3px}#cln-body .hp,#lab .hp{margin:3px}
+/* buttons, pills and small readouts */
+header .modes button,#git>span,#pc-pill,#think>.head button,#cln>.head button,#acid>.head button,#acid>.head .lock,
+#term-clear,#t-brief .ob-tabs button,#tb-mode,#apps-bar button,#apps-bar input,#apps-bar select,.ap button,#cln-cards button,#cln-comm button,#cln-views button,#ro button,#live,#t-bar #tb-mode{
+  --hb:var(--bcol,#2c6a78);border:1px solid var(--hb)!important;border-radius:0!important;
+  clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px);
+  background-image:linear-gradient(135deg,transparent 50%,var(--hb) 50%,var(--hb) calc(50% + 1px),transparent calc(50% + 1px)),linear-gradient(135deg,transparent calc(50% - 1px),var(--hb) calc(50% - 1px),var(--hb) 50%,transparent 50%)!important;background-size:6px 6px,6px 6px!important;background-position:0 0,100% 100%!important;background-repeat:no-repeat!important;background-origin:border-box!important}
+#live{padding:2px 10px}
+header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:#5ff6ff;box-shadow:inset 2px 0 0 #5ff6ff!important}
+#think>.head button,#cln>.head button,#lab>.head button,#acid>.head button,#patch>.head button{--bcol:#5ff6ff88}
+.ap button,#cln-cards button{--bcol:currentColor}
+/* tabs: chamfered top-left, accent tick on the open page */
+#wbtabs .tab{--hb:#1d4450;border:1px solid var(--hb)!important;border-bottom:0!important;border-radius:0!important;
+  clip-path:polygon(9px 0,100% 0,100% 100%,0 100%,0 9px);background-color:#02060a!important;
+  background-image:linear-gradient(135deg,transparent 50%,var(--hb) 50%,var(--hb) calc(50% + 1px),transparent calc(50% + 1px))!important;background-size:9px 9px!important;background-position:0 0!important;background-repeat:no-repeat!important;background-origin:border-box!important;box-shadow:none!important}
+#wbtabs .tab:hover{--hb:#2c6a78}
+#wbtabs .tab.on{--hb:#5ff6ff99;background-color:#010407!important;color:#5ff6ff!important;box-shadow:inset 2px 0 0 #5ff6ff,inset 0 1px 0 #5ff6ff66!important}
+
+/* sub-boxes inside panels: step tiles, approval cards, messages, gauges, copy readout */
+#cln-steps>div,#cln-cards>div,#cln-log>div,#ni-copy,.gg{
+  --hb:var(--scol,#1d5a66);border:1px solid var(--hb)!important;border-radius:0!important;box-shadow:none!important;
+  clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);
+  background-image:linear-gradient(135deg,transparent 50%,var(--hb) 50%,var(--hb) calc(50% + 1px),transparent calc(50% + 1px)),linear-gradient(135deg,transparent calc(50% - 1px),var(--hb) calc(50% - 1px),var(--hb) 50%,transparent 50%)!important;background-size:8px 8px,8px 8px!important;background-position:0 0,100% 100%!important;background-repeat:no-repeat!important;background-origin:border-box!important}
+#cln-steps>div.wait{--scol:#ffb347}#cln-steps>div.on,#cln-steps>div.now{--scol:#5ff6ff}.gg.hot{--scol:#ff4466}
+#cln-cards>div{--scol:#ffb34777}#cln-log>div{--scol:#7dffb255}
+
+/* CORE · RUN THESE: .bat files Claude asked you to run that have not run yet (tools/run_queue.json) */
+#runq{display:none;position:absolute;left:14px;right:14px;bottom:12px;z-index:4;padding:10px 12px 8px;background:rgba(4,22,14,.55);backdrop-filter:blur(3px);
+  border:1px solid #7dffb288;clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);animation:rqPulse 1.6s ease-in-out infinite}
+#runq.on{display:block}
+@keyframes rqPulse{0%,100%{background:rgba(4,30,18,.40);box-shadow:inset 0 0 18px #7dffb233;border-color:#7dffb266}50%{background:rgba(10,60,34,.70);box-shadow:inset 0 0 36px #7dffb266;border-color:#7dffb2}}
+#runq .rh{display:flex;justify-content:space-between;align-items:center;font-size:9.5px;letter-spacing:.2em;margin-bottom:6px}
+#runq .rh b{color:#7dffb2;font-weight:700}#runq .rh b::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:#7dffb2;margin-right:8px;box-shadow:0 0 10px #7dffb2;animation:ledPulse 1.1s ease-in-out infinite}
+#runq .rh span{color:#9fd8b8}
+#runq .it{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:6px 0;border-top:1px solid #7dffb233}
+#runq .it b{color:#e8fbff;font-size:10.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#runq .it em{grid-column:1;font-style:normal;color:#9fc7b4;font-size:9.5px}
+#runq .it .st{grid-column:1/-1;font-size:9.5px;color:#ffb347}
+#runq .bt{grid-row:1/3;grid-column:2;display:flex;flex-direction:column;gap:3px}
+#runq button{--hb:#7dffb2;font:inherit;font-size:9.5px;letter-spacing:.16em;padding:4px 12px;cursor:pointer;color:#011;background:#7dffb2;border:1px solid #7dffb2;
+  clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
+#runq button.f{background:transparent;color:#7dffb2;font-size:8.5px;padding:2px 8px;border-color:#7dffb266}
+#runq button:hover{box-shadow:0 0 12px #7dffb2}#runq button:disabled{background:transparent;color:#ffb347;border-color:#ffb34777;cursor:not-allowed;box-shadow:none}
+
+/* ===== LIBRE · HARDWARE DIAGNOSTICS (tools/lhm.json, written by tools/pc_stats.ps1 from LibreHardwareMonitor) ===== */
+#libre{position:fixed;inset:0;top:var(--tabs-h,80px);z-index:13;display:none;grid-template-rows:auto auto auto minmax(0,1fr);background:#010407}
+#libre.on{display:grid}
+#libre>.head{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);background:#02030a}
+#libre>.head b{color:var(--ok);letter-spacing:.18em;font-weight:600}#libre>.head span{color:var(--mut);font-size:10.5px}
+#libre>.head button{--hb:#5ff6ff88;background-color:#04161c;color:#5ff6ff;font:inherit;font-size:13px;padding:2px 10px;cursor:pointer;border:1px solid var(--hb);
+  clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
+#lb-top{margin:8px 10px 0;padding:14px 16px 8px!important;background:#010407}
+#lb-top h4,#lb-body h4{margin:0 0 6px;font-size:9px;letter-spacing:.2em;color:#5f8792;font-weight:500}#lb-top h4 b,#lb-body h4 b{color:var(--hc);font-weight:600}
+#lb-gg{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:4px}
+#lb-body{overflow:auto;padding:8px 10px 12px;columns:3 440px;column-gap:10px}
+#lb-body .hud{break-inside:avoid;margin:0 0 10px;padding:14px 16px 10px!important;background:#010407;display:block}
+#lb-body .hud.cpu{--hc:#ffb347}#lb-body .hud.gpu{--hc:#7dffb2}#lb-body .hud.disk{--hc:#ff4fd8}
+#lb-body h4 span{float:right;color:#3d6c78;letter-spacing:.1em}
+#lb-body h5{margin:8px 0 3px;font-size:8.5px;letter-spacing:.2em;color:#5f8792;font-weight:500;border-bottom:1px solid #0f3b46;padding-bottom:2px}
+#lb-body .r{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(60px,1fr) 70px 46px 46px;gap:8px;align-items:center;font-size:10px;line-height:15px}
+#lb-body .r span{color:#cfe2ea;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#lb-body .r b{text-align:right;color:#5ff6ff;font-weight:500}#lb-body .r b.w{color:#ffb347}#lb-body .r b.h{color:#ff4466}
+#lb-body .r i,#lb-body .r em{font-style:normal;text-align:right;color:#3d6c78;font-size:9px}
+#lb-body .r.hd{color:#3d6c78;font-size:8px;letter-spacing:.16em;line-height:12px}#lb-body .r.hd span,#lb-body .r.hd b{color:#3d6c78;font-size:8px}
+#lb-body .cells{display:grid;grid-template-columns:repeat(20,1fr);gap:1px;height:5px}#lb-body .cells i{background:#0a1a20}
+#lb-body .cells i.on{background:#5ff6ff;box-shadow:0 0 3px #5ff6ff88}#lb-body .cells i.am{background:#ffb347}#lb-body .cells i.rd{background:#ff4466}
+#lb-body .none{color:#5f8792;font-size:11px;padding:30px;column-span:all}
+
+/* LIBRE as a tabbed matrix: one tab per kind of hardware, its sensor groups as a grid of tiles; CPU adds a per-core matrix */
+#lb-tabs{display:flex;gap:4px;padding:8px 10px 0;border-bottom:1px solid #0f3b46}
+#lb-tabs button{--hb:#1d4450;font:inherit;font-size:10px;letter-spacing:.18em;color:#5f8792;background:#02060a;border:1px solid var(--hb);border-bottom:0;padding:5px 14px 6px;cursor:pointer;
+  clip-path:polygon(8px 0,100% 0,100% 100%,0 100%,0 8px);position:relative;top:1px}
+#lb-tabs button b{color:#3d6c78;font-weight:500;margin-left:6px}
+#lb-tabs button:hover{color:#cfe2ea}
+#lb-tabs button.on{--hb:#5ff6ff99;color:#5ff6ff;background:#010407;box-shadow:inset 2px 0 0 #5ff6ff,inset 0 1px 0 #5ff6ff66}
+
+#lb-body .hud{margin:0!important}
+#lb-body .mx{grid-column:1/-1}
+#lb-body table{width:100%;border-collapse:collapse;font-size:10px}
+#lb-body th{font-size:8px;letter-spacing:.18em;color:#3d6c78;font-weight:500;text-align:right;padding:2px 8px 4px;border-bottom:1px solid #0f3b46}
+#lb-body th:first-child,#lb-body td:first-child{text-align:left}
+#lb-body td{padding:4px 8px;border-bottom:1px solid #0a1a20;text-align:right;color:#5ff6ff}
+#lb-body td:first-child{color:#cfe2ea;letter-spacing:.08em}
+#lb-body td .cells{margin-top:3px}
+#lb-body td.w{color:#ffb347}#lb-body td.h{color:#ff4466}
+#lb-body h4 small{color:#3d6c78;letter-spacing:.1em;font-size:9px;margin-left:8px}
+
+/* LIBRE fits one screen: compact vitals, masonry tiles, and denser text if a tab still overflows */
+#lb-top{padding:10px 14px 4px!important;margin:6px 10px 0}
+#lb-gg .gk svg{max-width:92px;margin:0 auto;display:block}#lb-gg .gk b{font-size:8.5px}#lb-gg .gk small{font-size:8.5px}
+#lb-tabs{padding-top:6px}
+#lb-body{display:block!important;columns:280px 6!important;column-gap:8px;column-fill:balance;overflow:hidden!important;padding:8px 10px 8px}
+#lb-body .hud{break-inside:avoid;margin:0 0 8px!important;padding:11px 12px 7px!important}
+#lb-body .mx{column-span:all}
+#lb-body .r{grid-template-columns:minmax(0,1.4fr) minmax(40px,.8fr) 64px 38px 38px;gap:6px;line-height:13px;font-size:9.5px}
+#lb-body h4{margin:0 0 3px!important}#lb-body h4 small{display:block;margin:2px 0 0;font-size:8.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#lb-body h4 span{position:absolute;right:12px;top:11px}
+#lb-body td{padding:2px 8px}#lb-body table{font-size:9.5px}
+#lb-body.dense .r{line-height:11px;font-size:8.5px}#lb-body.dense td{padding:1px 8px}#lb-body.dense .hud{padding:9px 10px 5px!important;margin-bottom:6px!important}
+#lb-body.dense2 .r{grid-template-columns:minmax(0,1.4fr) minmax(30px,.6fr) 58px 0 34px}#lb-body.dense2 .r i{visibility:hidden}#lb-body.dense2 .r.hd{display:none}
 </style>
 </head>
 <body>
@@ -705,10 +1163,13 @@ header::after{background:linear-gradient(90deg,transparent,var(--cy),var(--ok),t
   <span id="live">● watching</span></header>
 <nav id="wbtabs" aria-label="Workbench pages">
   <button type="button" class="tab on" id="tab-wb" title="The workbench: design, live assembly, compiler, drawing">WORKBENCH</button>
+  <button type="button" id="acid-btn" class="tab" title="ACID BEDROCK developer copy (private_acid/, never pushed)">ACID BEDROCK</button>
   <button type="button" id="patch-btn" class="tab" title="Rack's live patch">PATCH MAP<b id="patch-n"></b></button>
   <button type="button" id="lib-btn" class="tab" title="Saved patches: patches/ and Rack's patches folder">PATCHES<b id="lib-n"></b></button>
-  <button type="button" id="think-btn" class="tab idle" title="What Claude is doing and why (tools/claude_thinking.json)"><i></i>THINKING<b id="think-now">-</b></button>
   <button type="button" id="lab-btn" class="tab" title="How the BACKDROP themes and cases are being built (tools/backdrop_lab.json)">BACKDROP LAB<b id="lab-n"></b></button>
+  <button type="button" id="cln-btn" class="tab" title="The PC cleanup: what changed, what is next, and approvals (tools/cleaner.json)">CLEANER<b id="cln-n"></b></button>
+  <button type="button" id="libre-btn" class="tab" title="LIBRE: every sensor LibreHardwareMonitor reads (tools/lhm.json)">LIBRE</button>
+  <button type="button" id="think-btn" class="tab idle" title="CORE: Claude's thinking + this PC live (tools/claude_thinking.json, tools/pc_stats.json)">CORE<b id="think-now" hidden></b></button>
   <span class="sp"></span>
   <div class="views" id="wb-views" title="What the WORKBENCH page shows"><i>VIEW</i><button type="button" data-v="all" class="on">ALL</button><button type="button" data-v="design">DESIGN</button><button type="button" data-v="code">CODE</button><button type="button" data-v="feeds">FEEDS + CHAT</button></div>
 </nav>
@@ -718,7 +1179,7 @@ header::after{background:linear-gradient(90deg,transparent,var(--cy),var(--ok),t
     <div id="stage"><img id="view" alt=""><div id="mod"></div></div>
   </section>
   <section class="pane" id="p-asm">
-    <div class="head"><span>LIVE.ASSEMBLY <b id="asm-file">waiting for a save</b> <span id="asm-meta"></span></span><button type="button" id="replay">REPLAY</button></div>
+    <div class="head"><span>LIVE.ASSEMBLY <b id="asm-file"></b> <span id="asm-meta"></span></span><button type="button" id="replay">REPLAY</button></div>
     <div id="asm"><pre id="code"><div class="more">Save an SVG in res/ or a file in src/ and it is rebuilt here, piece by piece.</div></pre></div>
   </section>
   <section class="pane" id="p-comp">
@@ -744,19 +1205,56 @@ header::after{background:linear-gradient(90deg,transparent,var(--cy),var(--ok),t
   <div class="note">Rack closes the patch that is open now and opens this one. Rack saves what was open first, and a copy goes to <b>Rack2/autosave-before-open</b>.</div>
   <div class="st" id="ro-st"></div></div>
   <div class="bot"><button type="button" class="cancel">CANCEL</button><button type="button" class="go">OPEN IN RACK</button></div></div></div>
-<div id="think" role="dialog" aria-modal="true" aria-label="Claude thinking"><div class="head"><span><b>CLAUDE · THINKING</b> &nbsp;<span id="t-at"></span></span><button type="button" id="think-x" aria-label="Close">&times;</button></div>
+<div id="think" role="dialog" aria-modal="true" aria-label="Claude thinking"><div class="head"><span><b>CORE · CLAUDE + SYSTEM</b> &nbsp;<span id="t-at"></span></span><button type="button" id="think-x" aria-label="Close">&times;</button></div>
+<div id="core-deck">
+  <div class="cd hud" id="core-map"><h4><b>LIVING MAP</b> · data moving inside this PC</h4><svg id="cm-svg" viewBox="0 0 520 200" preserveAspectRatio="xMidYMid meet"></svg></div>
+  <div class="cd hud" id="core-gauges"><h4><b>CORE GAUGES</b> · live</h4><div id="core-gg"></div></div>
+  <div class="cd hud" id="core-fans"><h4><b>FANS + HEAT</b></h4><div id="core-fanlist"></div><div id="core-heat"></div></div>
+</div>
+
   <div id="think-body">
+    <div id="t-bar"><b>SYNTHBLOK // OPERATOR TELEMETRY</b><span id="tb-now" title="TELEMETRY STREAM · the latest event"></span><i id="tb-mode">DORMANT</i><span></span><em id="tb-clock"></em></div>
     <div id="t-mind"><canvas id="mind-2d"></canvas>
       <div id="t-inbox" role="status" aria-live="polite"></div>
       <div id="t-now"><h4>RIGHT NOW</h4><div class="title" id="t-title">-</div><div class="detail" id="t-detail"></div><div class="why" id="t-why"></div></div></div>
-    <div class="card oled" id="t-brief"><div class="ob-tabs"><button type="button" data-tab="goal" class="on">GOAL<i id="t-qled" title="open questions for you"></i></button><button type="button" data-tab="plan">PLAN</button><button type="button" data-tab="log">DECISIONS</button></div>
+    <div id="core-right">
+    <div class="hud" id="core-space"><h4><b>STORAGE + SYSTEM</b> · C: F: and what runs</h4><div id="cs-copy" class="cs-none">no copy running</div><div id="cs-uf"></div><div id="cs-meters"></div><div id="t-sys"><div class="cs-h"><b>SYSTEM</b><span id="sys-at"></span></div><div id="sys-body"></div></div><div id="runq" role="status" aria-live="polite"><div class="rh"><b>RUN THESE</b><span id="runq-n"></span></div><div id="runq-list"></div></div></div>
+    <div class="card oled hud" id="t-term"><div class="ob-head"><b>MSYS2</b><span id="term-st">MINGW64</span><button type="button" id="term-clear" title="Clear the screen">CLEAR</button></div>
+      <pre id="term-out"></pre><div id="term-in"><span id="term-ps"></span><input id="term-cmd" autocomplete="off" spellcheck="false" placeholder="a command: make, git status, ls ..." /></div></div>
+    <div class="card oled hud" id="t-brief"><div class="ob-tabs"><button type="button" data-tab="goal" class="on">GOAL<i id="t-qled" title="open questions for you"></i></button><button type="button" data-tab="plan">PLAN</button><button type="button" data-tab="log">DECISIONS</button></div>
       <div class="ob-pane on" data-pane="goal"><div id="t-goal">-</div><h4 style="margin-top:14px">OPEN QUESTIONS FOR YOU</h4><div id="t-q"><div style="border:0;color:var(--mut)">none</div></div></div>
       <div class="ob-pane" data-pane="plan"><div class="flow" id="t-flow"></div></div>
       <div class="ob-pane" data-pane="log"><div id="t-entries"></div></div></div>
-    <div class="card oled" id="t-sys"><div class="ob-head"><b>SYSTEM</b><span id="sys-at"></span></div><div id="sys-body"></div></div>
-    <div class="card oled" id="t-term"><div class="ob-head"><b>MSYS2</b><span id="term-st">MINGW64</span><button type="button" id="term-clear" title="Clear the screen">CLEAR</button></div>
-      <pre id="term-out"></pre><div id="term-in"><span id="term-ps"></span><input id="term-cmd" autocomplete="off" spellcheck="false" placeholder="a command: make, git status, ls ..." /></div></div>
+    </div>
   </div></div>
+<div id="libre" role="dialog" aria-label="LIBRE hardware diagnostics"><div class="head"><span><b>LIBRE · HARDWARE DIAGNOSTICS</b> &nbsp;<span id="lb-at">waiting for LibreHardwareMonitor…</span></span><button type="button" id="libre-x" aria-label="Close">&times;</button></div>
+  <div id="lb-top" class="hud"><h4><b>VITALS</b> · live from LibreHardwareMonitor</h4><div id="lb-gg"></div></div>
+  <div id="lb-tabs" role="tablist"></div>
+  <div id="lb-body"></div></div>
+<div id="acid" role="dialog" aria-label="ACID BEDROCK"><div class="head"><span><b>ACID BEDROCK</b> &nbsp;<span id="acid-src">developer copy · private_acid/ACID_BEDROCK.html</span><i class="lock">PRIVATE · NOT ON GITHUB</i></span>
+  <span><button type="button" id="acid-reload">RELOAD</button> <button type="button" id="acid-x" aria-label="Close">&times;</button></span></div><div id="acid-body"></div></div>
+<div id="cln" role="dialog" aria-label="PC cleaner"><div class="head"><span><b>CLEANER · PC CLEANUP</b> &nbsp;<span id="cln-at"></span></span><span id="cln-live"></span><button type="button" id="cln-x" aria-label="Close">&times;</button></div>
+  <div id="cln-views"><button type="button" data-v="over" class="on">OVERVIEW</button></div>
+  <div id="cln-steps"></div>
+  <div id="cln-map"><div id="map-crumbs"></div><div id="map-tree"></div><div id="map-tip"></div>
+    <div id="map-side"><div id="map-donut"></div><div class="ob-head"><b>BIGGEST HERE</b><span id="map-cnt"></span></div><div id="map-list"></div>
+      <div id="map-pick"><h6>MARKED TO REMOVE · <span id="map-pick-gb"></span></h6><ul id="map-pick-ul"></ul><button type="button" class="go" id="map-send">SEND TO CLAUDE</button><button type="button" id="map-clear">CLEAR</button>
+        <div style="font-size:9.5px;color:var(--mut);margin-top:4px">Goes to COMM as your request. Claude checks each one (what it is, whether something needs it) before anything is removed.</div></div>
+      <div id="map-legend"><i style="background:#ff8a4a"></i>programs<i style="background:#ffbe5a"></i>games<i style="background:#7fd6a0"></i>your files<i style="background:#6fb7e0"></i>app data<i style="background:#b08cff"></i>Windows<i style="background:#8a8a8a"></i>other</div>
+      <div id="map-note"></div></div></div>
+  <div id="cln-body">
+    <div class="card" id="cln-start"><div class="ob-head"><b>STARTS WITH WINDOWS</b><span id="cln-sn"></span></div><div id="cln-slist"></div></div>
+    <div class="card" id="cln-uninst"><div class="ob-head"><b>UNINSTALL</b><span id="apps-cnt"></span></div>
+      <div id="apps-bar"><input id="apps-q" placeholder="search programs..."><select id="apps-sort"><option value="mb">biggest</option><option value="name">name</option><option value="date">newest</option><option value="old">oldest</option></select>
+        <button type="button" id="apps-refresh" title="read the list again">↻</button><button type="button" id="apps-settings" title="Windows Settings > Apps (Store apps)">APPS</button></div>
+      <div id="apps-now"><i class="spin"></i><div><b id="apps-now-h">NOW UNINSTALLING</b><div id="apps-now-t"></div></div></div><div id="apps-list"></div></div>
+    <div class="card" id="cln-ok"><div class="ob-head"><b>WAITING FOR YOUR OK</b><span>nothing happens until you approve</span></div><div id="cln-cards"></div></div>
+    <div class="card" id="cln-disk"><div class="ob-head"><b>SPACE · C:</b><span><span id="cln-free"></span></span></div><div id="cln-bar" style="display:none"><i></i></div><div id="ni-copy"><div class="hd"><b>NI LIBRARIES → F:\NI Libraries</b><span id="ni-n"></span></div><div class="bar"><i style="width:0"></i></div><div class="cells" id="ni-cells"></div><div class="now" id="ni-now"></div></div><div id="cln-gauges"></div><div id="cln-uf"><div class="lbl"><b id="uf-used">USED</b><span id="uf-free">FREE</span></div><div class="track"><div class="used" style="width:0"></div><div class="pct" id="uf-pct"></div></div></div><div id="cln-meters"></div><div id="cln-mini" style="display:none"></div><div id="cln-big" style="display:none"></div></div>
+    <div class="card" id="cln-comm"><div class="ob-head"><b>COMM</b><span>you &harr; Claude</span></div><div id="cln-log"></div>
+      <div><div id="cln-in"><textarea id="cln-text" placeholder="Message Claude about the cleanup (Ctrl+Enter sends)"></textarea><button type="button" id="cln-send">SEND</button></div>
+      <div id="cln-note">Messages and approvals are saved on this PC (tools/cleaner_inbox.json). Claude reads them when it works on the cleanup - in the chat, say "check CLEANER".</div></div></div>
+  </div>
+</div>
 <div id="lab" role="dialog" aria-label="BACKDROP lab"><div class="head"><span><b>BACKDROP · LAB</b> &nbsp;<span id="lab-at"></span></span><button type="button" id="lab-x" aria-label="Close">&times;</button></div>
   <div id="lab-tabs"><button type="button" data-v="over" class="on">OVERVIEW</button><button type="button" data-v="asm">ASSEMBLY</button><button type="button" data-v="cmp">COMPARE</button><button type="button" data-v="gal">GALLERY</button></div>
   <div id="lab-asm" class="lab-view"><div id="asm-side"><div class="ob-head"><b>ASSEMBLY</b><span>how a case goes together</span></div>
@@ -1654,8 +2152,9 @@ function closePatches() {
 }
 const popupMode = new URLSearchParams(location.search).get('patches');
 // ---- THE TABS: which page is up (the patches pop-up, THINKING, or the workbench itself) ----
+document.querySelectorAll('#wbtabs .tab').forEach(t => { if (!t.querySelector('.led')) t.insertAdjacentHTML('afterbegin', '<i class="led"></i>'); });
 const TabLight = (() => {
-  const ids = { wb: 'tab-wb', map: 'patch-btn', lib: 'lib-btn', think: 'think-btn', lab: 'lab-btn' };
+  const ids = { wb: 'tab-wb', map: 'patch-btn', lib: 'lib-btn', think: 'think-btn', lab: 'lab-btn', cln: 'cln-btn', acid: 'acid-btn', libre: 'libre-btn' };
   const el = k => document.getElementById(ids[k]);
   return {
     ping(k) {   // something happened on that page
@@ -1663,7 +2162,8 @@ const TabLight = (() => {
       if (!b.classList.contains('on')) b.classList.add('news');
       b.classList.remove('flash'); void b.offsetWidth; b.classList.add('flash');
     },
-    busy(k, on) { const b = el(k); if (b) b.classList.toggle('busy', !!on); },   // something is going on there now
+    busy(k, on) { const b = el(k); if (b) b.classList.toggle('busy', !!on); },
+    state(k, st) { const b = el(k); if (!b) return; ['ask', 'warn', 'hot'].forEach(c => b.classList.toggle(c, c === st)); },   // ask / warn / hot / ''   // something is going on there now
     seen() { for (const k in ids) { const b = el(k); if (b && b.classList.contains('on')) b.classList.remove('news'); } },
   };
 })();
@@ -1677,8 +2177,17 @@ function syncTabs() {
   document.getElementById('think-btn').classList.toggle('on', tOn && !lOn);
   document.getElementById('lab-btn').classList.toggle('on', lOn);
   if (lOn) { ['tab-wb', 'patch-btn', 'lib-btn'].forEach(id => document.getElementById(id).classList.remove('on')); }
+  const cOn = document.getElementById('cln').classList.contains('on');
+  document.getElementById('cln-btn').classList.toggle('on', cOn);
+  if (cOn) { ['tab-wb', 'patch-btn', 'lib-btn', 'think-btn', 'lab-btn'].forEach(id => document.getElementById(id).classList.remove('on')); }
+  const aOn = document.getElementById('acid').classList.contains('on');
+  document.getElementById('acid-btn').classList.toggle('on', aOn);
+  if (aOn) { ['tab-wb', 'patch-btn', 'lib-btn', 'think-btn', 'lab-btn', 'cln-btn'].forEach(id => document.getElementById(id).classList.remove('on')); }
+  const lbOn = document.getElementById('libre').classList.contains('on');
+  document.getElementById('libre-btn').classList.toggle('on', lbOn);
+  if (lbOn) { ['tab-wb', 'patch-btn', 'lib-btn', 'think-btn', 'lab-btn', 'cln-btn', 'acid-btn'].forEach(id => document.getElementById(id).classList.remove('on')); }
   TabLight.seen();
-  document.getElementById('wb-views').style.visibility = !pOn && !tOn && !lOn ? 'visible' : 'hidden';
+  document.getElementById('wb-views').style.visibility = !pOn && !tOn && !lOn && !cOn && !aOn && !lbOn ? 'visible' : 'hidden';
   const h = document.getElementById('wbtabs').getBoundingClientRect().bottom;
   document.documentElement.style.setProperty('--tabs-h', h + 'px');
 }
@@ -1738,7 +2247,7 @@ const Mind = (() => {
   const ago = ms => { const s = Math.max(0, (Date.now() - ms) / 1000); return s < 60 ? `${s.toFixed(0)}s ago` : s < 3600 ? `${(s / 60).toFixed(0)}m ago` : `${(s / 3600).toFixed(1)}h ago`; };
   const fit = (txt, w) => { if (ctx.measureText(txt).width <= w) return txt; while (txt.length > 3 && ctx.measureText(txt + '…').width > w) txt = txt.slice(0, -1); return txt + '…'; };
 
-  const stream = [], spikes = [], hist = new Float32Array(300);
+  const stream = [], spikes = [], hist = new Float32Array(300); let topBar = null;
   let act = .3, energy = .3, heat = 0, logHot = false, thinkHot = false, compiling = false;
   let plan = [], nowT = '', mode = 'idle', running = false, last = 0, born = Date.now(), sampleT = 0, procT = 0;
   let bDone = 0, bTotal = 35, glitch = 0, seenBuild = new Set(), evTimes = [];
@@ -1912,21 +2421,14 @@ const Mind = (() => {
     // ---- top bar ----
     const up = Date.now() - born;
     evTimes = evTimes.filter(v => Date.now() - v < 60000);
-    font(10, 600); ctx.fillStyle = C.cy; ctx.fillText('SYNTHBLOK // OPERATOR TELEMETRY', 14, 18);
-    alien(250, 10, 8, 'operator telemetry', C.cy, .6, 16);
     const modeTxt = compiling ? 'COMPILING' : mode === 'idle' ? 'DORMANT' : energy > .55 ? 'ACTIVE' : 'THINKING';
     const modeCol = compiling ? C.am : mode === 'idle' ? C.dim : C.gr;
-    font(10, 700); const mw = ctx.measureText(modeTxt).width + 22, mx = W / 2 - mw / 2;
-    ctx.fillStyle = modeCol; ctx.globalAlpha = .18 + .12 * Math.sin(t * (compiling ? 9 : 3)); ctx.fillRect(mx, 6, mw, 17); ctx.globalAlpha = 1;
-    ctx.strokeStyle = modeCol; ctx.strokeRect(mx + .5, 6.5, mw, 17); ctx.fillStyle = modeCol; ctx.fillText(modeTxt, mx + 11, 19);
-    font(9); ctx.fillStyle = C.cy; ctx.textAlign = 'right';
-    ctx.fillText(`T+${clock(up)}   EV/MIN ${String(evTimes.length).padStart(3, '0')}   ${new Date().toTimeString().slice(0, 8)}`, W - 14, 18);
-    ctx.textAlign = 'left';
-    ctx.fillStyle = C.cy; ctx.globalAlpha = .4; ctx.fillRect(14, 27, W - 28, 1); ctx.globalAlpha = 1;
+    topBar = { modeTxt, modeCol, fast: compiling, clock: `T+${clock(up)}   EV/MIN ${String(evTimes.length).padStart(3, '0')}   ${new Date().toTimeString().slice(0, 8)}` };
 
     const scopeH = Hh < 560 ? 64 : Math.max(84, Hh * .14), hwH = Hh < 560 ? 92 : Math.max(104, Math.min(138, Hh * .19));
-    const top = 36, bot = Hh - scopeH - hwH - 16;   // main readout, then HARDWARE, then the scope
-    const lw = Math.min(330, W * .29), rw = Math.min(440, W * .34);
+    const top = 8, bot = Hh - scopeH - hwH - 16;   // main readout, then HARDWARE, then the scope
+    const lw = Math.min(330, W * .29), rw = -12;   // TELEMETRY STREAM now lives in its own strip under CORE
+    if (window.__coreH !== hwH + '|' + scopeH) { window.__coreH = hwH + '|' + scopeH; const rs = document.documentElement.style; rs.setProperty('--hwH', hwH + 'px'); rs.setProperty('--scH', (scopeH - 10) + 'px'); }
     const cx0 = 14 + lw + 12, cw = W - 28 - lw - rw - 24;
 
     // ---- process table ----
@@ -1962,7 +2464,7 @@ const Mind = (() => {
     });
 
     // ---- gauge core ----
-    const R = Math.max(40, Math.min(cw * .46, (bot - top) * .48)), gx = cx0 + cw / 2, gy = top + (bot - top) / 2;
+    const R = Math.max(40, Math.min(cw * .46, (bot - top) * .5)), gx = cx0 + cw / 2, gy = top + (bot - top) / 2;
     const rot = t * (.08 + .5 * energy + .9 * heat);
     // outer tick ring
     ctx.lineWidth = 1;
@@ -2030,25 +2532,6 @@ const Mind = (() => {
     ctx.textAlign = 'left';
     const aw = Math.min(tt.length, 14) * 10;
     alien(gx - aw / 2, gy + R * .32 + 7, 8, tt, C.gr, .7, 14);
-
-    // ---- telemetry stream ----
-    const sx = W - 14 - rw;
-    panel(sx, top, rw, bot - top, 'TELEMETRY STREAM', C.am);
-    ctx.save(); ctx.beginPath(); ctx.rect(sx + 4, top + 20, rw - 8, bot - top - 24); ctx.clip();
-    const lh = 15;
-    let y = top + 34;
-    stream.forEach((e, i) => {
-      if (y > bot - 4) return;
-      const age = (nowMs - e.t) / 1000, col = KC[e.k] || C.cy;
-      const shown = i === 0 ? Math.floor(Math.min(1, age * 2.5) * e.txt.length) : e.txt.length;   // the newest line types itself out
-      font(8); ctx.fillStyle = '#3d6c78'; ctx.fillText(`${hex(e.addr, 6)}`, sx + 10, y);
-      font(8, 700); ctx.fillStyle = col; ctx.fillText(OP[e.k] || 'SYS ', sx + 56, y);
-      font(9); ctx.fillStyle = i === 0 ? C.wh : col; ctx.globalAlpha = Math.max(.35, 1 - i * .035);
-      ctx.fillText(e.txt.slice(0, shown) + (i === 0 && shown < e.txt.length && (t * 6 | 0) % 2 ? '▌' : ''), sx + 92, y);
-      ctx.globalAlpha = 1;
-      y += lh;
-    });
-    ctx.restore();
 
     // ---- oscilloscope ----
     drawHW(14, bot + 8, W - 28, hwH, t, dt);
@@ -2126,6 +2609,7 @@ const Mind = (() => {
 
   return {
     start() { if (running) return; running = true; last = 0; requestAnimationFrame(frame); },
+    feed() { return { stream, OP, KC, hex, topBar }; },
     stop() { running = false; },
     setPlan(p) { plan = p || []; },
     setHW(j) {
@@ -2204,12 +2688,12 @@ async function scanThink() {
   const btn = thinkEl('think-btn');
   const fresh = Date.now() - up < 10 * 60 * 1000;
   btn.classList.toggle('idle', !fresh);
-  thinkEl('think-now').textContent = (j.now && j.now.title) || '-';
+  thinkEl('think-btn').title = 'CORE · ' + ((j.now && j.now.title) || 'Claude + this PC');
   csig.think = j; drawSignal();
   try { Mind.compile(j.mode === 'compile' && Date.now() - up < 15 * 60 * 1000, 'think'); } catch (e) {}
   if (up === thinkSeen) return;
   try { j.mode === 'idle' ? Mind.rest() : Mind.pulse(.8); } catch (e) {}
-  if (thinkSeen) { btn.classList.remove('hot'); void btn.offsetWidth; btn.classList.add('hot'); try { TabLight.ping('think'); } catch (e) {} }
+  if (thinkSeen) { try { TabLight.ping('think'); } catch (e) {} }
   thinkSeen = up;
   document.querySelectorAll('#think-body .card').forEach(c => { c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash'); });
   thinkEl('t-at').textContent = 'updated ' + thinkTime(up) + (j.task ? ' · ' + j.task : '');
@@ -2305,11 +2789,12 @@ function drawSys(j) {
     : '<div class="hint">reading…</div>';
   const sn = j.sensors;
   const hot = sn ? (sn.temps || []).filter(t => /core|package|cpu/i.test(t.n)).sort((x, y) => y.c - x.c)[0] : null;
-  const sens = sn ? (hot ? row(hot.n, hot.c.toFixed(0) + '°', cls(hot.c, 75, 90)) : '') + ((sn.fans || [])[0] ? row(sn.fans[0].n, sn.fans[0].rpm + 'rpm') : '')
-    : '<div class="hint" title="Install LibreHardwareMonitor (free) for per-core temperatures and fans">cores + fans: needs LibreHardwareMonitor</div>';
+  const bf = (sn && sn.fans || []).filter(x => !/gpu/i.test(x.id || ''));
+  const sens = sn ? (hot ? row(hot.n, hot.c.toFixed(0) + '°', cls(hot.c, 75, 90)) : '') + (bf[0] ? row(bf[0].n, bf[0].rpm + 'rpm') : row('fans', 'hidden', 'w', 'this HP board does not report its fan speeds'))
+    : '<div class="hint" title="Start LibreHardwareMonitor (as admin) for CPU temperatures and fans">start LibreHardwareMonitor</div>';
   el.innerHTML = `<div><h5>TOP CPU</h5>${cpuL}<h5>TOP MEMORY</h5>${memL}</div>` +
-    `<div><h5>DRIVES</h5>${drv}<h5>NETWORK</h5>${net}</div>` +
-    `<div><h5>BOOT</h5>${boot}<h5>SENSORS</h5>${sens}</div>`;
+    `<div><h5>DRIVES</h5>${drv}<h5>SENSORS</h5>${sens}</div>` +
+    `<div><h5>NETWORK</h5>${net}<h5>BOOT</h5>${boot}</div>`;
 }
 // ---- BRIEF tabs: GOAL / PLAN / DECISIONS in one OLED ----
 document.querySelectorAll('#t-brief .ob-tabs button').forEach(b => b.onclick = () => {
@@ -2382,7 +2867,7 @@ async function scanJobs() {
   for (const n of names) (jobs[n.id] = jobs[n.id] || {})[n.ext] = true;
   const latest = {};   // kind -> newest job id
   for (const id of Object.keys(jobs).sort()) { const kind = id.slice(5); latest[kind] = id; }
-  try { TabLight.busy('think', Object.keys(jobs).some(id => jobs[id].job && !jobs[id].done)); } catch (e) {}   // a job running now
+  csig.job = Object.keys(jobs).some(id => jobs[id].job && !jobs[id].done); try { TabLight.busy('think', csig.job); } catch (e) {}   // a job running now
   const total = k => Object.keys(jobs).filter(id => id.slice(5) === k).length;
   const show = async (proc, kinds, label) => {
     const ids = kinds.map(k => latest[k]).filter(Boolean).sort();
@@ -2425,7 +2910,7 @@ async function scanInbox() {
   let d; try { d = JSON.parse(txt); } catch (e) { return; }
   const box = document.getElementById('t-inbox'), btn = document.getElementById('think-btn');
   let read = ''; try { read = localStorage.getItem('wb-inbox-read') || ''; } catch (e) {}
-  if (!d || !d.t || String(d.t) === read) { box.classList.remove('on'); btn.classList.remove('mail'); return; }
+  if (!d || !d.t || String(d.t) === read) { box.classList.remove('on'); btn.classList.remove('mail'); csig.mail = false; drawSignal(); return; }
   const links = (d.links || []).map((l, i) => `<a data-i="${i}" class="${l.open ? '' : 'f'}" title="${escS(l.open ? 'open in Rack (behind your windows)' : (l.href || ''))}">${esc(l.label || l.href || 'open')}</a>`).join('');
   box.innerHTML = `<div class="ih"><b>FOR YOU</b><span>${time(d.t)}</span></div><h5>${esc(d.title || '')}</h5><div class="it">${esc(d.text || '')}</div>` +
     (links ? `<div class="il">${links}</div>` : '') + `<div class="st"></div><button type="button" class="ok">GOT IT</button>`;
@@ -2438,8 +2923,8 @@ async function scanInbox() {
       catch (e) { st.textContent = 'Could not reach the Rack opener (tools/rack_open_server.py, port 8767).'; }
     } else window.open(l.href, '_blank');
   });
-  box.querySelector('.ok').onclick = () => { try { localStorage.setItem('wb-inbox-read', String(d.t)); } catch (e) {} box.classList.remove('on'); btn.classList.remove('mail'); };
-  box.classList.add('on'); btn.classList.add('mail');
+  box.querySelector('.ok').onclick = () => { try { localStorage.setItem('wb-inbox-read', String(d.t)); } catch (e) {} box.classList.remove('on'); btn.classList.remove('mail'); csig.mail = false; drawSignal(); };
+  box.classList.add('on'); btn.classList.add('mail'); csig.mail = true; drawSignal();
   try { TabLight.ping('think'); } catch (e) {}
 }
 scanInbox(); setInterval(scanInbox, 4000);
@@ -2663,6 +3148,8 @@ function drawSignal() {
     else if (fresh && j.mode !== 'idle') { kind = ''; k = 'CLAUDE · WORKING'; t = (j.now && j.now.title) || j.task || ''; }
   }
   if (!kind && csig.hot) { kind = 'hot'; k = 'PC RUNNING HOT'; t = csig.hot; }   // the PC's heat, when THINKING has nothing louder
+  try { TabLight.state('think', kind === 'warn' ? 'warn' : kind === 'hot' ? 'hot' : (kind === 'ask' || csig.mail || (typeof RunQ !== 'undefined' && RunQ.items.length)) ? 'ask' : '');
+        TabLight.busy('think', k === 'CLAUDE · WORKING' || csig.job); } catch (e) {}
   const sig = kind + '|' + t;
   const show = !!k && sig !== csig.hidden;
   el.className = show ? 'on ' + kind : '';
@@ -2691,6 +3178,689 @@ async function tick(first) {
   setTimeout(tick, POLL);
 }
 tick(true);
+
+// CLEANER: tools/cleaner.json (Claude's side) + tools/cleaner_inbox.json (yours, written by rack_open_server.py POST /cleaner)
+const clnOpen = on => { document.getElementById('cln').classList.toggle('on', on); syncTabs(); };
+document.getElementById('cln-btn').onclick = () => { closePatches(); try { thinkOpen(false); } catch (e) {} document.getElementById('lab').classList.remove('on'); clnOpen(true); };
+document.getElementById('cln-x').onclick = () => clnOpen(false);
+['tab-wb', 'patch-btn', 'lib-btn', 'think-btn', 'lab-btn'].forEach(id => document.getElementById(id).addEventListener('click', () => document.getElementById('cln').classList.remove('on'), true));
+let clnSeen = '', clnBox = { messages: [] }, clnData = null;
+async function clnPost(kind, text, item) {
+  try {
+    const r = await fetch('http://127.0.0.1:8767/cleaner', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, text, item }) });
+    if (!r.ok) throw 0;
+    scanCleaner(true);
+    return true;
+  } catch (e) { alert('Could not save that - the workbench helper (rack_open_server.py) is not running or is the old version.'); return false; }
+}
+document.getElementById('cln-send').onclick = async () => {
+  const t = document.getElementById('cln-text'); if (!t.value.trim()) return;
+  if (await clnPost('msg', t.value.trim(), '')) t.value = '';
+};
+document.getElementById('cln-text').addEventListener('keydown', e => { if (e.key === 'Enter' && e.ctrlKey) document.getElementById('cln-send').click(); });
+function clnRender() {
+  const d = clnData; if (!d) return; const E = v => escS(v);
+  document.getElementById('cln-at').textContent = d.updated ? 'updated ' + time(d.updated) : '';
+  document.getElementById('cln-steps').innerHTML = (d.steps || []).map(s => `<div class="${E(s.state)}"><b>${E(s.name)}</b>${E(s.note || '')}</div>`).join('');
+  const groups = {}; (d.startup || []).forEach(s => (groups[s.group || 'OTHER'] = groups[s.group || 'OTHER'] || []).push(s));
+  document.getElementById('cln-slist').innerHTML = Object.keys(groups).map(g => `<div class="cln-grp">${E(g)}</div>` + groups[g].map(s =>
+    `<div class="cln-row"><i class="${E(s.state)}">${E({ off: 'OFF', kept: 'KEPT', ask: 'ASK', on: 'ON' }[s.state] || s.state)}</i><span>${E(s.name)}<em>${E(s.why || '')}</em></span></div>`).join('')).join('');
+  const offN = (d.startup || []).filter(s => s.state === 'off').length;
+  document.getElementById('cln-sn').textContent = offN + ' off · ' + (d.startup || []).length + ' total';
+  const said = {}; (clnBox.messages || []).forEach(m => { if (m.item && m.kind !== 'msg') said[m.item] = m; });
+  document.getElementById('cln-cards').innerHTML = (d.approvals || []).map(a => {
+    const s = said[a.id], done = a.state === 'done';
+    return `<div class="cln-card ${done ? 'ok' : s ? '' : 'wait'}"><h5>${E(a.title)}</h5><p>${E(a.what || '')}</p>${(a.items || []).length ? '<ul>' + a.items.map(x => `<li>${E(x)}</li>`).join('') + '</ul>' : ''}
+      ${a.gain ? `<div class="gain">${E(a.gain)}</div>` : ''}${a.undo ? `<p style="color:var(--mut);font-size:10px">Undo: ${E(a.undo)}</p>` : ''}
+      <div class="btns">${done ? '<span class="said">DONE</span>' : s ? `<span class="said">You said ${s.kind === 'approve' ? 'GO' : 'HOLD'} · ${E(time(s.t))}</span>` : ''}
+      ${done ? '' : `<button type="button" class="go" data-a="approve" data-i="${E(a.id)}">APPROVE</button><button type="button" data-a="hold" data-i="${E(a.id)}">HOLD</button>`}</div></div>`;
+  }).join('') || '<p style="color:var(--mut)">Nothing waiting right now.</p>';
+  document.querySelectorAll('#cln-cards button').forEach(b => b.onclick = () => {
+    const a = (d.approvals || []).find(x => x.id === b.dataset.i);
+    clnPost(b.dataset.a, (b.dataset.a === 'approve' ? 'GO: ' : 'HOLD: ') + (a ? a.title : b.dataset.i), b.dataset.i);
+  });
+  document.getElementById('cln-big').innerHTML = (d.space || []).map(x => `<div><span>${E(x.name)}</span><b>${E(x.gb)} GB</b></div>`).join('');
+  const msgs = [...(d.messages || []).map(m => ({ ...m, who: 'c' })), ...(clnBox.messages || []).map(m => ({ ...m, who: 'u' }))].sort((a, b) => a.t - b.t);
+  const log = document.getElementById('cln-log'), atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+  log.innerHTML = msgs.map(m => `<div class="m ${m.who}"><small>${m.who === 'c' ? 'CLAUDE' : m.kind === 'approve' ? 'YOU · APPROVED' : m.kind === 'hold' ? 'YOU · HOLD' : 'YOU'} · ${E(time(m.t))}</small>${E(m.text)}</div>`).join('');
+  if (atEnd) log.scrollTop = log.scrollHeight;
+  const waiting = (d.approvals || []).filter(a => a.state !== 'done' && !said[a.id]).length;
+  document.getElementById('cln-n').textContent = waiting ? ' ' + waiting : '';
+}
+async function scanCleaner(force) {
+  const a = await getText('/tools/cleaner.json'), b = await getText('/tools/cleaner_inbox.json');
+  const key = (a || '') + '|' + (b || '');
+  if (!force && key === clnSeen) return;
+  const first = !clnSeen; clnSeen = key;
+  try { if (a) clnData = JSON.parse(a); } catch (e) {}
+  try { clnBox = b ? JSON.parse(b) : { messages: [] }; } catch (e) {}
+  clnRender();
+  if (!first) try { TabLight.ping('cln'); } catch (e) {}
+}
+async function scanCleanLive() {   // live disk numbers from THIS PC's feed
+  const t = await getText('/tools/pc_stats.json'); if (!t) return;
+  try {
+    const s = JSON.parse(t), c = (s.drives || []).find(x => x.d === 'C:') || {};
+    const free = c.freeGB != null ? c.freeGB : s.disk.cFreeGB, size = c.sizeGB || s.disk.cSizeGB;
+    document.getElementById('cln-free').textContent = free.toFixed(1) + ' GB free of ' + size + ' GB';
+    document.querySelector('#cln-bar i').style.width = (100 * (1 - free / size)).toFixed(1) + '%';
+    document.getElementById('cln-live').textContent = 'disk busy ' + (s.disk.busy || 0) + '% · CPU ' + (s.cpu.load || 0).toFixed(0) + '%';
+  } catch (e) {}
+}
+scanCleaner(); setInterval(scanCleaner, 3000); scanCleanLive(); setInterval(scanCleanLive, 3000);
+
+// CLEANER · SPACE MAP: tools/space_map.json (tools/space_scan.py, read-only) as a click-to-zoom treemap
+let mapData = null, mapPath = [], mapSeen = '';
+const mapSel = new Map();   // full path -> bytes, ticked for removal
+document.querySelectorAll('#cln-views button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#cln-views button').forEach(x => x.classList.toggle('on', x === b));
+  document.getElementById('cln').classList.toggle('map', b.dataset.v === 'map');
+  mapDraw();
+});
+const GB = b => (b / 1073741824);
+const MAPCAT = { prog: ['255,138,74', 'programs'], game: ['255,206,90', 'games'], user: ['61,255,154', 'your files'],
+  data: ['0,229,255', 'app data'], win: ['176,140,255', 'Windows'], other: ['150,170,180', 'other'] };
+const mapCat = (path, name) => {
+  const p = (path.join('\\') + '\\' + name).toLowerCase();
+  if (/starcraft|battle\.net|ea games|electronic arts|steam|epic games|riot|wildtangent|simcity|xboxgames/.test(p)) return 'game';
+  if (/^c:\\windows|pagefile|hiberfil|swapfile|\$recycle|system volume|windows \+ everything/.test(p)) return 'win';
+  if (/appdata|programdata/.test(p)) return 'data';
+  if (/users\\nickk\\(documents|videos|music|pictures|desktop|downloads)|^c:\\users/.test(p)) return 'user';
+  if (/program files|msys64/.test(p)) return 'prog';
+  return 'other';
+};
+const mapColor = (path, name) => 'rgb(' + MAPCAT[mapCat(path, name)][0] + ')';
+const mapRGB = (path, name) => MAPCAT[mapCat(path, name)][0];
+function squarify(items, x, y, w, h) {   // items sorted big -> small, each {v}; returns rects
+  const out = []; let rest = items.slice(), total = rest.reduce((s, i) => s + i.v, 0);
+  while (rest.length) {
+    const short = Math.min(w, h), scale = (w * h) / total; let row = [], best = Infinity;
+    for (const it of rest) {
+      const r = row.concat(it), s = r.reduce((a, i) => a + i.v, 0) * scale, mx = Math.max(...r.map(i => i.v)) * scale, mn = Math.min(...r.map(i => i.v)) * scale;
+      const worst = Math.max(short * short * mx / (s * s), (s * s) / (short * short * mn));
+      if (worst > best) break; best = worst; row = r;
+    }
+    const rs = row.reduce((a, i) => a + i.v, 0), len = rs * scale / short; let off = 0;
+    for (const it of row) {
+      const l = it.v * scale / len;
+      out.push(w >= h ? { it, x, y: y + off, w: len, h: l } : { it, x: x + off, y, w: l, h: len }); off += l;
+    }
+    if (w >= h) { x += len; w -= len; } else { y += len; h -= len; }
+    rest = rest.slice(row.length); total -= rs;
+  }
+  return out;
+}
+function mapNode() { let n = mapData.root; for (const k of mapPath) { const c = (n.kids || []).find(x => x.name === k); if (!c) { mapPath = []; return mapData.root; } n = c; } return n; }
+function mapDraw() {
+  if (!mapData || !document.getElementById('cln').classList.contains('map')) return;
+  const E = v => escS(v), node = mapNode(), names = ['C:', ...mapPath];
+  const kids = (node.kids || []).filter(k => k.b > 0), shown = kids.reduce((s, k) => s + k.b, 0), other = node.b - shown;
+  const items = kids.map(k => ({ v: k.b, k }));
+  if (other > node.b * 0.01) items.push({ v: other, k: { name: 'small files + folders under 150 MB', b: other, leaf: true } });
+  items.sort((a, b) => b.v - a.v);
+  document.getElementById('map-crumbs').innerHTML = names.map((n, i) => `<a data-i="${i}">${E(n)}</a>`).join(' › ') +
+    `<span class="sum">${GB(node.b).toFixed(1)} GB here · drive: ${GB(mapData.used).toFixed(0)} GB used, ${GB(mapData.free).toFixed(1)} GB free of ${GB(mapData.size).toFixed(0)} GB</span>`;
+  document.querySelectorAll('#map-crumbs a').forEach(a => a.onclick = () => { mapPath = mapPath.slice(0, +a.dataset.i); mapDraw(); });
+  const box = document.getElementById('map-tree'), W = box.clientWidth, H = box.clientHeight, G = 3;
+  if (!mapPath.length && mapData.free) items.push({ v: mapData.free, k: { name: 'FREE SPACE', b: mapData.free, free: true } });
+  items.sort((a, b) => b.v - a.v);
+  const whole = items.reduce((s, i) => s + i.v, 0);
+  box.classList.remove('zoom'); void box.offsetWidth; if (mapDraw.lastKey !== names.join('/')) box.classList.add('zoom'); mapDraw.lastKey = names.join('/');
+  box.innerHTML = W > 20 && H > 20 && items.length ? squarify(items, 0, 0, W, H).map((r, idx) => {
+    const k = r.it.k, can = !k.leaf && !k.file && !k.free && (k.kids || []).length;
+    const x = r.x + G / 2, y = r.y + G / 2, w = Math.max(0, r.w - G), hh = Math.max(0, r.h - G);
+    const fs = Math.max(10, Math.min(15, Math.sqrt(w * hh) / 11)), show = w > 54 && hh > 26;
+    let sub = '';
+    if (can && w > 90 && hh > 70) {   // a faint preview of what is inside
+      const ks = k.kids.filter(c => c.b > 0).slice(0, 12).map(c => ({ v: c.b }));
+      const inner = { x: 6, y: fs * 2.6 + 8, w: w - 12, h: hh - fs * 2.6 - 14 };
+      if (inner.w > 30 && inner.h > 20 && ks.length > 1) {
+        const sum = ks.reduce((s, c) => s + c.v, 0), sc = Math.min(1, sum / k.b);
+        const ih = inner.h * Math.sqrt(sc), iw = inner.w * Math.sqrt(sc);
+        sub = squarify(ks, inner.x, inner.y + (inner.h - ih), iw, ih).map(q => `<i class="sub" style="left:${q.x + 1}px;top:${q.y + 1}px;width:${Math.max(0, q.w - 2)}px;height:${Math.max(0, q.h - 2)}px"></i>`).join('');
+      }
+    }
+    const cls = 'tm' + (can ? '' : ' leaf') + (k.free ? ' free' : '') + (k.leaf ? ' rest' : '');
+    return `<div class="${cls}" data-n="${E(k.name)}" data-b="${k.b}" data-f="${k.files || ''}" data-can="${can ? 1 : 0}"
+      style="left:${x}px;top:${y}px;width:${w}px;height:${hh}px;--rgb:${k.free || k.leaf ? '' : mapRGB(names, k.name)};animation-delay:${Math.min(idx, 20) * 18}ms">
+      ${sub}${show ? `<b style="font-size:${fs}px">${E(k.name)}</b><span class="sz" style="font-size:${fs * .8}px">${GB(k.b).toFixed(1)} GB</span>` : ''}${w > 70 && hh > 50 ? `<span class="pc">${(100 * k.b / whole).toFixed(1)}%</span>` : ''}</div>`;
+  }).join('') : '<p style="color:var(--mut);padding:10px">Nothing bigger than 150 MB in here.</p>';
+  const tip = document.getElementById('map-tip');
+  box.querySelectorAll('.tm').forEach(d => {
+    d.onmousemove = ev => {
+      const b = +d.dataset.b;
+      tip.innerHTML = `<b>${E(d.dataset.n)}</b><i>${E(names.join('\\') + '\\' + d.dataset.n)}</i><div class="row"><span>size</span><span>${GB(b).toFixed(2)} GB</span></div>
+        <div class="row"><span>of this folder</span><span>${(100 * b / Math.max(1, node.b)).toFixed(1)}%</span></div>${d.dataset.f ? `<div class="row"><span>files</span><span>${(+d.dataset.f).toLocaleString()}</span></div>` : ''}
+        ${d.dataset.can === '1' ? '<div style="margin-top:4px;color:#7fd6a0">click to look inside</div>' : ''}`;
+      tip.style.display = 'block';
+      const tx = Math.min(ev.clientX + 14, innerWidth - tip.offsetWidth - 8), ty = Math.min(ev.clientY + 14, innerHeight - tip.offsetHeight - 8);
+      tip.style.left = tx + 'px'; tip.style.top = ty + 'px';
+    };
+    d.onmouseleave = () => tip.style.display = 'none';
+  });
+  // the donut: what kind of stuff is in this folder
+  const cats = {}; kids.forEach(k => { const c = mapCat(names, k.name); cats[c] = (cats[c] || 0) + k.b; });
+  if (other > 0) cats.other = (cats.other || 0) + other;
+  const ct = Object.values(cats).reduce((s, v) => s + v, 0) || 1, R = 46, C = 2 * Math.PI * R; let off = 0;
+  const arcs = Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([c, v]) => {
+    const len = C * v / ct, s = `<circle r="${R}" cx="60" cy="60" fill="none" stroke="rgb(${MAPCAT[c][0]})" stroke-width="16" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 60 60)"/>`;
+    off += len; return s; }).join('');
+  document.getElementById('map-donut').innerHTML = `<svg viewBox="0 0 120 120"><circle r="${R}" cx="60" cy="60" fill="none" stroke="#2a1e0c" stroke-width="16"/>${arcs}
+    <text x="60" y="57" text-anchor="middle" fill="#00e5ff" font-size="15" font-weight="600">${GB(node.b).toFixed(0)}</text><text x="60" y="72" text-anchor="middle" fill="#8a7a64" font-size="9" letter-spacing="1">GB HERE</text></svg>
+    <div class="cats">${Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<div><i style="background:rgb(${MAPCAT[c][0]});color:rgb(${MAPCAT[c][0]})"></i>${MAPCAT[c][1]}<b>${GB(v).toFixed(1)} GB</b></div>`).join('')}</div>`;
+  box.querySelectorAll('.tm:not(.leaf)').forEach(d => d.onclick = () => { mapPath.push(d.dataset.n); mapDraw(); });
+  const top = kids.slice(0, 25), mx = top.length ? top[0].b : 1;
+  document.getElementById('map-cnt').textContent = kids.length + ' items';
+  const full = n => names.join('\\') + '\\' + n;
+  document.getElementById('map-list').innerHTML = top.map(k => `<div data-n="${E(k.name)}" data-c="${(k.kids || []).length ? 1 : 0}" class="${mapSel.has(full(k.name)) ? 'sel' : ''}"><input type="checkbox" title="mark to remove" ${mapSel.has(full(k.name)) ? 'checked' : ''}><section><p><span>${E(k.name)}</span><b>${GB(k.b).toFixed(2)} GB</b></p><i style="width:${(100 * k.b / mx).toFixed(1)}%;background:${mapColor(names, k.name)}"></i></section></div>`.replace('<div data-n', `<div style="--c:${mapColor(names, k.name)}" data-n`)).join('');
+  document.querySelectorAll('#map-list div').forEach(d => {
+    const k = top.find(x => x.name === d.dataset.n);
+    d.querySelector('input').onclick = ev => { ev.stopPropagation(); const f = full(k.name); ev.target.checked ? mapSel.set(f, k.b) : mapSel.delete(f); mapDraw(); };
+    if (d.dataset.c === '1') d.querySelector('section').onclick = () => { mapPath.push(d.dataset.n); mapDraw(); };
+  });
+  box.querySelectorAll('.tm').forEach(d => { if (mapSel.has(full(d.dataset.n))) d.classList.add('sel'); });
+  const pick = document.getElementById('map-pick'), tot = [...mapSel.values()].reduce((s, b) => s + b, 0);
+  pick.classList.toggle('on', mapSel.size > 0);
+  document.getElementById('map-pick-gb').textContent = mapSel.size + ' · ' + GB(tot).toFixed(1) + ' GB';
+  document.getElementById('map-pick-ul').innerHTML = [...mapSel].map(([f, b]) => `<li>${E(f)} · ${GB(b).toFixed(2)} GB</li>`).join('');
+  document.getElementById('map-note').textContent = mapData.seed ? 'From last night\'s survey, updated for step 1. A fresh full scan of C: is queued and will replace this.' :
+    `Scanned ${time(mapData.t)} · ${(mapData.root.files || 0).toLocaleString()} files in ${mapData.secs}s. Folders the scan could not open are left out.`;
+}
+function mapMini() {
+  const box = document.getElementById('cln-mini'); if (!box || !mapData) return;
+  const W = box.clientWidth, H = box.clientHeight; if (W < 30 || H < 30) return;
+  const E = v => escS(v), root = mapData.root, items = (root.kids || []).filter(k => k.b > 0).map(k => ({ v: k.b, k }));
+  if (mapData.free) items.push({ v: mapData.free, k: { name: 'FREE', b: mapData.free, free: true } });
+  items.sort((a, b) => b.v - a.v);
+  box.innerHTML = squarify(items, 0, 0, W, H).map(r => { const k = r.it.k, x = r.x + 1.5, y = r.y + 1.5, w = Math.max(0, r.w - 3), hh = Math.max(0, r.h - 3);
+    return `<div class="tm${k.free ? ' free' : ''}" data-n="${E(k.name)}" style="left:${x}px;top:${y}px;width:${w}px;height:${hh}px;--rgb:${k.free ? '' : mapRGB(['C:'], k.name)}">${w > 46 && hh > 22 ? `<b>${E(k.name)}</b><span class="sz">${GB(k.b).toFixed(1)} GB</span>` : ''}</div>`; }).join('');
+  box.querySelectorAll('.tm').forEach(d => d.onclick = ev => { ev.stopPropagation(); mapPath = d.classList.contains('free') ? [] : [d.dataset.n]; mapOpenView(); });
+}
+function mapOpenView() {}   // the SPACE MAP page was removed (Nick, 2026-11-08); the main screen keeps the gauges + meters
+async function scanMap() {
+  const t = await getText('/tools/space_map.json'); if (!t || t === mapSeen) return; mapSeen = t;
+  try { mapData = JSON.parse(t); } catch (e) { return; } mapDraw(); mapMini();
+}
+document.getElementById('map-clear').onclick = () => { mapSel.clear(); mapDraw(); };
+document.getElementById('map-send').onclick = async () => {
+  if (!mapSel.size) return;
+  const tot = [...mapSel.values()].reduce((s, b) => s + b, 0);
+  const txt = 'REMOVE these (ticked in SPACE MAP, ' + GB(tot).toFixed(1) + ' GB):\n' + [...mapSel].map(([f, b]) => '- ' + f + '  (' + GB(b).toFixed(2) + ' GB)').join('\n');
+  if (await clnPost('msg', txt, 'remove')) { mapSel.clear(); mapDraw(); }
+};
+scanMap(); setInterval(scanMap, 5000); window.addEventListener('resize', () => { mapDraw(); mapMini(); });
+document.querySelector('#cln-views button[data-v="over"]').addEventListener('click', () => setTimeout(mapMini, 30));
+document.getElementById('cln-btn').addEventListener('click', () => setTimeout(mapMini, 60));
+
+// CLEANER gauges: live from tools/pc_stats.json (C:, F:, disk activity, CPU) + top folders from space_map.json
+const GG = { };
+function ggMake(id, label) {
+  const R = 46, C = 2 * Math.PI * R, L = C * 0.75;
+  const ticks = Array.from({ length: 11 }, (_, i) => { const a = (135 + i * 27) * Math.PI / 180, r1 = i % 5 ? 50 : 48;
+    return `<line x1="${60 + Math.cos(a) * r1}" y1="${62 + Math.sin(a) * r1}" x2="${60 + Math.cos(a) * 54}" y2="${62 + Math.sin(a) * 54}" stroke="#2a5a66" stroke-width="${i % 5 ? 1 : 1.6}"/>`; }).join('');
+  return `<div class="gg" id="gg-${id}"><svg viewBox="0 0 120 100"><defs><linearGradient id="gr-${id}" x1="0" x2="1"><stop offset="0" stop-color="#3dff9a"/><stop offset=".6" stop-color="#ffbe5a"/><stop offset="1" stop-color="#ff4d3a"/></linearGradient>
+    <filter id="gl-${id}" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+    <circle r="${R}" cx="60" cy="62" fill="none" stroke="#0b2a33" stroke-width="9" stroke-dasharray="${L} ${C}" transform="rotate(135 60 62)" stroke-linecap="round"/>
+    <circle class="arc" r="${R}" cx="60" cy="62" fill="none" stroke="url(#gr-${id})" stroke-width="9" stroke-dasharray="0 ${C}" transform="rotate(135 60 62)" stroke-linecap="round" filter="url(#gl-${id})"/>
+    ${ticks}<g class="ndl" style="transform:rotate(-135deg)"><line x1="60" y1="62" x2="60" y2="24" stroke="#e6f4f8" stroke-width="1.6" stroke-linecap="round"/></g><circle cx="60" cy="62" r="4" fill="#04161c" stroke="#00e5ff" stroke-width="1.2"/>
+    <text class="val" x="60" y="86" text-anchor="middle">-</text><text class="unit" x="60" y="96" text-anchor="middle"></text></svg><b>${label}</b><small></small></div>`;
+}
+function ggSet(id, frac, val, unit, sub, busy) {
+  const el = document.getElementById('gg-' + id); if (!el) return;
+  frac = Math.max(0, Math.min(1, frac || 0)); const R = 46, C = 2 * Math.PI * R, L = C * 0.75;
+  el.querySelector('.arc').setAttribute('stroke-dasharray', `${(L * frac).toFixed(1)} ${C}`);
+  el.querySelector('.ndl').style.transform = `rotate(${-135 + 270 * frac}deg)`;
+  el.querySelector('.val').textContent = val; el.querySelector('.unit').textContent = unit; el.querySelector('small').textContent = sub || '';
+  el.classList.toggle('hot', frac > 0.88); el.classList.toggle('busy', !!busy);
+}
+(function () {
+  const g = document.getElementById('cln-gauges'); if (!g) return;
+  g.innerHTML = ggMake('c', 'C: DRIVE') + ggMake('f', 'F: DRIVE') + ggMake('io', 'DISK ACTIVITY') + ggMake('cpu', 'CPU');
+})();
+function ggLive(s) {
+  const c = (s.drives || []).find(x => x.d === 'C:'), f = (s.drives || []).find(x => x.d === 'F:');
+  if (c) { const u = c.sizeGB - c.freeGB, fr = u / c.sizeGB;
+    document.querySelector('#cln-uf .used').style.width = (100 * fr).toFixed(1) + '%';
+    document.getElementById('uf-used').textContent = `C: USED  ${u.toFixed(1)} GB`;
+    document.getElementById('uf-free').textContent = `FREE  ${c.freeGB.toFixed(1)} GB`;
+    document.getElementById('uf-pct').textContent = `${(100 * fr).toFixed(0)}% FULL · ${c.sizeGB.toFixed(0)} GB`; }
+  if (c) ggSet('c', 1 - c.freeGB / c.sizeGB, c.freeGB.toFixed(1), 'GB FREE', `${(c.sizeGB - c.freeGB).toFixed(0)} of ${c.sizeGB.toFixed(0)} GB used`, (c.wKBs || 0) > 2000);
+  if (f) ggSet('f', 1 - f.freeGB / f.sizeGB, f.freeGB.toFixed(0), 'GB FREE', `${f.label || ''} · ${f.sizeGB.toFixed(0)} GB`, (f.wKBs || 0) > 2000);
+  else ggSet('f', 0, '—', 'NOT PLUGGED IN', 'external drive');
+  const busy = s.disk && s.disk.busy || 0, mb = c ? ((c.rKBs || 0) + (c.wKBs || 0)) / 1024 : 0;
+  ggSet('io', busy / 100, busy.toFixed(0) + '%', 'BUSY', mb.toFixed(1) + ' MB/s on C:', busy > 60);
+  const cpu = s.cpu && s.cpu.load || 0, top = (s.procs && s.procs.cpu || [])[0];
+  ggSet('cpu', cpu / 100, cpu.toFixed(0) + '%', 'LOAD', top ? 'top: ' + top.n : '', cpu > 70);
+}
+function ggMeters() {
+  const box = document.getElementById('cln-meters'); if (!box || !mapData) return;
+  const kids = (mapData.root.kids || []).filter(k => k.b > 0).slice(0, 6), mx = Math.max(...kids.map(k => k.b), 1);
+  box.innerHTML = kids.map(k => { const n = Math.max(1, Math.round(24 * k.b / mx));
+    return `<div class="mt" style="--rgb:${mapRGB(['C:'], k.name)}"><span>${escS(k.name)}</span><div class="seg">${Array.from({ length: 24 }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</div><b>${GB(k.b).toFixed(1)} GB</b></div>`; }).join('');
+}
+
+async function ggTick() { try { const t = await getText('/tools/pc_stats.json'); if (t) ggLive(JSON.parse(t)); } catch (e) {} }
+ggTick(); setInterval(ggTick, 2500);
+mapMini = function () { ggMeters(); };
+
+// CLEANER · UNINSTALL: the Windows uninstall list (read via rack_open_server.py) + each program's OWN uninstaller
+let appsAll = [], appsTok = '';
+const SRVC = 'http://127.0.0.1:8767';
+const KEEP = /realtek|nvidia (graphics driver|hd audio|physx|app)|intel\(|intel® |intel |tascam|native instruments|native access|kontakt|maschine|komplete|visual c\+\+|\.net|edge|webview|tailscale|ableton|image-line|fl studio|serato|touchdesigner|derivative|cura 5\.10|msys|git version|^git |python|node\.js|vcv|vs code|visual studio code|claude|firefox|chrome|obs studio|ndi|avid|ilok|pace|steinberg|asio/i;
+const SEC = /mcafee|norton|avast|webadvisor|defender/i;
+async function appsToken() { if (appsTok) return appsTok; const r = await fetch('/tools/.shell_token?t=' + Date.now(), { cache: 'no-store' }).catch(() => null); appsTok = r && r.ok ? (await r.text()).trim() : ''; return appsTok; }
+async function appsLoad() {
+  document.getElementById('apps-cnt').textContent = 'reading the uninstall list...';
+  try {
+    const r = await fetch(SRVC + '/cleaner/apps', { headers: { 'X-Token': await appsToken() } });
+    const j = await r.json(); if (!j.ok) throw 0; appsAll = j.apps; appsDraw();
+  } catch (e) { appsTok = ''; document.getElementById('apps-cnt').textContent = 'the workbench helper is not answering (it restarts after the current cleanup jobs)'; }
+}
+function appsDraw() {
+  const q = document.getElementById('apps-q').value.trim().toLowerCase(), so = document.getElementById('apps-sort').value;
+  let L = appsAll.filter(a => !q || (a.name + ' ' + a.pub).toLowerCase().includes(q));
+  L.sort(so === 'name' ? (a, b) => a.name.localeCompare(b.name) : so === 'date' ? (a, b) => (b.date || '').localeCompare(a.date || '') : so === 'old' ? (a, b) => (a.date || '9').localeCompare(b.date || '9') : (a, b) => b.mb - a.mb);
+  const tot = L.reduce((s, a) => s + a.mb, 0);
+  document.getElementById('apps-cnt').textContent = `${L.length} programs · ${(tot / 1024).toFixed(1)} GB`;
+  const E = v => escS(v), d8 = d => d && d.length === 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}` : '';
+  document.getElementById('apps-list').innerHTML = L.map(a => {
+    const tag = SEC.test(a.name + a.pub) ? '<span class="tag sec">SECURITY</span>' : KEEP.test(a.name + ' ' + a.pub) ? '<span class="tag keep">KEEP · YOU USE IT</span>' : a.mb > 1024 ? '<span class="tag big">BIG</span>' : '<span></span>';
+    return `<div class="ap" data-id="${E(a.id)}"><div class="nm">${E(a.name)}${tag.replace('<span></span>', '')}<em>${E(a.pub)}${a.ver ? ' · ' + E(a.ver) : ''}</em></div><div class="sz">${a.mb ? (a.mb >= 1024 ? (a.mb / 1024).toFixed(1) + ' GB' : a.mb.toFixed(0) + ' MB') : ''}</div>
+      <div class="dt">${d8(a.date)}</div>${tag}<div class="btns"><button type="button" class="un">UNINSTALL</button></div></div>`; }).join('');
+  document.querySelectorAll('#apps-list .ap').forEach(row => {
+    const a = appsAll.find(x => x.id === row.dataset.id), bx = row.querySelector('.btns');
+    const ask = () => {
+      const warn = KEEP.test(a.name + ' ' + a.pub) ? 'you use this - sure?' : 'start its uninstaller?';
+      bx.innerHTML = `<span class="msg" style="color:#ffbe5a">${warn}</span><button type="button" class="yes">YES</button><button type="button" class="no">NO</button>`;
+      bx.querySelector('.no').onclick = () => { bx.innerHTML = '<button type="button" class="un">UNINSTALL</button>'; bx.querySelector('.un').onclick = ask; };
+      bx.querySelector('.yes').onclick = async () => {
+        bx.innerHTML = '<span class="msg">starting...</span>';
+        try {
+          const r = await fetch(SRVC + '/cleaner/uninstall', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Token': await appsToken() }, body: JSON.stringify({ id: a.id }) });
+          const j = await r.json();
+          bx.innerHTML = j.ok ? '<span class="msg">uninstaller opened - finish it on screen, then REFRESH</span>' : `<span class="msg" style="color:#ff9a7a">${E(j.error || 'failed')}</span>`;
+          if (j.ok) row.classList.add('gone');
+        } catch (e) { bx.innerHTML = '<span class="msg" style="color:#ff9a7a">helper not answering</span>'; }
+      };
+    };
+    bx.querySelector('.un').onclick = ask;
+  });
+}
+document.getElementById('cln-btn').addEventListener('click', () => { if (!appsAll.length) appsLoad(); });
+if (document.getElementById('cln').classList.contains('on')) appsLoad();
+document.getElementById('apps-q').oninput = appsDraw; document.getElementById('apps-sort').onchange = appsDraw;
+document.getElementById('apps-refresh').onclick = appsLoad;
+document.getElementById('apps-settings').onclick = async () => { await fetch(SRVC + '/cleaner/settings', { method: 'POST', headers: { 'X-Token': await appsToken() } }).catch(() => null); };
+
+// when an uninstaller starts (from here or from a cleanup job), CLEANER jumps to the UNINSTALL tab and shows it
+let unRunning = false;
+async function unWatch() {
+  let L = null;
+  try { const r = await fetch(SRVC + '/cleaner/running', { headers: { 'X-Token': await appsToken() } }); const j = await r.json(); if (j.ok) L = j.running; } catch (e) { return; }
+  if (!L) return;
+  const box = document.getElementById('apps-now'), names = L.map(x => x.title || x.proc).filter((v, i, a) => a.indexOf(v) === i);
+  if (L.length) {
+    box.className = 'on'; document.getElementById('apps-now-h').textContent = 'NOW UNINSTALLING';
+    document.getElementById('apps-now-t').textContent = names.join('  ·  ') + '  -  finish it on screen (the window may be behind others)';
+    if (!unRunning) {
+      unRunning = true;
+      const u = document.getElementById('cln-uninst'); u.classList.remove('flash'); void u.offsetWidth; u.classList.add('flash');
+      try { TabLight.ping('cln'); } catch (e) {}
+    }
+  } else if (unRunning) {
+    unRunning = false; box.className = 'on done'; document.getElementById('apps-now-h').textContent = 'UNINSTALL FINISHED';
+    document.getElementById('apps-now-t').textContent = 'list refreshed'; appsLoad();
+    setTimeout(() => { if (!unRunning) box.className = ''; }, 15000);
+  }
+}
+setInterval(unWatch, 3000);
+
+// COPY progress: tools/ni_copy.json (NI libraries) and tools/fl_copy.json (FL Studio data) - shows the one running, else the newest
+let niSeen = '';
+async function niTick() {
+  const a = await getText('/tools/ni_copy.json'), b = await getText('/tools/fl_copy.json');
+  if ((a || '') + '|' + (b || '') === niSeen) return; niSeen = (a || '') + '|' + (b || '');
+  const parse = t => { try { return t ? JSON.parse(t.replace(/^\uFEFF/, '')) : null; } catch (e) { return null; } };
+  const A = parse(a), B = parse(b);
+  let d = A; if (B && (!A || !B.finished || (A.finished && B.started > A.started))) d = B;
+  if (A && !A.finished) d = A;
+  if (!d) return;
+  const L = d.libs || [], done = L.filter(x => x.state === 'copied').length, bad = L.filter(x => x.ok === false).length;
+  const gb = L.reduce((s, x) => s + (x.gb || 0), 0), cur = L.find(x => x.state === 'copying');
+  const box = document.getElementById('ni-copy'); box.className = 'on' + (d.finished ? ' done' : '');
+  box.querySelector('.hd b').textContent = d.title || 'NI LIBRARIES → F:\\NI Libraries';
+  document.getElementById('ni-n').textContent = `${done + bad} / ${L.length} ${d.title ? 'folders' : 'libraries'} · ${gb.toFixed(1)} GB checked` + (bad ? ` · ${bad} PROBLEM` : '') + (d === B && A && A.finished ? ' · NI done ✓' : '');
+  box.querySelector('.bar i').style.width = (100 * (done + bad) / Math.max(1, L.length)).toFixed(1) + '%';
+  document.getElementById('ni-cells').innerHTML = L.map(x => `<i class="${x.state === 'copied' ? 'copied' : x.state === 'copying' ? 'copying' : x.ok === false ? 'bad' : ''}" title="${escS(x.name)} · ${escS(x.state)}${x.gb ? ' · ' + x.gb + ' GB' : ''}"></i>`).join('');
+  document.getElementById('ni-now').textContent = d.finished ? (bad ? `finished with ${bad} problem(s) - Claude will check them` : 'ALL COPIED AND VERIFIED') : cur ? 'copying now: ' + cur.name : 'starting...';
+}
+niTick(); setInterval(niTick, 3000);
+
+// ACID BEDROCK tab: loads the private developer copy only when opened (keeps the workbench light)
+const acidOpen = on => {
+  document.getElementById('acid').classList.toggle('on', on); syncTabs();
+  const body = document.getElementById('acid-body');
+  if (on && !body.firstChild) acidLoad();
+};
+async function acidLoad() {
+  const body = document.getElementById('acid-body'), src = '/private_acid/ACID_BEDROCK.html';
+  const r = await fetch(src + '?t=' + Date.now(), { method: 'HEAD', cache: 'no-store' }).catch(() => null);
+  body.innerHTML = r && r.ok ? `<iframe src="${src}?t=${Date.now()}" title="ACID BEDROCK"></iframe>`
+    : '<div class="none">No developer copy yet. Put ACID_BEDROCK.html in the private_acid folder of SynTHBloK (it is git-ignored, so it never goes to GitHub).</div>';
+}
+document.getElementById('acid-btn').onclick = () => { closePatches(); try { thinkOpen(false); } catch (e) {} ['lab', 'cln'].forEach(id => document.getElementById(id).classList.remove('on')); acidOpen(true); };
+document.getElementById('acid-x').onclick = () => acidOpen(false);
+// LIBRE tab: opening it closes the other pages; any other tab closes it
+const libreOpen = on => { document.getElementById('libre').classList.toggle('on', on); syncTabs(); if (on) libreTick(); };
+document.getElementById('libre-btn').onclick = () => { closePatches(); try { thinkOpen(false); } catch (e) {} ['lab', 'cln', 'acid'].forEach(id => document.getElementById(id).classList.remove('on')); libreOpen(true); };
+document.getElementById('libre-x').onclick = () => libreOpen(false);
+document.getElementById('wbtabs').addEventListener('click', e => { const t = e.target.closest('.tab'); if (t && t.id !== 'libre-btn' && document.getElementById('libre').classList.contains('on')) libreOpen(false); }, true);
+function lbGauges() { const G = document.getElementById('lb-gg'); if (G.firstChild) return;
+  G.innerHTML = [['lcpt', 'CPU PACKAGE'], ['lcpl', 'CPU LOAD'], ['lcpw', 'CPU POWER'], ['lgpt', 'GPU TEMP'], ['lgpl', 'GPU LOAD'], ['lgpw', 'GPU POWER'], ['lmem', 'MEMORY'], ['ldsk', 'HOTTEST DRIVE']].map(x => gkMake(x[0], x[1])).join(''); }
+var lbSeen = 0;
+async function libreTick() {
+  if (!document.getElementById('libre').classList.contains('on')) return;
+  lbGauges();
+  let j; try { j = JSON.parse(((await getText('/tools/lhm.json')) || '').replace(/^\uFEFF/, '')); } catch (e) { j = null; }
+  const body = document.getElementById('lb-body');
+  if (!j || !j.hw) { body.innerHTML = '<div class="none">No readings yet. LibreHardwareMonitor must be running with Options &gt; Remote Web Server &gt; Run ticked; the PC stats feed picks it up within 30 seconds.</div>'; return; }
+  const age = (Date.now() - j.t) / 1000;
+  document.getElementById('lb-at').textContent = `${j.hw.length} devices · ` + (age < 15 ? 'live' : `last reading ${Math.round(age)} s ago`);
+  if (j.t === lbSeen) return; lbSeen = j.t;
+  const all = []; j.hw.forEach(h => h.groups.forEach(g => g.s.forEach(x => all.push(Object.assign({ hw: h.name, g: g.g }, x)))));
+  const find = (hwRe, t, nRe) => all.find(x => hwRe.test(x.id || '') && x.t === t && nRe.test(x.n));
+  const cpuT = find(/cpu/, 'Temperature', /package/i) || find(/cpu/, 'Temperature', /max/i), cpuL = find(/cpu/, 'Load', /total/i), cpuW = find(/cpu/, 'Power', /package/i);
+  const gT = find(/gpu/, 'Temperature', /core/i), gL = find(/gpu/, 'Load', /core/i), gW = find(/gpu/, 'Power', /package|board|total/i) || find(/gpu/, 'Power', /./);
+  const mL = find(/ram|memory/i, 'Load', /memory/i) || all.find(x => x.t === 'Load' && /^memory$/i.test(x.n));
+  const dT = all.filter(x => /hdd|nvme|ssd|storage/i.test(x.id || '') && x.t === 'Temperature').sort((a, b) => b.v - a.v)[0];
+  const G = (id, x, max, unit, hotAt) => x ? gkSet(id, x.v / max, (unit === '%' ? x.v.toFixed(0) : x.v.toFixed(x.v < 100 ? 1 : 0)) + (unit === '°' ? '°' : ''), unit === '°' ? 'CELSIUS' : unit === 'W' ? 'WATTS' : 'LOAD', `max ${x.max != null ? x.max.toFixed(0) : '-'}${unit === '°' ? '°' : unit}`, x.v >= hotAt) : gkSet(id, 0, '-', '', 'not reported');
+  G('lcpt', cpuT, 100, '°', 85); G('lcpl', cpuL, 100, '%', 90); G('lcpw', cpuW, 95, 'W', 999); G('lgpt', gT, 95, '°', 80);
+  G('lgpl', gL, 100, '%', 95); G('lgpw', gW, 130, 'W', 999); G('lmem', mL, 100, '%', 90); G('ldsk', dT, 70, '°', 55);
+  // bar scale per sensor type
+  const scale = x => { const v = x.v; if (v == null) return null;
+    switch (x.t) { case 'Temperature': return v / 100; case 'Load': case 'Control': case 'Level': return v / 100; case 'Fan': return v / 3000;
+      case 'Power': case 'Clock': return x.max ? v / x.max : null;
+      default: return null; } };   // voltages, data, timings ...: numbers only
+  const tone = x => x.t === 'Temperature' ? (x.v >= 85 ? 'h' : x.v >= 70 ? 'w' : '') : (x.t === 'Load' && x.v >= 90 ? 'w' : '');
+  const fmt = (v, u) => v == null ? '-' : (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2).replace(/0$/, '')) + (u ? (u === '°C' || u === 'C' ? '°' : ' ' + u) : '');
+  const cells = f => { if (f == null) return '<div></div>'; f = Math.max(0, Math.min(1, f));
+    return '<div class="cells">' + Array.from({ length: 20 }, (_, i) => `<i class="${(i + .5) / 20 <= f ? (i >= 16 ? 'rd' : i >= 12 ? 'am' : 'on') : ''}"></i>`).join('') + '</div>'; };
+  // which tab a device belongs to (by its sensor ids)
+  const CATS = [['cpu', 'CPU', /intelcpu|amdcpu/], ['gpu', 'GPU', /gpu-/], ['mem', 'MEMORY', /\/ram|\/vram|memory|dimm/i], ['disk', 'STORAGE', /\/hdd|\/nvme|\/ssd|storage/],
+                ['net', 'NETWORK', /\/nic/], ['board', 'BOARD', /\/lpc|\/mainboard|\/motherboard|superio/i], ['other', 'OTHER', /./]];
+  const catOf = h => { const ids = h.groups.flatMap(g => g.s.map(x => x.id || '')).join(' '); return (CATS.find(c => c[2].test(ids) || (c[0] === 'mem' && /memory|corsair|kingston|dimm|ddr/i.test(h.name))) || CATS[6])[0]; };
+  const byCat = {}; j.hw.forEach(h => (byCat[catOf(h)] = byCat[catOf(h)] || []).push(h));
+  let cur = ''; try { cur = localStorage.getItem('wb-libre-tab') || ''; } catch (e) {}
+  if (!byCat[cur]) cur = CATS.find(c => byCat[c[0]])[0];
+  const tabs = document.getElementById('lb-tabs');
+  const tk = CATS.filter(c => byCat[c[0]]).map(c => c[0] + byCat[c[0]].length).join('|') + cur;
+  if (tabs.dataset.k !== tk) { tabs.dataset.k = tk;
+    tabs.innerHTML = CATS.filter(c => byCat[c[0]]).map(c => `<button type="button" role="tab" data-c="${c[0]}" class="${c[0] === cur ? 'on' : ''}">${c[1]}<b>${byCat[c[0]].length}</b></button>`).join(''); }
+  const kindCls = { cpu: 'cpu', gpu: 'gpu', disk: 'disk' }[cur] || '';
+  const row = x => `<div class="r" title="${escS(x.id)}"><span>${escS(x.n)}</span>${cells(scale(x))}<b class="${tone(x)}">${fmt(x.v, x.u)}</b><i>${fmt(x.min, '')}</i><em>${fmt(x.max, '')}</em></div>`;
+  let html = '';
+  // CPU: a core-by-core matrix (clock, temperature, distance to TjMax, voltage, load per thread)
+  if (cur === 'cpu') byCat.cpu.forEach(h => {
+    const S = h.groups.flatMap(g => g.s), cores = [...new Set(S.map(x => (x.n.match(/^CPU Core #(\d+)/) || [])[1]).filter(Boolean))].sort((a, b) => a - b);
+    if (!cores.length) return;
+    const pick = (c, t, re) => S.find(x => x.t === t && new RegExp('^CPU Core #' + c + re).test(x.n));
+    const cols = [['CLOCK', 'Clock', '$'], ['TEMP', 'Temperature', '$'], ['TO TjMAX', 'Temperature', ' Distance'], ['VOLTAGE', 'Voltage', '$'], ['THREAD 1', 'Load', ' Thread #1'], ['THREAD 2', 'Load', ' Thread #2']]
+      .filter(c => cores.some(k => pick(k, c[1], c[2])));
+    html += `<div class="hud cpu mx"><i class="hf"></i><h4><b>CORE MATRIX</b><small>${escS(h.name)} · ${cores.length} cores</small></h4><table><tr><th>CORE</th>${cols.map(c => `<th>${c[0]}</th>`).join('')}</tr>` +
+      cores.map(k => `<tr><td>CORE ${k}</td>${cols.map(c => { const x = pick(k, c[1], c[2]);
+        if (!x) return '<td>-</td>';
+        const far = c[2] === ' Distance', f = far ? 1 - x.v / 100 : scale(x), t = far ? (x.v <= 10 ? 'h' : x.v <= 20 ? 'w' : '') : tone(x);
+        return `<td class="${t}">${fmt(x.v, x.u)}${cells(f)}</td>`; }).join('')}</tr>`).join('') + '</table></div>';
+  });
+  // every sensor group of every device in this tab, as tiles
+  byCat[cur].forEach(h => h.groups.forEach(g => {
+    html += `<div class="hud ${kindCls}"><i class="hf"></i><h4><b>${escS(g.g.toUpperCase())}</b><small>${escS(g.hw)}</small><span>${g.s.length}</span></h4>` +
+      `<div class="r hd"><span>SENSOR</span><span></span><b>NOW</b><i>MIN</i><em>MAX</em></div>` + g.s.map(row).join('') + '</div>';
+  }));
+  body.innerHTML = html;
+  // no scroll bars: tighten the text until the tab fits the screen
+  body.classList.remove('dense', 'dense2');
+  const over = () => body.scrollHeight > body.clientHeight + 2 || body.scrollWidth > body.clientWidth + 2;
+  if (over()) body.classList.add('dense');
+  if (over()) body.classList.add('dense2');
+}
+document.getElementById('lb-tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return;
+  try { localStorage.setItem('wb-libre-tab', b.dataset.c); } catch (err) {} lbSeen = 0; libreTick(); });
+setInterval(libreTick, 2000);
+document.getElementById('acid-reload').onclick = () => { document.getElementById('acid-body').innerHTML = ''; acidLoad(); };
+['tab-wb', 'patch-btn', 'lib-btn', 'think-btn', 'lab-btn', 'cln-btn'].forEach(id => document.getElementById(id).addEventListener('click', () => { document.getElementById('acid').classList.remove('on'); }, true));
+
+// CORE dials in the THINKING look: tick ring, dashed cyan arc, thin needle, big number
+const GK_R = 40, GK_C = 2 * Math.PI * GK_R, GK_L = GK_C * .75;
+function gkDash(frac) {   // dashes (3.2 on, 2 off) that stop at frac of the 270-degree sweep
+  const len = GK_L * Math.max(0, Math.min(1, frac)), seg = 5.2, n = Math.floor(len / seg), rest = len - n * seg;
+  return (Array(n).fill('3.2 2').join(' ') + (rest > .2 ? ` ${Math.min(3.2, rest).toFixed(2)} ${GK_C}` : ` 0 ${GK_C}`)).trim();
+}
+function gkMake(id, label) {
+  const ticks = Array.from({ length: 48 }, (_, i) => { const a = (i * 7.5) * Math.PI / 180, maj = i % 6 === 0, r1 = maj ? 45 : 47;
+    return `<line x1="${(60 + Math.cos(a) * r1).toFixed(1)}" y1="${(58 + Math.sin(a) * r1).toFixed(1)}" x2="${(60 + Math.cos(a) * 50).toFixed(1)}" y2="${(58 + Math.sin(a) * 50).toFixed(1)}" stroke="${maj ? '#2f8a9a' : '#163a44'}" stroke-width="${maj ? 1.1 : .7}"/>`; }).join('');
+  const nodes = [45, 135, 225, 315].map(d => { const a = d * Math.PI / 180; return `<circle cx="${(60 + Math.cos(a) * 54).toFixed(1)}" cy="${(58 + Math.sin(a) * 54).toFixed(1)}" r="1.4" fill="#00e5ff" opacity=".7"/>`; }).join('');
+  return `<div class="gk" id="gk-${id}"><svg viewBox="0 0 120 112"><defs><filter id="gkg-${id}" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="1.8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+    <circle cx="60" cy="58" r="52" fill="none" stroke="#0f3b46" stroke-width=".6"/>${ticks}${nodes}
+    <circle class="trk" cx="60" cy="58" r="${GK_R}" fill="none" stroke="#0b2a33" stroke-width="5" transform="rotate(135 60 58)" stroke-dasharray="${gkDash(1)}"/>
+    <circle class="va" cx="60" cy="58" r="${GK_R}" fill="none" stroke="#00e5ff" stroke-width="5" transform="rotate(135 60 58)" stroke-dasharray="0 ${GK_C}" filter="url(#gkg-${id})"/>
+    <circle cx="60" cy="58" r="33" fill="none" stroke="#0f3b46" stroke-width=".8" stroke-dasharray="1 3"/>
+    <g class="nd" style="transform:rotate(-135deg)"><line x1="60" y1="58" x2="60" y2="16" stroke="#e6f4f8" stroke-width=".9" opacity=".85"/></g>
+    <circle cx="60" cy="58" r="2.4" fill="#020b10" stroke="#00e5ff" stroke-width="1"/>
+    <text class="num" x="60" y="84" text-anchor="middle">-</text><text class="unit" x="60" y="93" text-anchor="middle"></text></svg><b>${label}</b><small></small></div>`;
+}
+function gkSet(id, frac, val, unit, sub, hot) {
+  const el = document.getElementById('gk-' + id); if (!el) return;
+  frac = Math.max(0, Math.min(1, frac || 0));
+  const dash = gkDash(frac);
+  const va = el.querySelector('.va'); va.setAttribute('stroke-dasharray', dash);
+  va.setAttribute('stroke', frac > .9 ? '#ff4d3a' : frac > .75 ? '#ffbe5a' : '#00e5ff');
+  el.querySelector('.nd').style.transform = `rotate(${-135 + 270 * frac}deg)`;
+  el.querySelector('.num').textContent = val; el.querySelector('.unit').textContent = unit; el.querySelector('small').textContent = sub || '';
+  el.classList.toggle('hot', !!hot);
+}
+(function () {
+  const G = document.getElementById('core-gg'); if (!G) return;
+  G.innerHTML = [['kcpu', 'CPU LOAD'], ['kclk', 'CPU CLOCK'], ['ktemp', 'HP SENSOR'], ['kram', 'MEMORY'], ['kgpu', 'GPU LOAD'], ['kgtemp', 'GPU TEMP'], ['kvram', 'GPU MEMORY'], ['kio', 'DISK']].map(x => gkMake(x[0], x[1])).join('');
+})();
+
+// ===== CORE: gauges, fans and the living map, from tools/pc_stats.json =====
+(function () {
+  const rotor = (id, label) => `<div class="fan off" id="fan-${id}"><svg viewBox="0 0 54 54"><circle cx="27" cy="27" r="25" fill="#020b10" stroke="#0f6b7a"/>
+    <g class="rot">${[0, 72, 144, 216, 288].map(a => `<path d="M27 27 C 31 17, 40 13, 43 18 C 40 23, 33 25, 27 27 Z" fill="#00e5ff" fill-opacity=".55" transform="rotate(${a} 27 27)"/>`).join('')}<circle cx="27" cy="27" r="5" fill="#04161c" stroke="#00e5ff"/></g></svg>
+    <div><b>${label}</b><span>-</span><em></em></div></div>`;
+  document.getElementById('core-fanlist').innerHTML = rotor('gpu', 'GPU FAN') + rotor('cpu', 'CPU FAN') + rotor('case', 'CASE FAN');
+  // living map
+  const N = { cpu: [260, 100, 'CPU'], ram: [130, 42, 'MEMORY'], gpu: [390, 42, 'GPU'], c: [130, 158, 'C: DRIVE'], f: [390, 158, 'F: DRIVE'], net: [470, 100, 'NETWORK'], scr: [50, 100, 'SCREEN'] };
+  const L = [['cpu', 'ram'], ['cpu', 'gpu'], ['ram', 'c'], ['c', 'f'], ['cpu', 'net'], ['gpu', 'scr'], ['cpu', 'c']];
+  const svg = document.getElementById('cm-svg'), NS = 'http://www.w3.org/2000/svg';
+  let s = '<defs><radialGradient id="cmglow"><stop offset="0" stop-color="#00e5ff" stop-opacity=".55"/><stop offset="1" stop-color="#00e5ff" stop-opacity="0"/></radialGradient></defs>';
+  L.forEach(([a, b]) => { const p = N[a], q = N[b]; s += `<path class="link" d="M${p[0]} ${p[1]} L${q[0]} ${q[1]}"/>`; });
+  s += '<g id="cm-dots"></g>';
+  for (const k in N) { const [x, y, t] = N[k];
+    s += `<g class="node" id="cmn-${k}"><circle class="glow" cx="${x}" cy="${y}" r="34" fill="url(#cmglow)" opacity=".2"/><rect x="${x - 40}" y="${y - 17}" width="80" height="34" rx="4"/>
+      <text x="${x}" y="${y - 4}" text-anchor="middle">${t}</text><text class="v" id="cmv-${k}" x="${x}" y="${y + 10}" text-anchor="middle">-</text></g>`; }
+  svg.innerHTML = s;
+  const dotsG = document.getElementById('cm-dots');
+  const flows = L.map(([a, b]) => ({ a: N[a], b: N[b], rate: 0, dots: [], key: a + '-' + b }));
+  const flowOf = k => flows.find(f => f.key === k);
+  let last = performance.now(), acc = 0;
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (!document.getElementById('think').classList.contains('on')) { last = now; return; }
+    const dt = Math.min(.1, (now - last) / 1000); last = now; acc += dt; if (acc < 1 / 30) return; const step = acc; acc = 0;
+    let html = '';
+    flows.forEach(f => {
+      const want = Math.round(2 + 10 * f.rate);           // more traffic = more dots
+      while (f.dots.length < want) f.dots.push({ t: Math.random(), dir: Math.random() < .5 ? 1 : -1 });
+      if (f.dots.length > want) f.dots.length = want;
+      const sp = .05 + .9 * f.rate;                          // and faster
+      f.dots.forEach(d => { d.t += d.dir * sp * step; if (d.t > 1) d.t -= 1; if (d.t < 0) d.t += 1;
+        const x = f.a[0] + (f.b[0] - f.a[0]) * d.t, y = f.a[1] + (f.b[1] - f.a[1]) * d.t, c = f.rate > .75 ? '#ffbe5a' : '#00e5ff';
+        html += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(1.4 + 1.6 * f.rate).toFixed(1)}" fill="${c}" opacity="${(.35 + .6 * f.rate).toFixed(2)}"/>`; });
+    });
+    dotsG.innerHTML = html;
+  }
+  requestAnimationFrame(frame);
+  const heatCol = c => c > 85 ? '#ff4d3a' : c > 70 ? '#ffbe5a' : '#0f6b7a';
+  const setNode = (k, val, load, temp) => { const g = document.getElementById('cmn-' + k); if (!g) return;
+    document.getElementById('cmv-' + k).textContent = val; g.querySelector('.glow').setAttribute('opacity', (.15 + .75 * Math.min(1, load)).toFixed(2));
+    g.querySelector('rect').style.stroke = temp != null ? heatCol(temp) : load > .85 ? '#ffbe5a' : '#0f6b7a'; };
+  window.coreLive = function (st) {
+    const cpu = st.cpu || {}, g = st.gpu || {}, r = st.ram || {}, d = st.disk || {}, n = st.net || {}, zones = st.zones || [];
+    const c = (st.drives || []).find(x => x.d === 'C:') || {}, f = (st.drives || []).find(x => x.d === 'F:');
+    const hp = (zones.find(z => z.name === 'HPTZ') || zones[0] || {}).c;
+    gkSet('kcpu', (cpu.load || 0) / 100, (cpu.load || 0).toFixed(0) + '%', 'LOAD', `${cpu.cores || '?'} cores · ${cpu.threads || '?'} threads`, cpu.load > 80);
+    gkSet('kclk', (cpu.mhz || 0) / 4600, ((cpu.mhz || 0) / 1000).toFixed(2), 'GHz', `base ${((cpu.baseMHz || 0) / 1000).toFixed(1)} · turbo 4.6`);
+    const sn = st.sensors, T = sn ? sn.temps || [] : [];
+    const pkg = T.find(t => /package/i.test(t.n)) || T.find(t => /core max/i.test(t.n)) || T.find(t => /cpu/i.test(t.n) && /cpu/i.test(t.id || 'cpu'));
+    const tl = document.querySelector('#gk-ktemp > b');
+    if (pkg) { tl.textContent = 'CPU TEMP'; gkSet('ktemp', pkg.c / 100, pkg.c.toFixed(0) + '°', 'CELSIUS', pkg.c > 85 ? 'HOT - check dust & airflow' : `package${hp != null ? ' · HP zone ' + hp.toFixed(0) + '°' : ''}`, pkg.c > 85); }
+    else if (hp != null) { tl.textContent = 'HP SENSOR'; gkSet('ktemp', hp / 105, hp.toFixed(0) + '°', 'CELSIUS', hp > 85 ? 'HOT - check dust & airflow' : 'board/CPU zone', hp > 85); }
+    gkSet('kram', (r.usedMB || 0) / (r.totalMB || 1), ((r.usedMB || 0) / 1024).toFixed(1), 'GB USED', `of ${((r.totalMB || 0) / 1024).toFixed(0)} GB`);
+    gkSet('kgpu', (g.load || 0) / 100, (g.load || 0).toFixed(0) + '%', 'LOAD', `${g.mhz || 0} / ${g.mhzMax || 0} MHz · ${(g.power || 0).toFixed(0)} W`);
+    gkSet('kgtemp', (g.temp || 0) / 95, (g.temp || 0) + '°', 'CELSIUS', g.name || '', g.temp > 80);
+    gkSet('kvram', (g.memUsed || 0) / (g.memTotal || 1), ((g.memUsed || 0) / 1024).toFixed(1), 'GB VRAM', `of ${((g.memTotal || 0) / 1024).toFixed(0)} GB`);
+    const mbs = ((c.rKBs || 0) + (c.wKBs || 0)) / 1024;
+    gkSet('kio', (d.busy || 0) / 100, (d.busy || 0).toFixed(0) + '%', 'BUSY', mbs.toFixed(1) + ' MB/s on C:', d.busy > 90);
+    // fans: the GPU fan is the only fan Windows reports on this PC
+    const gf = document.getElementById('fan-gpu');
+    if (g.fan != null) { gf.classList.toggle('off', !g.fan); gf.querySelector('.rot').style.animationDuration = (0.18 + (100 - g.fan) / 100 * 1.4).toFixed(2) + 's';
+      const gr = st.sensors && (st.sensors.fans || []).find(x => /gpu/i.test(x.id || x.n)); gf.querySelector('span').textContent = g.fan + '%' + (gr ? ' · ' + gr.rpm + ' RPM' : ' speed'); gf.querySelector('em').textContent = `GPU at ${g.temp}°C`; }
+    // CPU + case fans come from LibreHardwareMonitor (st.sensors), when it is running
+    const bf = sn ? (sn.fans || []).filter(x => !/gpu/i.test(x.id || '') && !/gpu/i.test(x.n)) : [];
+    const cf = bf.find(x => /cpu/i.test(x.n)) || bf[0], kf = bf.find(x => x !== cf);
+    [['cpu', cf], ['case', kf]].forEach(([k, x]) => { const e = document.getElementById('fan-' + k);
+      if (x) { e.classList.toggle('off', !x.rpm); e.querySelector('.rot').style.animationDuration = (0.18 + (1 - Math.min(x.rpm, 3000) / 3000) * 1.4).toFixed(2) + 's';
+        e.querySelector('span').textContent = x.rpm + ' RPM'; e.querySelector('em').textContent = x.n; }
+      else { e.classList.add('off'); e.querySelector('span').textContent = sn ? 'not reported' : 'no sensor';
+        e.querySelector('em').textContent = ''; } });
+    const extra = [];
+    if (pkg) extra.push(['CPU PACKAGE', pkg.c]);
+    const cmx = T.find(t => /core max/i.test(t.n)); if (cmx && cmx !== pkg) extra.push(['HOTTEST CORE', cmx.c]);
+    T.filter(t => /nvme|hdd|ssd|storage/i.test(t.id || '')).slice(0, 2).forEach((t, i) => extra.push([i ? 'DRIVE ' + (i + 1) : 'DRIVE', t.c]));
+    document.getElementById('core-heat').innerHTML = [...zones.map(z => [z.name === 'HPTZ' ? 'HP SENSOR' : z.name, z.c]), ['GPU', g.temp]].filter(x => x[1] != null)
+      .map(([nm, v]) => `<div class="heat ${v > 85 ? 'hot' : ''}"><span>${escS(nm)}</span><i><u style="width:${Math.min(100, v).toFixed(0)}%"></u></i><b>${(+v).toFixed(0)}°</b></div>`).join('');
+    // the living map
+    const ld = (cpu.load || 0) / 100, gl = (g.load || 0) / 100, ru = (r.usedMB || 0) / (r.totalMB || 1);
+    setNode('cpu', (cpu.load || 0).toFixed(0) + '% · ' + ((cpu.mhz || 0) / 1000).toFixed(1) + 'GHz', ld, hp);
+    setNode('ram', ((r.usedMB || 0) / 1024).toFixed(1) + ' GB', ru);
+    setNode('gpu', (g.load || 0) + '% · ' + (g.temp || 0) + '°', gl, g.temp);
+    setNode('c', mbs.toFixed(1) + ' MB/s', (d.busy || 0) / 100);
+    setNode('f', f ? (((f.rKBs || 0) + (f.wKBs || 0)) / 1024).toFixed(1) + ' MB/s' : 'unplugged', f ? Math.min(1, ((f.wKBs || 0) + (f.rKBs || 0)) / 1024 / 60) : 0);
+    setNode('net', ((n.rxKBs || 0) + (n.txKBs || 0)).toFixed(0) + ' KB/s', Math.min(1, ((n.rxKBs || 0) + (n.txKBs || 0)) / 2000));
+    setNode('scr', '4K · 60Hz', gl);
+    const fl = (k, v) => { const x = flowOf(k); if (x) x.rate = Math.max(0, Math.min(1, v)); };
+    fl('cpu-ram', ld); fl('cpu-gpu', gl * .9 + .05); fl('ram-c', Math.min(1, mbs / 40)); fl('cpu-c', (d.busy || 0) / 100 * .6);
+    fl('c-f', f ? Math.min(1, ((f.wKBs || 0)) / 1024 / 40) : 0); fl('cpu-net', Math.min(1, ((n.rxKBs || 0) + (n.txKBs || 0)) / 2000)); fl('gpu-scr', .15 + .8 * gl);
+  };
+})();
+function coreSpace() {
+  const cells = (n, frac, cls = 'tone') => Array.from({ length: n }, (_, i) => { const on = (i + .5) / n <= frac;
+    return `<i class="${!on ? '' : cls === 'tone' ? (i >= n * .8 ? 'rd' : i >= n * .6 ? 'am' : 'on') : cls}"></i>`; }).join('');
+  const grid = n => `style="grid-template-columns:repeat(${n},1fr)"`;
+  const T = id => (document.getElementById(id) || {}).textContent || '';
+  // copy progress
+  const nc = document.getElementById('ni-copy'), cc = document.getElementById('cs-copy');
+  if (nc && cc) {
+    if (nc.classList.contains('on')) {
+      const w = parseFloat(nc.querySelector('.bar i').style.width) / 100 || 0;
+      const libs = [...nc.querySelectorAll('#ni-cells i')].map(i => `<i class="${i.classList.contains('copied') ? 'gr' : i.classList.contains('copying') ? 'now' : i.classList.contains('bad') ? 'bad' : ''}" title="${escS(i.title)}"></i>`).join('');
+      cc.className = ''; cc.innerHTML = `<div class="lab"><b>${escS(nc.querySelector('.hd b').textContent)}</b><span>${escS(T('ni-n'))}</span></div>
+        <div class="cells" ${grid(48)}>${cells(48, w, 'gr')}</div><div class="cells lib" ${grid(Math.max(1, nc.querySelectorAll('#ni-cells i').length))}>${libs}</div><div class="now">${escS(T('ni-now'))}</div>`;
+    } else { cc.className = 'cs-none'; cc.textContent = 'NO COPY RUNNING'; }
+  }
+  // C: used / free
+  const used = document.querySelector('#cln-uf .used'), fr = used ? parseFloat(used.style.width) / 100 || 0 : 0;
+  document.getElementById('cs-uf').innerHTML = `<div class="lab"><b>${escS(T('uf-used'))}</b><span>${escS(T('uf-free'))} · ${escS(T('uf-pct'))}</span></div><div class="cells" ${grid(48)}>${cells(48, fr)}</div>`;
+  // biggest folders on C:
+  document.getElementById('cs-meters').innerHTML = [...document.querySelectorAll('#cln-meters .mt')].map(m => {
+    const segs = m.querySelectorAll('.seg i'), on = m.querySelectorAll('.seg i.on').length;
+    return `<div class="row"><span>${escS(m.querySelector('span').textContent)}</span><div class="cells" ${grid(32)}>${cells(32, on / Math.max(1, segs.length))}</div><b>${escS(m.querySelector('b').textContent)}</b></div>`; }).join('');
+}
+async function coreTick() { coreSpace(); try { const t = await getText('/tools/pc_stats.json'); if (t) coreLive(JSON.parse(t)); } catch (e) {} }
+// every page's panels wear the CORE frame
+[['#cln .card', ''], ['#cln-ok', 'am'], ['#cln-comm', 'gr'], ['#acid-body', 'mg']]
+  .forEach(([q, c]) => document.querySelectorAll(q).forEach(e => { e.classList.add('hp'); if (c) e.classList.add(c); }));
+// WORKBENCH, PATCHES and BACKDROP LAB keep their own look; only the CORE lettering on their headings (.hl)
+[['section.pane', ''], ['#lab .card', ''], ['#lab-log', 'am']]
+  .forEach(([q, c]) => document.querySelectorAll(q).forEach(e => { e.classList.add('hl'); if (c) e.classList.add(c); }));
+document.querySelectorAll('.hud').forEach(h => { if (!h.querySelector(':scope>.hf')) h.insertAdjacentHTML('afterbegin', '<i class="hf"></i>'); });
+coreTick(); setInterval(coreTick, 2500);
+// RUN THESE: .bat files in tools/run_queue.json that have not run yet. Done = opened from here (tools/run_done.json),
+// its doneIf file was written after it was added, or dismissed here.
+const RunQ = { items: [], token: '' };
+async function runqTick() {
+  const q = await getText('/tools/run_queue.json'); if (!q) { RunQ.items = []; return runqDraw(); }
+  let items; try { items = JSON.parse(q.replace(/^\uFEFF/, '')).items || []; } catch (e) { return; }
+  let done = {}; try { done = JSON.parse((await getText('/tools/run_done.json')) || '{}'); } catch (e) {}
+  let dis = {}; try { dis = JSON.parse(localStorage.getItem('wb-runq-dismiss') || '{}'); } catch (e) {}
+  const out = [];
+  for (const it of items) {
+    if ((done[it.id] || 0) >= (it.added || 0) || dis[it.id] === it.added) continue;
+    if (it.doneIf) { const r = await fetch('/' + it.doneIf.replace(/^\/+/, '') + '?t=' + Date.now(), { method: 'HEAD', cache: 'no-store' }).catch(() => null);
+      if (r && r.ok && Date.parse(r.headers.get('Last-Modified') || 0) >= (it.added || 0) - 2000) continue; }
+    out.push(it);
+  }
+  // items marked blockWhile:"copy" wait until both copies to F: (NI libraries, then FL Studio data) are finished
+  const fin = async f => { try { const t = await getText(f); return !!(t && JSON.parse(t.replace(/^\uFEFF/, '')).finished); } catch (e) { return false; } };
+  RunQ.copyBusy = !((await fin('/tools/ni_copy.json')) && (await fin('/tools/fl_copy.json')));
+  RunQ.items = out; runqDraw();
+}
+function runqDraw() {
+  const box = document.getElementById('runq'), L = RunQ.items;
+  box.classList.toggle('on', L.length > 0);
+  try { drawSignal(); } catch (e) {}
+  document.getElementById('runq-n').textContent = L.length + (L.length === 1 ? ' file waiting' : ' files waiting');
+  const key = L.map(x => x.id + x.added).join('|') + RunQ.copyBusy; if (box.dataset.k === key) return; box.dataset.k = key;
+  document.getElementById('runq-list').innerHTML = L.map(x => `<div class="it" data-id="${escS(x.id)}"><b title="${escS(x.path)}">${escS(x.name)}</b>
+    <div class="bt"><button type="button" class="go"${x.blockWhile === 'copy' && RunQ.copyBusy ? ' disabled title="waits for the copy to F: to finish"' : ''}>${x.blockWhile === 'copy' && RunQ.copyBusy ? 'WAIT' : 'OPEN'}</button><button type="button" class="f sh">SHOW FILE</button><button type="button" class="f">DONE</button></div><em>${escS(x.why || '')}</em><div class="st">${x.blockWhile === 'copy' && RunQ.copyBusy ? 'opens after the copy to F: finishes (restarting now would break it)' : ''}</div></div>`).join('');
+}
+document.getElementById('runq-list').addEventListener('click', async e => {
+  const b = e.target.closest('button'), row = e.target.closest('.it'); if (!b || !row) return;
+  const it = RunQ.items.find(x => x.id === row.dataset.id); if (!it) return;
+  const st = row.querySelector('.st');
+  if (b.classList.contains('sh')) return runqShell(it, 'show', st);
+  if (b.classList.contains('f')) { try { const d = JSON.parse(localStorage.getItem('wb-runq-dismiss') || '{}'); d[it.id] = it.added; localStorage.setItem('wb-runq-dismiss', JSON.stringify(d)); } catch (e) {} return runqTick(); }
+  st.textContent = 'opening…';
+  try {
+    if (!RunQ.token) RunQ.token = ((await getText('/tools/.shell_token')) || '').trim();
+    const r = await fetch('http://127.0.0.1:8767/runq/open', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Token': RunQ.token }, body: JSON.stringify({ id: it.id }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 403) RunQ.token = '';
+    if (j.ok) { st.textContent = 'opened · approve the Windows prompt if one appears'; setTimeout(runqTick, 1500); }
+    else if (r.status === 404) return runqShell(it, 'open', st);   // a helper started before RUN THESE existed: open it through the MSYS terminal
+    else st.textContent = (j.error || 'could not open it') + ' · SHOW FILE finds it for you';
+  } catch (err) { st.textContent = 'the workbench helper is not answering · double-click it on your Desktop'; }
+});
+// open or show a listed .bat through the workbench's MSYS terminal (same helper, same token)
+async function runqShell(it, how, st) {
+  const win = String(it.path || '').replace(/%USERPROFILE%/gi, 'C:\\Users\\nickk');
+  if (!/^[A-Za-z]:\\[^"'$`]+\.bat$/i.test(win)) { st.textContent = 'not a .bat path'; return; }
+  const cmd = how === 'show' ? `MSYS2_ARG_CONV_EXCL='*' explorer.exe "/select,${win}"; true`
+                             : `MSYS2_ARG_CONV_EXCL='*' powershell.exe -NoProfile -Command "Start-Process -FilePath '${win}'"`;
+  try {
+    if (!RunQ.token) RunQ.token = ((await getText('/tools/.shell_token')) || '').trim();
+    const r = await fetch('http://127.0.0.1:8767/sh', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Token': RunQ.token }, body: JSON.stringify({ cmd }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 403) RunQ.token = '';
+    st.textContent = j.ok ? (how === 'show' ? 'Desktop opened with the file selected' : 'opened · click Yes on the Windows prompt') : (j.error || 'the terminal is busy') + (r.status === 409 ? ' · try again in a moment' : '');
+    if (j.ok && how === 'open') { const d = await getText('/tools/run_done.json').catch(() => null); setTimeout(runqTick, 3000); }
+  } catch (e) { st.textContent = 'the workbench helper is not answering · double-click it on your Desktop'; }
+}
+runqTick(); setInterval(runqTick, 4000);
+
+// TELEMETRY banner: the newest event only, plus the readout's mode and clock
+setInterval(() => {
+  if (!document.getElementById('think').classList.contains('on')) return;
+  let f; try { f = Mind.feed(); } catch (e) { return; }
+  const e = f.stream[0], el = document.getElementById('tb-now');
+  const html = e ? `<u>${f.hex(e.addr, 6)}</u><b style="color:${f.KC[e.k] || '#5ff6ff'}">${escS((f.OP[e.k] || 'SYS').trim())}</b>${escS(e.txt)}` : '';
+  if (el.innerHTML !== html) el.innerHTML = html;
+  const tb = f.topBar; if (!tb) return;
+  const m = document.getElementById('tb-mode'); m.textContent = tb.modeTxt; m.style.setProperty('--mc', tb.modeCol); m.classList.toggle('fast', !!tb.fast);
+  document.getElementById('tb-clock').textContent = tb.clock;
+}, 500);
 </script>
 </body>
 </html>

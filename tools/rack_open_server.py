@@ -10,6 +10,14 @@
 #   POST /sh       {"cmd": "..."}  -> {"ok": true, "id": n}     (needs the token from tools/.shell_token)
 #   GET  /sh/out?id=n&from=k       -> {"text": ..., "next": k2, "done": bool, "code": int, "cwd": ...}
 #   POST /sh/kill                  -> stops the running command
+#   POST /cleaner  {"kind": "msg" | "approve" | "hold", "text": "...", "item": "<step id>"}: the CLEANER tab's COMM window.
+#        Appends to tools/cleaner_inbox.json (local only) for Claude to read; changes nothing on the PC by itself.
+#   GET  /cleaner/apps              (token) installed programs from the Windows uninstall list (read-only)
+#   POST /cleaner/uninstall {id}    (token) starts THAT program's own uninstaller on Nick's screen (Windows asks to approve)
+#   POST /cleaner/settings          (token) opens Settings > Apps
+#   GET  /cleaner/running           (token) uninstallers running right now (process name + window title), read-only
+#   POST /runq/open {id}            (token) the CORE tab's RUN THESE window: opens ONE .bat that Claude listed in
+#        tools/run_queue.json, only from the Desktop or the SynTHBloK folder (Windows still asks for admin if the .bat needs it)
 #   Only the workbench's own page can use it: its Origin, and the token this server writes at start (other
 #   sites can't read either). No interactive input (no vim / less): commands that finish, like make, git, ls.
 # Only .vcv files straight inside patches/ or Rack's patches folder can be opened.
@@ -37,6 +45,7 @@ except Exception:
     pass
 SH = {'id': 0, 'proc': None, 'buf': '', 'done': True, 'code': 0, 'cwd': REPO, 'lock': threading.Lock()}
 MARK = '\x01CWD:'
+CLEAN_LOCK = threading.Lock()
 def sh_start(cmd):
     with SH['lock']:
         if SH['proc'] and SH['proc'].poll() is None: return None
@@ -69,6 +78,92 @@ def rack_running():
     r = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq Rack.exe', '/NH'], capture_output=True, text=True)
     return 'Rack.exe' in r.stdout
 
+
+# ---- CLEANER: installed programs + their own uninstallers (Windows only) ----
+# ---- CORE: RUN THESE (.bat files Claude asked Nick to run) ----
+RUNQ, RUND = os.path.join(HERE, 'run_queue.json'), os.path.join(HERE, 'run_done.json')
+def runq_open(rid):
+    import time as _t
+    try: items = json.load(open(RUNQ, encoding='utf-8-sig')).get('items', [])
+    except Exception: return None, 'no run queue'
+    it = next((x for x in items if x.get('id') == rid), None)
+    if not it: return None, 'not in the run queue'
+    path = os.path.abspath(os.path.expandvars(it.get('path', '')))
+    roots = [os.path.abspath(os.path.join(os.environ.get('USERPROFILE', ''), 'Desktop')), os.path.abspath(REPO)]
+    if not path.lower().endswith('.bat') or not os.path.isfile(path) or not any(os.path.dirname(path).lower().startswith(r.lower()) for r in roots):
+        return path, 'only .bat files on the Desktop or in SynTHBloK'
+    os.startfile(path)
+    try: done = json.load(open(RUND, encoding='utf-8'))
+    except Exception: done = {}
+    done[rid] = int(_t.time() * 1000)
+    with open(RUND, 'w', encoding='utf-8') as f: json.dump(done, f)
+    return path, None
+
+UNINST_ROOTS = []
+if os.name == 'nt':
+    import winreg, ctypes
+    UNINST_ROOTS = [('HKLM', winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'),
+                    ('HKLM32', winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'),
+                    ('HKCU', winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Uninstall')]
+def _rv(k, n):
+    try: return winreg.QueryValueEx(k, n)[0]
+    except OSError: return None
+def list_apps():
+    out = {}
+    for tag, hive, path in UNINST_ROOTS:
+        try: root = winreg.OpenKey(hive, path)
+        except OSError: continue
+        i = 0
+        while True:
+            try: sub = winreg.EnumKey(root, i)
+            except OSError: break
+            i += 1
+            try: k = winreg.OpenKey(root, sub)
+            except OSError: continue
+            name = _rv(k, 'DisplayName'); us = _rv(k, 'UninstallString')
+            if not name or not us or _rv(k, 'SystemComponent') == 1 or _rv(k, 'ParentKeyName') or re.match(r'^KB\d', name): continue
+            key = name.strip().lower()
+            if key in out: continue
+            out[key] = {'id': tag + '|' + sub, 'name': name.strip(), 'pub': (_rv(k, 'Publisher') or '').strip(), 'ver': str(_rv(k, 'DisplayVersion') or ''),
+                        'mb': round((_rv(k, 'EstimatedSize') or 0) / 1024, 1), 'date': str(_rv(k, 'InstallDate') or ''), 'msi': bool(re.match(r'(?i)msiexec', us.strip()))}
+    return sorted(out.values(), key=lambda a: a['name'].lower())
+UNINST_PROC = re.compile(r'^(msiexec|unins\d*|uninst\w*|uninstall\w*|au_|un_a|un_b|setup|vs_installer\w*|vs_setup\w*|installer|cleanup)\.exe$', re.I)
+_RUN_CACHE = {'t': 0, 'v': []}
+def running_uninstallers():
+    import time as _t
+    if _t.time() - _RUN_CACHE['t'] < 2: return _RUN_CACHE['v']
+    out = []
+    try:
+        txt = subprocess.run(['tasklist', '/v', '/fo', 'csv', '/nh'], capture_output=True, text=True, timeout=8,
+                             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)).stdout
+        import csv, io
+        for row in csv.reader(io.StringIO(txt)):
+            if len(row) < 9 or not UNINST_PROC.match(row[0]): continue
+            title = row[8].strip()
+            if row[0].lower() == 'msiexec.exe' and title in ('', 'N/A'): continue   # the idle Windows Installer service
+            out.append({'proc': row[0], 'pid': row[1], 'title': '' if title == 'N/A' else title})
+    except Exception:
+        pass
+    _RUN_CACHE.update(t=_t.time(), v=out)
+    return out
+def run_uninstall(app_id):
+    tag, _, sub = app_id.partition('|')
+    for t, hive, path in UNINST_ROOTS:
+        if t != tag: continue
+        try: k = winreg.OpenKey(hive, path + '\\' + sub)
+        except OSError: return None, 'not found (already uninstalled?)'
+        name = _rv(k, 'DisplayName'); us = (_rv(k, 'UninstallString') or '').strip()
+        if not us: return name, 'no uninstaller listed'
+        m = re.match(r'(?i)msiexec(\.exe)?\s.*?(\{[0-9A-F-]+\})', us)
+        if m: exe, args = 'msiexec.exe', '/x ' + m.group(2)
+        else:
+            m = re.match(r'^"([^"]+)"\s*(.*)$', us) or re.match(r'^(.+?\.exe)\s*(.*)$', us, re.I)
+            exe, args = (m.group(1), m.group(2)) if m else (us, '')
+        # ShellExecute so the uninstaller can ask Windows for permission (a normal launch would fail when it needs admin)
+        rc = ctypes.windll.shell32.ShellExecuteW(None, 'open', exe, args or None, None, 1)
+        return name, (None if rc > 32 else 'could not start (code %d)' % rc)
+    return None, 'unknown id'
+
 class H(BaseHTTPRequestHandler):
     def head(self, code):
         self.send_response(code)
@@ -97,9 +192,16 @@ class H(BaseHTTPRequestHandler):
                     i = buf.find(MARK)
                     if i >= 0: buf = buf[:i]   # the cwd marker is never shown
                 return self.reply(200, {'ok': True, 'id': SH['id'], 'text': buf[frm:], 'next': len(buf), 'done': SH['done'], 'code': SH['code'], 'cwd': SH['cwd']})
+        if self.path == '/cleaner/running':
+            if self.headers.get('Origin') not in ORIGINS or self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False})
+            return self.reply(200, {'ok': True, 'running': running_uninstallers()})
+        if self.path == '/cleaner/apps':
+            if self.headers.get('Origin') not in ORIGINS or self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False})
+            try: return self.reply(200, {'ok': True, 'apps': list_apps()})
+            except Exception as e: return self.reply(500, {'ok': False, 'error': str(e)})
         self.reply(404, {'ok': False})
     def do_POST(self):
-        if self.path not in ('/open', '/gen', '/sh', '/sh/kill'): return self.reply(404, {'ok': False})
+        if self.path not in ('/open', '/gen', '/sh', '/sh/kill', '/cleaner', '/cleaner/uninstall', '/cleaner/settings', '/runq/open'): return self.reply(404, {'ok': False})
         # pages from other sites can't use it: only the workbench's own origin
         if self.headers.get('Origin') not in ORIGINS: return self.reply(403, {'ok': False, 'error': 'not the workbench'})
         if self.path.startswith('/sh'):
@@ -118,6 +220,22 @@ class H(BaseHTTPRequestHandler):
             if i is None: return self.reply(409, {'ok': False, 'error': 'a command is still running (Ctrl+C stops it)'})
             return self.reply(200, {'ok': True, 'id': i, 'cwd': SH['cwd']})
         if self.path == '/gen': return self.gen()
+        if self.path == '/cleaner': return self.cleaner()
+        if self.path == '/runq/open':
+            if self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False, 'error': 'no token'})
+            try: rid = str(json.loads(self.rfile.read(min(int(self.headers.get('Content-Length') or 0), 2000)) or b'{}').get('id') or '')
+            except Exception: return self.reply(400, {'ok': False, 'error': 'bad request'})
+            path, err = runq_open(rid)
+            return self.reply(200 if not err else 409, {'ok': not err, 'path': path, 'error': err})
+        if self.path in ('/cleaner/uninstall', '/cleaner/settings'):
+            if self.headers.get('X-Token') != TOKEN: return self.reply(403, {'ok': False, 'error': 'no token'})
+            if self.path == '/cleaner/settings':
+                os.startfile('ms-settings:appsfeatures'); return self.reply(200, {'ok': True})
+            try: app_id = str(json.loads(self.rfile.read(min(int(self.headers.get('Content-Length') or 0), 2000)) or b'{}').get('id') or '')
+            except Exception: return self.reply(400, {'ok': False, 'error': 'bad request'})
+            name, err = run_uninstall(app_id)
+            self._clean_note({'kind': 'msg', 'item': 'uninstall', 'text': f"UNINSTALL started from CLEANER: {name or app_id}" + (f" - {err}" if err else '')})
+            return self.reply(200 if not err else 409, {'ok': not err, 'name': name, 'error': err})
         try:
             req = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
             d, f = LIBS[req['lib']], req['file']
@@ -129,6 +247,30 @@ class H(BaseHTTPRequestHandler):
         subprocess.Popen(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT, path],
                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         self.reply(200, {'ok': True, 'path': path})
+    def cleaner(self, forced=None):
+        if forced is not None: req = forced
+        else:
+            try:
+                req = json.loads(self.rfile.read(min(int(self.headers.get('Content-Length') or 0), 20000)) or b'{}')
+            except Exception:
+                return self.reply(400, {'ok': False, 'error': 'bad request'})
+        return self._clean_note(req, reply=True)
+    def _clean_note(self, req, reply=False):
+        kind = req.get('kind') if req.get('kind') in ('msg', 'approve', 'hold') else 'msg'
+        text = str(req.get('text') or '')[:2000]; item = str(req.get('item') or '')[:80]
+        if not text.strip() and kind == 'msg': return self.reply(400, {'ok': False, 'error': 'empty'})
+        path = os.path.join(HERE, 'cleaner_inbox.json')
+        with CLEAN_LOCK:
+            try:
+                with open(path, encoding='utf-8') as f: box = json.load(f)
+            except Exception:
+                box = {'messages': []}
+            import time as _t
+            m = {'id': len(box['messages']) + 1, 't': int(_t.time() * 1000), 'kind': kind, 'item': item, 'text': text}
+            box['messages'].append(m)
+            with open(path + '.tmp', 'w', encoding='utf-8') as f: json.dump(box, f, indent=1)
+            os.replace(path + '.tmp', path)
+        if reply: self.reply(200, {'ok': True, 'id': m['id']})
     def gen(self):
         try:
             style = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}').get('style') or ''

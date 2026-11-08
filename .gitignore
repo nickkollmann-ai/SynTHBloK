@@ -39,3 +39,18 @@ tools/backdrop_lab.json
 tools/pc_survey.txt
 tools/pc_probe.txt
 tools/pc_stats_test.txt
+# the CLEANER tab (local only)
+tools/cleaner.json
+tools/cleaner_inbox.json
+tools/pc_step1.txt
+tools/space_map.json
+# ACID BEDROCK developer copy: protected code, NEVER public (workbench ACID BEDROCK tab loads it from here)
+private_acid/
+tools/run_queue.json
+tools/run_done.json
+tools/lhm_install.txt
+tools/bios_restart.txt
+tools/lhm.json
+tools/ni_relink*.txt
+tools/ni_relink*.json
+tools/ni_relink_xml_backup/
