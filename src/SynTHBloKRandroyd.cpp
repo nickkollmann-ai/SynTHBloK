@@ -119,6 +119,11 @@ struct SynTHBloKRandroyd : Module {
     std::atomic<bool> rollReq{false}, mutateReq{false}, storeReq{false}, parkReq{false}, undoReq{false},
         newTrackReq{false}, newRackReq{false}, sceneNextReq{false}, rolled{false};
     std::atomic<float> cpuLoad{0.f};
+    // CPU sizing: what one layer really costs on this computer (learned after each build), and the guard
+    // that parks layers when the meter sits at the limit. AUTO aims to leave the rack under CPU_BUDGET.
+    static constexpr float CPU_BUDGET = 0.55f, CPU_GUARD = 0.90f;
+    float layerCost = 0.12f;   // starts cautious: a fresh install rolls MED-sized tracks, not FULL
+    bool cpuGuard = true;
     std::atomic<int> sceneOut{-1};
     dsp::PulseGenerator trigPulse;
     midi::InputQueue midiIn;
@@ -278,6 +283,8 @@ struct SynTHBloKRandroyd : Module {
         json_object_set_new(root, "selTrack", json_integer(selTrack));
         json_object_set_new(root, "curPad", json_integer(curPad));
         json_object_set_new(root, "spots", json_integer(SPOTS));
+        json_object_set_new(root, "layerCost", json_real(layerCost));
+        json_object_set_new(root, "cpuGuard", json_boolean(cpuGuard));
         json_t* ar = json_array();
         for (int i = 0; i < 8; i++) json_array_append_new(ar, json_integer(this->arr[i]));
         json_object_set_new(root, "arr", ar);
@@ -384,6 +391,8 @@ struct SynTHBloKRandroyd : Module {
         curPad = geti("curPad", -1);
         if (curPad >= 0 && geti("spots", 8) == 8) curPad = (curPad / 8) * SPOTS + curPad % 8;   // saved before 16 spots per bank
         curPad = clamp(curPad, -1, BANKS * SPOTS - 1);
+        if (json_t* v = json_object_get(root, "layerCost")) layerCost = clamp((float) json_number_value(v), 0.03f, 0.4f);
+        if (json_t* v = json_object_get(root, "cpuGuard")) cpuGuard = json_is_true(v);
         if (json_t* ar = json_object_get(root, "arr")) for (int i = 0; i < 8; i++) arr[i] = (uint8_t) json_integer_value(json_array_get(ar, i));
         arrKind = geti("arrKind", -1);
         mode = geti("mode", 0);
@@ -771,8 +780,9 @@ struct RdCpu : TransparentWidget {
             }
             rdFont(args.vg);
             rdText(args.vg, box.size.x, h * 0.5f, string::f("%d%%", (int) std::round(load * 100.f)), 7.f, oled::amber(), NVG_ALIGN_RIGHT);
-            int room = std::max(0, (int) std::floor((0.6f - load) / 0.08f));
-            std::string line = load > 0.85f ? "CPU LIMIT" : (room > 0 ? string::f("ROOM FOR ~%d MORE", room) : "NEAR THE LIMIT");
+            float cost = module ? module->layerCost : 0.12f;
+            int room = std::max(0, (int) std::floor((SynTHBloKRandroyd::CPU_BUDGET - load) / cost));
+            std::string line = load > 0.85f ? "CPU LIMIT" : (room > 0 ? string::f("ROOM FOR ~%d MORE PARTS", room) : "NEAR THE LIMIT");
             rdText(args.vg, 0.f, mm2px(5.4f), line, 5.2f, load > 0.85f ? rdz::red() : oled::amber(170), NVG_ALIGN_LEFT);
         }
         Widget::drawLayer(args, layer);
@@ -843,6 +853,39 @@ struct RdOled : OpaqueWidget {
 struct SynTHBloKRandroydWidget : ModuleWidget {
     RdInfo info;
     float infoTimer = 0.f;
+    // CPU: a few seconds after a build, measure what its layers cost (m->layerCost); the guard parks
+    // RANDROYD's least important layer when the meter sits above CPU_GUARD for 3 s, one at a time.
+    float cpuMeasureT = -1.f, cpuOthers = 0.f, guardT = 0.f, guardCool = 0.f;
+    int liveUnparked() { int n = 0; for (int t = 0; t < 8; t++) if (trackLive(t) && !trackParked(t)) n++; return n; }
+    void cpuBuildStart() {   // before a build: what the rest of the rack uses
+        SynTHBloKRandroyd* m = rd();
+        cpuOthers = std::max(0.f, m->cpuLoad.load() - m->layerCost * liveUnparked());
+        cpuMeasureT = -1.f;
+    }
+    void cpuBuildDone() { cpuMeasureT = 4.f; guardT = 0.f; guardCool = 4.f; }   // let the meter settle first
+    void cpuStep(float dt) {
+        SynTHBloKRandroyd* m = rd();
+        float load = m->cpuLoad.load();
+        if (cpuMeasureT >= 0.f && (cpuMeasureT -= dt) < 0.f) {
+            int n = liveUnparked();
+            float c = n ? (load - cpuOthers) / n : 0.f;
+            if (n && c > 0.01f && load < 0.99f)   // a pinned meter says nothing about the real cost
+                m->layerCost = clamp(0.5f * m->layerCost + 0.5f * c, 0.03f, 0.4f);
+            else if (n && load >= 0.99f)
+                m->layerCost = clamp(m->layerCost * 1.5f, 0.03f, 0.4f);   // overloaded: AUTO goes smaller next time
+        }
+        guardCool -= dt;
+        guardT = (m->cpuGuard && load > SynTHBloKRandroyd::CPU_GUARD) ? guardT + dt : 0.f;
+        if (guardT < 3.f || guardCool > 0.f) return;
+        for (int t = 7; t >= 1; t--)   // the last-added parts go first; drums (T1) keep playing
+            if (trackLive(t) && !trackParked(t)) {
+                parkTrack(t, true);
+                m->layerCost = clamp(m->layerCost * 1.25f, 0.03f, 0.4f);
+                m->say(string::f("CPU LIMIT: T%d PARKED TO STOP CRACKLES  ·  WAKE IT IN THE TRACK VIEW, OR SET SIZE LOWER", t + 1));
+                break;
+            }
+        guardT = 0.f; guardCool = 3.f;
+    }
 
     SynTHBloKRandroyd* rd() { return dynamic_cast<SynTHBloKRandroyd*>(module); }
 
@@ -2511,17 +2554,19 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         std::mt19937 rng(sd);
         int bpm = std::uniform_int_distribution<int>(G.bpmLo, G.bpmHi)(rng);
         // SIZE: how many layers. LIGHT = drums + bass, MED = + lead + chords, FULL = + perc + pad.
-        // AUTO reads the CPU meter: what the rack uses without the track being replaced, ~8 % per layer.
+        // AUTO reads the CPU meter: what the rack uses without the track being replaced, and what one layer
+        // costs on this computer (layerCost, learned after each build).
         int size = clamp((int) std::round(m->params[SynTHBloKRandroyd::SIZE_PARAM].getValue()), 0, 3);
         int layers = size == 1 ? 2 : size == 2 ? 4 : 6;
         if (size == 0) {
             int live = 0;
             for (int t = 0; t < 8; t++) if (trackLive(t)) live++;
             float load = m->cpuLoad.load();
-            float others = std::max(0.f, load - 0.08f * live);
-            layers = clamp((int) std::floor((0.6f - others) / 0.08f), 2, 6);
+            float others = std::max(0.f, load - m->layerCost * live);
+            layers = clamp((int) std::floor((SynTHBloKRandroyd::CPU_BUDGET - others) / m->layerCost), 2, 6);
         }
         static const char* SIZE_NAMES[7] = {"", "", "LIGHT", "3 PARTS", "MED", "5 PARTS", "FULL"};
+        cpuBuildStart();
         clearLayers();
         m->hKey = -1;   // a new track picks a new key and progression
         ensureHarmony(g, rng);
@@ -2598,6 +2643,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         std::string keyName = string::f("%s %s", rdz::KEYS[clamp(m->hKey, 0, 11)], rdz::SCALES[clamp(m->hScale, 0, 7)]);
         m->say(string::f("NEW TRACK: %s  %d BPM  %s  %s%s  ·  %s  ·  SAVE TO KEEP IT", G.name, bpm, keyName.c_str(),
                          size == 0 ? "AUTO " : "", SIZE_NAMES[layers], arrName(m->arrKind)));
+        cpuBuildDone();
         refreshInfo();
     }
 
@@ -3108,7 +3154,8 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             std::string need = missing({"Mix8", "NoizeeFlagshipFilter", "DualFilter", "FX", "Poly", "Stereo", "Resonator", "SnareHat", "Kick"});
             if (!need.empty()) { m->say("RACK MODE ALSO NEEDS: " + need + "  ·  BUILD MODE WORKS WITH WHAT YOU HAVE"); return; }
             int size = clamp((int) std::round(m->params[SynTHBloKRandroyd::SIZE_PARAM].getValue()), 0, 3);
-            bool full = size == 3 || (size == 0 && m->cpuLoad.load() < 0.3f);
+            bool full = size == 3 || (size == 0 && m->cpuLoad.load() + 6.f * m->layerCost <= SynTHBloKRandroyd::CPU_BUDGET);
+            cpuBuildStart();
             clearLayers();
             m->hKey = -1;
             ensureHarmony(g, rng);
@@ -3119,6 +3166,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             if (h->isEmpty()) delete h; else APP->history->push(h);
             if (!ok) { m->say("COULD NOT BUILD THE RACK (A SYNTHBLOK MODULE IS MISSING?)"); return; }
             built = true;
+            cpuBuildDone();
         }
         writeSong(g, rng, false);
         m->seed = sd;
@@ -3875,6 +3923,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         if (m->sceneNextReq.exchange(false)) sceneClicked(((m->scene < 0 ? -1 : m->scene) + 1) % 8);
         if (m->noticeTime > 0.f) m->noticeTime -= dt;
         m->cpuLoad = clamp((float) APP->engine->getMeterAverage(), 0.f, 1.f);
+        cpuStep(dt);
         infoTimer -= dt;
         if (infoTimer <= 0.f) { refreshInfo(); infoTimer = 0.25f; }
         followSong();
@@ -3886,6 +3935,9 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         menu->addChild(new MenuSeparator);
         menu->addChild(createBoolPtrMenuItem("SAFE: leave VCV Core (Audio / MIDI) modules alone", "", &m->safe));
         menu->addChild(createBoolPtrMenuItem("CHAOS: any jack to any jack, loops allowed (wild, can get loud)", "", &m->chaos));
+        menu->addChild(createBoolPtrMenuItem("CPU GUARD: park RANDROYD's parts when the CPU sits at the limit", "", &m->cpuGuard));
+        menu->addChild(createMenuItem("Forget this computer's CPU measurements", string::f("%d%% per part", (int) std::round(m->layerCost * 100.f)),
+                                      [=]() { m->layerCost = 0.12f; }));
         menu->addChild(createMenuItem("Clear RANDROYD's cables (rolled + mixer routing)", "", [=]() { doClear(true); }));
         menu->addChild(createMenuItem("Clear rolled cables only (keep mixer routing)", "", [=]() { doClear(false); }));
         menu->addChild(createMenuItem("Unlock mixer channels (cables stay, become yours)", "", [=]() { m->locks.clear(); }));
