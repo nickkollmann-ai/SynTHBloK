@@ -10,6 +10,8 @@
 <meta name="theme-color" content="#070b10">
 <title>SynTHBloK Workbench</title>
 <script>
+// temperatures are measured in °C and shown in °F (Nick's choice)
+const tF = c => Math.round(c * 9 / 5 + 32), tFd = c => Math.round(c * 9 / 5);
 // A phone goes to the phone workbench (tools/mobile.html). Its DESKTOP link comes back with ?desktop=1,
 // which is remembered until mobile.html is opened again.
 (() => {
@@ -2346,7 +2348,7 @@ const Mind = (() => {
     font(22, 700); ctx.fillStyle = load > 85 ? C.rd : load > 60 ? C.am : C.cy; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8;
     ctx.fillText(`${load.toFixed(0)}%`, cx, iy + 28); ctx.shadowBlur = 0;
     font(8); ctx.fillStyle = C.cy; ctx.fillText(`${(mhz / 1000).toFixed(2)} GHz`, cx, iy + 41);
-    if (zone) { ctx.fillStyle = tCol(ease('zone', zone.c, dt, 2), 75, 90); ctx.fillText(`${zone.name} ${ease('zone', zone.c, 0).toFixed(0)}°C`, cx, iy + 53); }
+    if (zone) { ctx.fillStyle = tCol(ease('zone', zone.c, dt, 2), 75, 90); ctx.fillText(`${zone.name} ${tF(ease('zone', zone.c, 0))}°F`, cx, iy + 53); }
     const th = c.perThread || [], bx = cx + 74, bw = w1 - 80, cols = Math.max(1, th.length), colW = bw / cols, bh = ih - 12;
     th.forEach((v, i) => {
       const e = ease('t' + i, v, dt, 6) / 100, wob = .015 * Math.sin(t * 9 + i * 1.7) * (e > .02 ? 1 : 0);
@@ -2368,7 +2370,7 @@ const Mind = (() => {
       font(22, 700); ctx.fillStyle = gl > 85 ? C.rd : gl > 60 ? C.am : C.cy; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8;
       ctx.fillText(`${gl.toFixed(0)}%`, cx, iy + 28);
       const lw = ctx.measureText(`${gl.toFixed(0)}%`).width;
-      ctx.fillStyle = tCol(gt, 70, 83); ctx.shadowColor = ctx.fillStyle; ctx.fillText(`${gt.toFixed(0)}°C`, cx + lw + 14, iy + 28); ctx.shadowBlur = 0;
+      ctx.fillStyle = tCol(gt, 70, 83); ctx.shadowColor = ctx.fillStyle; ctx.fillText(`${tF(gt)}°F`, cx + lw + 14, iy + 28); ctx.shadowBlur = 0;
       const mw = w2;
       meter(cx, iy + 42, mw, 'VRAM', ease('vram', g.memUsed, dt), g.memTotal, `${(hwS.vram / 1024).toFixed(1)} / ${(g.memTotal / 1024).toFixed(1)} GB`, C.cy);
       meter(cx, iy + 58, mw * .55 - 6, 'POWER', ease('pw', g.power, dt), g.powerMax || 100, `${hwS.pw.toFixed(0)} W`, C.am);
@@ -2395,8 +2397,8 @@ const Mind = (() => {
     spark(cx, sy, w4, sh, hwHist.ct, 30, 100, C.am);
     spark(cx, sy, w4, sh, hwHist.gt, 30, 100, C.mg);
     font(8, 700);
-    if (zone) { ctx.fillStyle = C.am; ctx.fillText(`■ ${zone.name} ${zone.c.toFixed(0)}°`, cx, iy + ih - 4); }
-    if (g) { ctx.fillStyle = C.mg; ctx.textAlign = 'right'; ctx.fillText(`■ GPU ${g.temp}°`, cx + w4, iy + ih - 4); ctx.textAlign = 'left'; }
+    if (zone) { ctx.fillStyle = C.am; ctx.fillText(`■ ${zone.name} ${tF(zone.c)}°F`, cx, iy + ih - 4); }
+    if (g) { ctx.fillStyle = C.mg; ctx.textAlign = 'right'; ctx.fillText(`■ GPU ${tF(g.temp)}°F`, cx + w4, iy + ih - 4); ctx.textAlign = 'left'; }
     if (stale) {
       ctx.fillStyle = '#010407'; ctx.globalAlpha = .7; ctx.fillRect(x + 1, y + 18, w - 2, h - 19); ctx.globalAlpha = 1;
       font(10, 700); ctx.fillStyle = (t * 2 | 0) % 2 ? C.am : '#7a5a2a'; ctx.textAlign = 'center';
@@ -2623,8 +2625,8 @@ const Mind = (() => {
       // thermal alarms, once per crossing (5 degrees of hysteresis)
       const warn = (k, v, lim, label) => {
         if (v == null) return;
-        if (!hwWarn[k] && v >= lim) { hwWarn[k] = true; push('fix', `THERMAL · ${label} ${v.toFixed(0)}°C`); hit('FORGE', .4); }
-        else if (hwWarn[k] && v < lim - 5) { hwWarn[k] = false; push('check', `THERMAL · ${label} back to ${v.toFixed(0)}°C`); }
+        if (!hwWarn[k] && v >= lim) { hwWarn[k] = true; push('fix', `THERMAL · ${label} ${tF(v)}°F`); hit('FORGE', .4); }
+        else if (hwWarn[k] && v < lim - 5) { hwWarn[k] = false; push('check', `THERMAL · ${label} back to ${tF(v)}°F`); }
       };
       warn('z', z && z.c, 92, z ? z.name : 'CPU'); warn('g', j.gpu && j.gpu.temp, 83, 'GPU');
       if ((j.cpu || {}).load > 85) hit('FORGE', .2);
@@ -2735,19 +2737,19 @@ async function scanHW() {
   try { Mind.setHW(j); } catch (e) {}
   try { drawSys(j); } catch (e) {}
   { const z = (j.zones || []).slice().sort((a, b) => b.c - a.c)[0], g = j.gpu;
-    const parts = []; if (z && z.c >= 95) parts.push(`${z.name} ${z.c.toFixed(0)}°C`); if (g && g.temp >= 85) parts.push(`GPU ${g.temp}°C`);
+    const parts = []; if (z && z.c >= 95) parts.push(`${z.name} ${tF(z.c)}°F`); if (g && g.temp >= 85) parts.push(`GPU ${tF(g.temp)}°F`);
     csig.hot = live && parts.length ? parts.join(' · ') : null; drawSignal(); }
   const c = j.cpu || {}, g = j.gpu, z = (j.zones || []).slice().sort((a, b) => b.c - a.c)[0];
   const cls = (v, warm, hot) => v >= hot ? 'hot' : v >= warm ? 'warm' : '';
   pcLoad.push(c.load || 0); if (pcLoad.length > 16) pcLoad.shift();
   thinkEl('pc-spark').innerHTML = pcLoad.map(v => `<i style="height:${Math.max(1, v / 100 * 12)}px"></i>`).join('');
   thinkEl('pc-txt').innerHTML = `CPU <b>${(c.load || 0).toFixed(0)}%</b>` +
-    (z ? ` <span class="${cls(z.c, 80, 92)}">${z.c.toFixed(0)}°</span>` : '') +
-    (g ? ` · GPU <b>${g.load}%</b> <span class="${cls(g.temp, 75, 83)}">${g.temp}°</span>` : '') +
+    (z ? ` <span class="${cls(z.c, 80, 92)}">${tF(z.c)}°F</span>` : '') +
+    (g ? ` · GPU <b>${g.load}%</b> <span class="${cls(g.temp, 75, 83)}">${tF(g.temp)}°F</span>` : '') +
     ` · RAM <b>${((j.ram || {}).usedMB / 1024 || 0).toFixed(1)}G</b>`;
   pill.title = `${j.host} · ${j.model}\n${c.name} ${c.cores}C/${c.threads}T @ ${(c.mhz / 1000).toFixed(2)} GHz · ${c.load}%` +
-    (z ? `\nthermal zone ${z.name} ${z.c}°C` : '') +
-    (g ? `\n${g.name} · ${g.load}% · ${g.temp}°C · ${g.memUsed}/${g.memTotal} MiB · ${g.power} W · fan ${g.fan}%` : '') +
+    (z ? `\nthermal zone ${z.name} ${tF(z.c)}°F` : '') +
+    (g ? `\n${g.name} · ${g.load}% · ${tF(g.temp)}°F · ${g.memUsed}/${g.memTotal} MiB · ${g.power} W · fan ${g.fan}%` : '') +
     `\nRAM ${(j.ram.usedMB / 1024).toFixed(1)} / ${(j.ram.totalMB / 1024).toFixed(1)} GB · C: ${j.disk.cFreeGB} GB free` +
     (j.rack ? `\nRack ${j.rack.cpu ?? '…'}% CPU · ${j.rack.ramMB} MB` : '\nRack not running') + '\nclick: CLAUDE · THINKING';
   // RACK-LINK: Rack itself, live (its patch, CPU, memory)
@@ -2790,7 +2792,7 @@ function drawSys(j) {
   const sn = j.sensors;
   const hot = sn ? (sn.temps || []).filter(t => /core|package|cpu/i.test(t.n)).sort((x, y) => y.c - x.c)[0] : null;
   const bf = (sn && sn.fans || []).filter(x => !/gpu/i.test(x.id || ''));
-  const sens = sn ? (hot ? row(hot.n, hot.c.toFixed(0) + '°', cls(hot.c, 75, 90)) : '') + (bf[0] ? row(bf[0].n, bf[0].rpm + 'rpm') : row('fans', 'hidden', 'w', 'this HP board does not report its fan speeds'))
+  const sens = sn ? (hot ? row(hot.n, tF(hot.c) + '°F', cls(hot.c, 75, 90)) : '') + (bf[0] ? row(bf[0].n, bf[0].rpm + 'rpm') : row('fans', 'hidden', 'w', 'this HP board does not report its fan speeds'))
     : '<div class="hint" title="Start LibreHardwareMonitor (as admin) for CPU temperatures and fans">start LibreHardwareMonitor</div>';
   el.innerHTML = `<div><h5>TOP CPU</h5>${cpuL}<h5>TOP MEMORY</h5>${memL}</div>` +
     `<div><h5>DRIVES</h5>${drv}<h5>SENSORS</h5>${sens}</div>` +
@@ -3573,7 +3575,7 @@ async function libreTick() {
   const gT = find(/gpu/, 'Temperature', /core/i), gL = find(/gpu/, 'Load', /core/i), gW = find(/gpu/, 'Power', /package|board|total/i) || find(/gpu/, 'Power', /./);
   const mL = find(/ram|memory/i, 'Load', /memory/i) || all.find(x => x.t === 'Load' && /^memory$/i.test(x.n));
   const dT = all.filter(x => /hdd|nvme|ssd|storage/i.test(x.id || '') && x.t === 'Temperature').sort((a, b) => b.v - a.v)[0];
-  const G = (id, x, max, unit, hotAt) => x ? gkSet(id, x.v / max, (unit === '%' ? x.v.toFixed(0) : x.v.toFixed(x.v < 100 ? 1 : 0)) + (unit === '°' ? '°' : ''), unit === '°' ? 'CELSIUS' : unit === 'W' ? 'WATTS' : 'LOAD', `max ${x.max != null ? x.max.toFixed(0) : '-'}${unit === '°' ? '°' : unit}`, x.v >= hotAt) : gkSet(id, 0, '-', '', 'not reported');
+  const G = (id, x, max, unit, hotAt) => x ? gkSet(id, x.v / max, (unit === '°' ? tF(x.v) + '°' : unit === '%' ? x.v.toFixed(0) : x.v.toFixed(x.v < 100 ? 1 : 0)), unit === '°' ? 'FAHRENHEIT' : unit === 'W' ? 'WATTS' : 'LOAD', `max ${x.max == null ? '-' : unit === '°' ? tF(x.max) + '°F' : x.max.toFixed(0) + unit}`, x.v >= hotAt) : gkSet(id, 0, '-', '', 'not reported');
   G('lcpt', cpuT, 100, '°', 85); G('lcpl', cpuL, 100, '%', 90); G('lcpw', cpuW, 95, 'W', 999); G('lgpt', gT, 95, '°', 80);
   G('lgpl', gL, 100, '%', 95); G('lgpw', gW, 130, 'W', 999); G('lmem', mL, 100, '%', 90); G('ldsk', dT, 70, '°', 55);
   // bar scale per sensor type
@@ -3583,6 +3585,7 @@ async function libreTick() {
       default: return null; } };   // voltages, data, timings ...: numbers only
   const tone = x => x.t === 'Temperature' ? (x.v >= 85 ? 'h' : x.v >= 70 ? 'w' : '') : (x.t === 'Load' && x.v >= 90 ? 'w' : '');
   const fmt = (v, u) => v == null ? '-' : (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2).replace(/0$/, '')) + (u ? (u === '°C' || u === 'C' ? '°' : ' ' + u) : '');
+  const fmtT = (x, v) => v == null ? '-' : x.t !== 'Temperature' ? fmt(v, v === x.v ? x.u : '') : (/distance/i.test(x.n) ? tFd(v) : tF(v)) + (v === x.v ? '°F' : '');
   const cells = f => { if (f == null) return '<div></div>'; f = Math.max(0, Math.min(1, f));
     return '<div class="cells">' + Array.from({ length: 20 }, (_, i) => `<i class="${(i + .5) / 20 <= f ? (i >= 16 ? 'rd' : i >= 12 ? 'am' : 'on') : ''}"></i>`).join('') + '</div>'; };
   // which tab a device belongs to (by its sensor ids)
@@ -3597,7 +3600,7 @@ async function libreTick() {
   if (tabs.dataset.k !== tk) { tabs.dataset.k = tk;
     tabs.innerHTML = CATS.filter(c => byCat[c[0]]).map(c => `<button type="button" role="tab" data-c="${c[0]}" class="${c[0] === cur ? 'on' : ''}">${c[1]}<b>${byCat[c[0]].length}</b></button>`).join(''); }
   const kindCls = { cpu: 'cpu', gpu: 'gpu', disk: 'disk' }[cur] || '';
-  const row = x => `<div class="r" title="${escS(x.id)}"><span>${escS(x.n)}</span>${cells(scale(x))}<b class="${tone(x)}">${fmt(x.v, x.u)}</b><i>${fmt(x.min, '')}</i><em>${fmt(x.max, '')}</em></div>`;
+  const row = x => `<div class="r" title="${escS(x.id)}"><span>${escS(x.n)}</span>${cells(scale(x))}<b class="${tone(x)}">${fmtT(x, x.v)}</b><i>${fmtT(x, x.min)}</i><em>${fmtT(x, x.max)}</em></div>`;
   let html = '';
   // CPU: a core-by-core matrix (clock, temperature, distance to TjMax, voltage, load per thread)
   if (cur === 'cpu') byCat.cpu.forEach(h => {
@@ -3610,7 +3613,7 @@ async function libreTick() {
       cores.map(k => `<tr><td>CORE ${k}</td>${cols.map(c => { const x = pick(k, c[1], c[2]);
         if (!x) return '<td>-</td>';
         const far = c[2] === ' Distance', f = far ? 1 - x.v / 100 : scale(x), t = far ? (x.v <= 10 ? 'h' : x.v <= 20 ? 'w' : '') : tone(x);
-        return `<td class="${t}">${fmt(x.v, x.u)}${cells(f)}</td>`; }).join('')}</tr>`).join('') + '</table></div>';
+        return `<td class="${t}">${fmtT(x, x.v)}${cells(f)}</td>`; }).join('')}</tr>`).join('') + '</table></div>';
   });
   // every sensor group of every device in this tab, as tiles
   byCat[cur].forEach(h => h.groups.forEach(g => {
@@ -3715,18 +3718,18 @@ function gkSet(id, frac, val, unit, sub, hot) {
     const sn = st.sensors, T = sn ? sn.temps || [] : [];
     const pkg = T.find(t => /package/i.test(t.n)) || T.find(t => /core max/i.test(t.n)) || T.find(t => /cpu/i.test(t.n) && /cpu/i.test(t.id || 'cpu'));
     const tl = document.querySelector('#gk-ktemp > b');
-    if (pkg) { tl.textContent = 'CPU TEMP'; gkSet('ktemp', pkg.c / 100, pkg.c.toFixed(0) + '°', 'CELSIUS', pkg.c > 85 ? 'HOT - check dust & airflow' : `package${hp != null ? ' · HP zone ' + hp.toFixed(0) + '°' : ''}`, pkg.c > 85); }
-    else if (hp != null) { tl.textContent = 'HP SENSOR'; gkSet('ktemp', hp / 105, hp.toFixed(0) + '°', 'CELSIUS', hp > 85 ? 'HOT - check dust & airflow' : 'board/CPU zone', hp > 85); }
+    if (pkg) { tl.textContent = 'CPU TEMP'; gkSet('ktemp', pkg.c / 100, tF(pkg.c) + '°', 'FAHRENHEIT', pkg.c > 85 ? 'HOT - check dust & airflow' : `package${hp != null ? ' · HP zone ' + tF(hp) + '°F' : ''}`, pkg.c > 85); }
+    else if (hp != null) { tl.textContent = 'HP SENSOR'; gkSet('ktemp', hp / 105, tF(hp) + '°', 'FAHRENHEIT', hp > 85 ? 'HOT - check dust & airflow' : 'board/CPU zone', hp > 85); }
     gkSet('kram', (r.usedMB || 0) / (r.totalMB || 1), ((r.usedMB || 0) / 1024).toFixed(1), 'GB USED', `of ${((r.totalMB || 0) / 1024).toFixed(0)} GB`);
     gkSet('kgpu', (g.load || 0) / 100, (g.load || 0).toFixed(0) + '%', 'LOAD', `${g.mhz || 0} / ${g.mhzMax || 0} MHz · ${(g.power || 0).toFixed(0)} W`);
-    gkSet('kgtemp', (g.temp || 0) / 95, (g.temp || 0) + '°', 'CELSIUS', g.name || '', g.temp > 80);
+    gkSet('kgtemp', (g.temp || 0) / 95, tF(g.temp || 0) + '°', 'FAHRENHEIT', g.name || '', g.temp > 80);
     gkSet('kvram', (g.memUsed || 0) / (g.memTotal || 1), ((g.memUsed || 0) / 1024).toFixed(1), 'GB VRAM', `of ${((g.memTotal || 0) / 1024).toFixed(0)} GB`);
     const mbs = ((c.rKBs || 0) + (c.wKBs || 0)) / 1024;
     gkSet('kio', (d.busy || 0) / 100, (d.busy || 0).toFixed(0) + '%', 'BUSY', mbs.toFixed(1) + ' MB/s on C:', d.busy > 90);
     // fans: the GPU fan is the only fan Windows reports on this PC
     const gf = document.getElementById('fan-gpu');
     if (g.fan != null) { gf.classList.toggle('off', !g.fan); gf.querySelector('.rot').style.animationDuration = (0.18 + (100 - g.fan) / 100 * 1.4).toFixed(2) + 's';
-      const gr = st.sensors && (st.sensors.fans || []).find(x => /gpu/i.test(x.id || x.n)); gf.querySelector('span').textContent = g.fan + '%' + (gr ? ' · ' + gr.rpm + ' RPM' : ' speed'); gf.querySelector('em').textContent = `GPU at ${g.temp}°C`; }
+      const gr = st.sensors && (st.sensors.fans || []).find(x => /gpu/i.test(x.id || x.n)); gf.querySelector('span').textContent = g.fan + '%' + (gr ? ' · ' + gr.rpm + ' RPM' : ' speed'); gf.querySelector('em').textContent = `GPU at ${tF(g.temp)}°F`; }
     // CPU + case fans come from LibreHardwareMonitor (st.sensors), when it is running
     const bf = sn ? (sn.fans || []).filter(x => !/gpu/i.test(x.id || '') && !/gpu/i.test(x.n)) : [];
     const cf = bf.find(x => /cpu/i.test(x.n)) || bf[0], kf = bf.find(x => x !== cf);
@@ -3740,12 +3743,12 @@ function gkSet(id, frac, val, unit, sub, hot) {
     const cmx = T.find(t => /core max/i.test(t.n)); if (cmx && cmx !== pkg) extra.push(['HOTTEST CORE', cmx.c]);
     T.filter(t => /nvme|hdd|ssd|storage/i.test(t.id || '')).slice(0, 2).forEach((t, i) => extra.push([i ? 'DRIVE ' + (i + 1) : 'DRIVE', t.c]));
     document.getElementById('core-heat').innerHTML = [...zones.map(z => [z.name === 'HPTZ' ? 'HP SENSOR' : z.name, z.c]), ['GPU', g.temp]].filter(x => x[1] != null)
-      .map(([nm, v]) => `<div class="heat ${v > 85 ? 'hot' : ''}"><span>${escS(nm)}</span><i><u style="width:${Math.min(100, v).toFixed(0)}%"></u></i><b>${(+v).toFixed(0)}°</b></div>`).join('');
+      .map(([nm, v]) => `<div class="heat ${v > 85 ? 'hot' : ''}"><span>${escS(nm)}</span><i><u style="width:${Math.min(100, v).toFixed(0)}%"></u></i><b>${tF(+v)}°F</b></div>`).join('');
     // the living map
     const ld = (cpu.load || 0) / 100, gl = (g.load || 0) / 100, ru = (r.usedMB || 0) / (r.totalMB || 1);
     setNode('cpu', (cpu.load || 0).toFixed(0) + '% · ' + ((cpu.mhz || 0) / 1000).toFixed(1) + 'GHz', ld, hp);
     setNode('ram', ((r.usedMB || 0) / 1024).toFixed(1) + ' GB', ru);
-    setNode('gpu', (g.load || 0) + '% · ' + (g.temp || 0) + '°', gl, g.temp);
+    setNode('gpu', (g.load || 0) + '% · ' + tF(g.temp || 0) + '°F', gl, g.temp);
     setNode('c', mbs.toFixed(1) + ' MB/s', (d.busy || 0) / 100);
     setNode('f', f ? (((f.rKBs || 0) + (f.wKBs || 0)) / 1024).toFixed(1) + ' MB/s' : 'unplugged', f ? Math.min(1, ((f.wKBs || 0) + (f.rKBs || 0)) / 1024 / 60) : 0);
     setNode('net', ((n.rxKBs || 0) + (n.txKBs || 0)).toFixed(0) + ' KB/s', Math.min(1, ((n.rxKBs || 0) + (n.txKBs || 0)) / 2000));

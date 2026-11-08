@@ -54,3 +54,4 @@ tools/lhm.json
 tools/ni_relink*.txt
 tools/ni_relink*.json
 tools/ni_relink_xml_backup/
+tools/claude_startup.txt
