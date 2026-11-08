@@ -1167,8 +1167,10 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
 #ps-body .hud{background:#010407;padding:14px 16px 10px;min-height:0;display:flex;flex-direction:column}
 #ps-body h4{margin:0 0 8px;font-size:9px;letter-spacing:.2em;color:#5f8792;font-weight:500}#ps-body h4 b{color:var(--hc);font-weight:600}
 #ps-q{grid-row:1/5;overflow:auto;--hc:#7dffb2}#ps-out{--hc:#5ff6ff;grid-column:2;grid-row:2}#ps-con{--hc:#ffb347;grid-column:2;grid-row:4}
-/* CMD LIVE: a .bat from RUN THESE, live, between OUTPUT and CONSOLE. Shows while it runs (+20 s after); glows softly in its run LED colour */
-#ps-live{display:none!important;grid-column:2;grid-row:3;height:24vh;--lr:77,163,255;--hc:rgb(var(--lr))}#ps-live.on{display:flex!important}
+/* CMD LIVE: always open between OUTPUT and CONSOLE, one running history of the .bat files from RUN THESE (a divider per run).
+   It glows softly in the run's LED colour while one runs (and 20 s after it ends), then rests dim. */
+#ps-live{grid-column:2;grid-row:3;height:24vh;--lr:95,246,255;--hc:rgb(var(--lr));box-shadow:inset 0 0 0 1px rgba(var(--lr),.14)}
+#ps-ltext .sep{color:#3d6c78}#ps-ltext .dim{color:#3d6c78}
 #ps-live[data-st=waiting]{--lr:125,255,178}#ps-live[data-st=needs-ok],#ps-live[data-st=input]{--lr:255,179,71}#ps-live[data-st=running]{--lr:77,163,255}#ps-live[data-st=done]{--lr:0,229,255}#ps-live[data-st=failed]{--lr:255,68,102}
 #ps-live.on{animation:psFlash 1.4s ease-in-out infinite}#ps-live[data-st=input].on{animation-duration:.9s}
 #ps-lin{display:none;gap:6px;align-items:center;padding-top:6px;border-top:1px solid rgba(var(--lr),.35);font:11px Consolas,'Cascadia Mono',monospace}
@@ -3975,14 +3977,17 @@ function psLiveRun() { return PSX.runs.find(r => r.kind === 'bat' && ['waiting',
 function psLiveShow() {
   if (!PSX.live) return;
   const L = PSX.live, r = psLiveRun(), el = document.getElementById('ps-live');
-  if (r && r.id !== L.run) { L.run = r.id; L.from = 0; L.endAt = 0; document.getElementById('ps-ltext').textContent = ''; }
+  if (r && r.id !== L.run) { L.run = r.id; L.from = 0; L.endAt = 0;
+    const t = document.getElementById('ps-ltext'); if (t.textContent) psLivePut('\n');
+    psLivePut('──── ' + r.name + ' · ' + new Date(r.started || Date.now()).toLocaleTimeString() + ' ────\n', 'sep');
+    while (t.childNodes.length > 4000) t.removeChild(t.firstChild); }
   if (r && (r.state === 'done' || r.state === 'failed') && !L.endAt) L.endAt = Date.now();
   const on = !!r && (!L.endAt || Date.now() - L.endAt < 20000);
-  el.classList.toggle('on', on); if (r) el.dataset.st = r.state;
+  el.classList.toggle('on', on); el.dataset.st = on ? r.state : '';
   el.classList.toggle('live', !!r && !!r.live && (r.state === 'running' || r.state === 'input'));
   if (r && r.state === 'input' && L.asked !== r.id + L.from && document.getElementById('psx').classList.contains('on') && document.activeElement.id !== 'ps-cmd') { L.asked = r.id + L.from; document.getElementById('ps-lcmd').focus(); }
   const lbl = { waiting: 'STARTING', 'needs-ok': 'WAITING FOR YOUR OK', running: 'RUNNING', input: 'WAITING FOR YOU', done: 'DONE', failed: 'FAILED' };
-  if (r) document.getElementById('ps-lname').textContent = '· ' + r.name + ' · ' + (lbl[r.state] || r.state);
+  document.getElementById('ps-lname').textContent = on ? '· ' + r.name + ' · ' + (lbl[r.state] || r.state) : '· idle · .bat files from RUN THESE run here';
 }
 async function psLiveTick() {
   psLiveShow(); const L = PSX.live; if (!L.run || !document.getElementById('ps-live').classList.contains('on')) return;
@@ -4001,6 +4006,7 @@ async function psLiveSend(text) {
   setTimeout(psTick, 300);
 }
 const psLivePut = (t, c) => { const el = document.getElementById('ps-ltext'), d = document.createElement('span'); if (c) d.className = c; d.textContent = t; el.appendChild(d); el.scrollTop = el.scrollHeight; };
+psLivePut('Command Prompt for the .bat files: their output lands here, and you answer their questions on the line below while they run.\n', 'dim');
 document.getElementById('ps-lcmd').addEventListener('keydown', e => {
   if (e.key === 'Enter') { const v = e.target.value; e.target.value = ''; psLiveSend(v); e.preventDefault(); }
   else if (e.key === 'c' && e.ctrlKey) { psLiveSend('stop'); e.preventDefault(); }
