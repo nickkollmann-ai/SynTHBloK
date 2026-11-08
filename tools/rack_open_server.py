@@ -21,7 +21,8 @@
 #   POWERSHELL tab (all token-protected, this computer only):
 #   POST /ps        {"cmd": "..."}  one PowerShell command at a time in the SynTHBloK folder (cd carries over)
 #   GET  /ps/out?from=k            its output;  POST /ps/kill stops it
-#   POST /ps/task   {"id": "..."}  runs a RUN THESE item's script (tools\*.ps1 named in tools/run_queue.json) with its
+#   POST /ps/task   {"id": "..."}  runs a RUN THESE item's script (tools\*.ps1 named in tools/run_queue.json, or the
+#        item's .bat from the Desktop / SynTHBloK, hidden, "pause" skipped: the tab's CMD LIVE panel shows it) with its
 #        output captured to tools/ps_runs/<run>.log; items marked "admin" start through the normal Windows admin prompt
 #        (Nick clicks Yes) - nothing here gets around that prompt
 #   GET  /ps/tasks                 the runs (state, exit code);  GET /ps/task/out?run=..&from=k  a run's output
@@ -220,18 +221,25 @@ def ps_task(rid):
     try: items = json.load(open(os.path.join(HERE, 'run_queue.json'), encoding='utf-8-sig')).get('items', [])
     except Exception: return None, 'no run queue'
     it = next((x for x in items if x.get('id') == rid), None)
-    if not it or not it.get('script'): return None, 'this item has no script to run here'
-    sc = os.path.abspath(os.path.join(REPO, it['script']))
-    if not sc.lower().startswith(os.path.join(REPO, 'tools').lower() + os.sep) or not sc.lower().endswith('.ps1') or not os.path.isfile(sc):
-        return None, 'only .ps1 scripts in SynTHBloK\\tools can run here'
+    if not it: return None, 'not in the run queue'
+    if it.get('script'):
+        kind = 'ps1'; sc = os.path.abspath(os.path.join(REPO, it['script']))
+        if not sc.lower().startswith(os.path.join(REPO, 'tools').lower() + os.sep) or not sc.lower().endswith('.ps1') or not os.path.isfile(sc):
+            return None, 'only .ps1 scripts in SynTHBloK\\tools can run here'
+    else:   # a .bat from the queue: runs hidden with its output captured (CMD LIVE in the tab); "pause" just continues
+        kind = 'bat'; sc = os.path.abspath(os.path.expandvars(it.get('path', '')))
+        roots = [os.path.abspath(os.path.join(os.environ.get('USERPROFILE', ''), 'Desktop')), os.path.abspath(REPO)]
+        if not sc.lower().endswith('.bat') or not os.path.isfile(sc) or not any(os.path.dirname(sc).lower().startswith(r.lower()) for r in roots):
+            return None, 'only .bat files on the Desktop or in SynTHBloK'
     if any(r['item'] == rid and r['state'] in ('waiting', 'running') for r in RUNS.values()): return None, 'already running'
     os.makedirs(RUNS_DIR, exist_ok=True)
     run = _t.strftime('%Y%m%d-%H%M%S') + '-' + re.sub(r'[^\w-]', '', rid)[:30]
     log = os.path.join(RUNS_DIR, run + '.log'); wrap = os.path.join(RUNS_DIR, run + '.ps1')
     with open(wrap, 'w', encoding='utf-8-sig') as f:
         f.write("$ErrorActionPreference = 'Continue'\n$log = '%s'\n" % log.replace("'", "''") +
-                "'##START ' + (Get-Date -Format s) | Out-File -LiteralPath $log -Encoding utf8\n"
-                "try { & '%s' *>&1 | ForEach-Object { \"$_\" | Out-File -LiteralPath $log -Append -Encoding utf8 } ; $c = if ($?) { 0 } else { 1 } }\n" % sc.replace("'", "''") +
+                "'##START ' + (Get-Date -Format s) | Out-File -LiteralPath $log -Encoding utf8\n" +
+                ("try { & '%s' *>&1 | ForEach-Object { \"$_\" | Out-File -LiteralPath $log -Append -Encoding utf8 } ; $c = if ($?) { 0 } else { 1 } }\n" % sc.replace("'", "''") if kind == 'ps1' else
+                 "try { $null | & cmd.exe /d /c '%s' 2>&1 | ForEach-Object { \"$_\" | Out-File -LiteralPath $log -Append -Encoding utf8 } ; $c = [int]$LASTEXITCODE }\n" % sc.replace("'", "''")) +
                 "catch { \"$_\" | Out-File -LiteralPath $log -Append -Encoding utf8; $c = 1 }\n"
                 "'##END ' + $c | Out-File -LiteralPath $log -Append -Encoding utf8\n")
     open(log, 'w').close()
@@ -242,7 +250,7 @@ def ps_task(rid):
         subprocess.Popen([PSX, '-NoProfile', '-Command', q], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     else:
         subprocess.Popen([PSX] + args, cwd=REPO, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    RUNS[run] = {'id': run, 'item': rid, 'name': it.get('name', rid), 'admin': bool(it.get('admin')), 'started': int(_t.time() * 1000), 'log': log, 'state': 'waiting'}
+    RUNS[run] = {'id': run, 'item': rid, 'kind': kind, 'name': it.get('name', rid), 'admin': bool(it.get('admin')), 'started': int(_t.time() * 1000), 'log': log, 'state': 'waiting'}
     try:
         done = json.load(open(RUND, encoding='utf-8'))
     except Exception: done = {}
