@@ -225,6 +225,11 @@ VOICE_BUTTON_LIGHT,
     float driftSpeed4[MAX_VOICES] = {};
 
     float mixLP[MAX_VOICES] = {};
+    float mixLPR[MAX_VOICES] = {};   // the right side of the stereo unison
+    float ladderR[4] = {};           // the right channel's ladder
+    float ladderInR = 0.f;
+    float sideLP = 0.f;   // the stereo side is kept above ~150 Hz: the bass stays mono and solid
+    float cutLfo = 0.f;              // the LFO for the cutoff (wobble), de-clicked
 
     float accentSmooth = 0.f;
 
@@ -255,7 +260,7 @@ VOICE_BUTTON_LIGHT,
         configParam(PWM_CV_PARAM, 0.f, 1.2f, 0.f, "PWM CV amount");
         configSwitch(LFO_ENABLE_PARAM, 0.f, 1.f, 1.f, "LFO enable", {"Off", "On"});
 
-configParam(CUT_CV_PARAM, 0.f, 1.f, 0.f, "Cutoff CV amount");
+configParam(CUT_CV_PARAM, 0.f, 1.f, 0.f, "Cutoff CV amount (jack empty: the LFO, a wobble; LFO SYNC locks it to the clock)");
 configParam(KEYTRACK_PARAM, -1.f, 1.f, 0.f, "Keytrack amount");   // <‑‑ correct spot
 configInput(KEYTRACK_INPUT, "Keytrack CV");
         // Jack names (tooltips in Rack and in the VCV Library)
@@ -320,7 +325,7 @@ configParam(LFO_RATE_PARAM, 0.f, 1.f, 0.5f, "LFO rate");
         configParam(LFO_MORPH_PARAM, 0.f, 1.f, 0.f, "LFO Morph");
 
         configParam(CLOCK_RATE_PARAM, 0.f, 1.f, 0.5f, "Clock rate");
-        configParam(SPREAD_PARAM, 0.f, 1.f, kSpreadDefault, "Unison spread", " cents", 0.f, 28.f);
+        configParam(SPREAD_PARAM, 0.f, 1.f, kSpreadDefault, "Unison spread (detune up to +-50 cents, opens the stereo width)", "%", 0.f, 100.f);
         configParam(DRIVE_PARAM, 0.f, 1.f, 0.3f, "Filter drive", "%", 0.f, 100.f);
 
         for (int v = 0; v < MAX_VOICES; ++v) {
@@ -526,6 +531,9 @@ float accentKnob = params[ACCENT_PARAM].getValue();
         }
 
         float wave = w0 * (1.f - t) + w1 * t;
+        // WOBBLE: the LFO's plain shape (MORPH picks it, LFO SYNC locks it to the clock) for the cutoff, smoothed
+        // over ~1 ms so a square doesn't click. It reaches the filter through CUTOFF CV when that jack is empty.
+        cutLfo += (wave * (params[LFO_ENABLE_PARAM].getValue() > 0.5f ? 1.f : 0.f) - cutLfo) * (1.f - std::exp(-dt / 0.001f));
         float warp = morph * morph;
 
         float skew = lfoPhase + (warp * 0.25f * (lfoPhase < 0.5f ? -1.f : 1.f));
@@ -601,7 +609,7 @@ float accentKnob = params[ACCENT_PARAM].getValue();
         float triSum = 0.f;
         float sqrSum = 0.f;
         float sawSum = 0.f;
-        float mixSum = 0.f;
+        float mixSum = 0.f, mixSumL = 0.f, mixSumR = 0.f;
 
         float coarse = params[FREQ_PARAM].getValue();
         float fine   = params[FINE_PARAM].getValue();
@@ -652,29 +660,38 @@ float accentKnob = params[ACCENT_PARAM].getValue();
             // spread, each wandering up to +-1.5 cents (analog drift); that beating is the hum.
             // Saw and square are PolyBLEP (clean edges, no aliasing grit up high).
             float spread = params[SPREAD_PARAM].getValue();
+            // detune: up to +-14 cents at the old half-way point, then on to +-50 cents (supersaw / reese)
+            float detune = spread * 14.f + spread * spread * spread * 36.f;
+            // STEREO UNISON: the oscillators fan out left to right as the spread opens (equal power)
+            float width = clamp(spread * 2.2f, 0.f, 1.f) * 0.9f;
             float* oscPh[4] = {&oscPhase1[v], &oscPhase2[v], &oscPhase3[v], &oscPhase4[v]};
             float oscDrift[4] = {drift1[v], drift2[v], drift3[v], drift4[v]};
             float triMix = 0.f, sawMix = 0.f, sqrMix = 0.f, sineV = 0.f;
+            float triL = 0.f, triR = 0.f, sawL = 0.f, sawR = 0.f, sqrL = 0.f, sqrR = 0.f;
             for (int o = 0; o < oscCount; o++) {
                 float pos = oscCount > 1 ? (2.f * o / (oscCount - 1) - 1.f) : 0.f;   // -1..+1 across the stack
-                float cents = pos * spread * 14.f + oscDrift[o] * 0.3f;
+                float cents = pos * detune + oscDrift[o] * 0.3f;
                 float inc = clamp(freq * std::exp2(cents * (1.f / 1200.f)) * dt, 0.f, 0.45f);
                 float p = *oscPh[o] + inc;
                 if (p >= 1.f) p -= 1.f;
                 *oscPh[o] = p;
-                triMix += 1.f - 4.f * fabsf(p - 0.5f);
-                sawMix += 2.f * p - 1.f - polyBlep(p, inc);
+                float tr = 1.f - 4.f * fabsf(p - 0.5f);
+                float sw = 2.f * p - 1.f - polyBlep(p, inc);
                 float q = p + 1.f - pw;
                 if (q >= 1.f) q -= 1.f;
-                sqrMix += (p < pw ? 1.f : -1.f) + polyBlep(p, inc) - polyBlep(q, inc);
+                float sq = (p < pw ? 1.f : -1.f) + polyBlep(p, inc) - polyBlep(q, inc);
+                triMix += tr; sawMix += sw; sqrMix += sq;
                 sineV += sinf(p * 2.f * PI);
+                float a = (pos * width + 1.f) * 0.25f * PI;   // 0 .. pi/2
+                float panL = std::cos(a) * 1.41421356f, panR = std::sin(a) * 1.41421356f;
+                triL += tr * panL; triR += tr * panR; sawL += sw * panL; sawR += sw * panR; sqrL += sq * panL; sqrR += sq * panR;
             }
             float invOsc = 1.f / oscCount;
             triMix *= invOsc;
             sawMix *= invOsc;
             sqrMix *= invOsc;
             sineV *= invOsc;
-
+            triL *= invOsc; triR *= invOsc; sawL *= invOsc; sawR *= invOsc; sqrL *= invOsc; sqrR *= invOsc;
 
             float subFreq = freq * 0.5f;
             subPhaseV[v] = fmodf(subPhaseV[v] + subFreq * dt, 1.f);
@@ -683,13 +700,14 @@ float accentKnob = params[ACCENT_PARAM].getValue();
             float sqSub = tanhf(triSub * 1.4f);
             float sineSub = sinf(subPhaseV[v] * 2.f * PI) * 0.30f;
 
+            // the sub: mostly sine (deep, clean weight under a reese or a wobble), a little triangle and square
+            // for presence. Its level is set once, by SUB in the mix (it used to be scaled twice and was too quiet).
             float prophetSub =
-                triSub * 0.55f +
-                sqSub * 0.30f +
-                sineSub * 0.15f;
+                sineSub * (1.f / 0.30f) * 0.62f +
+                triSub * 0.26f +
+                sqSub * 0.12f;
 
-            prophetSub = tanhf(prophetSub * 1.2f);
-            float sub = prophetSub * params[SUB_LEVEL_PARAM].getValue() * 0.6f;
+            float sub = tanhf(prophetSub * 1.1f);
 
             float modSource = inputs[MOD_CV_INPUT].isConnected()
                 ? inputs[MOD_CV_INPUT].getVoltage()
@@ -721,28 +739,30 @@ float accentKnob = params[ACCENT_PARAM].getValue();
             float triGain = params[SINE_PARAM].getValue() * 0.8f;
             float sawGain = params[SAW_PARAM].getValue() * 0.8f;
             float sqrGain = params[SQUARE_PARAM].getValue() * 0.8f;
-            float subGain = params[SUB_LEVEL_PARAM].getValue() * 0.6f;
+            float subGain = params[SUB_LEVEL_PARAM].getValue() * 0.75f;
 
             triMix  = tanhf(triMix  * 1.1f);
             mainSaw = tanhf(mainSaw * 1.1f);
             sqrMix  = tanhf(sqrMix  * 1.1f);
-            sub     = tanhf(sub     * 1.1f);
 
             float mix =
                 triMix * triGain +
                 mainSaw * sawGain +
                 sqrMix * sqrGain +
                 sub    * subGain;
-
-
+            // the stereo pair: the unison's left / right, the sub in the middle (the Blade saw stays centred)
+            float sawLs = useBlade ? mainSaw : tanhf(sawL * 1.1f), sawRs = useBlade ? mainSaw : tanhf(sawR * 1.1f);
+            float mixL = tanhf(triL * 1.1f) * triGain + sawLs * sawGain + tanhf(sqrL * 1.1f) * sqrGain + sub * subGain;
+            float mixR = tanhf(triR * 1.1f) * triGain + sawRs * sawGain + tanhf(sqrR * 1.1f) * sqrGain + sub * subGain;
 
             float c = expf(-2.f * PI * 14000.f * dt);
-            mixLP[v] = mixLP[v] * c + mix * (1.f - c);
-            float mixOutVoice = mixLP[v];
+            mixLP[v] = mixLP[v] * c + mixL * (1.f - c);
+            mixLPR[v] = mixLPR[v] * c + mixR * (1.f - c);
 
             float hf = clamp(freq / 8000.f, 0.f, 1.f);
             float hfDamp = 1.f - hf * 0.65f;
-            mixOutVoice *= hfDamp;
+            float mixOutVoice = mix * hfDamp;
+            float mixOutL = mixLP[v] * hfDamp, mixOutR = mixLPR[v] * hfDamp;
             bool gateNow = false;
             if (seqGate) gateNow = seq.gate[std::min(v, 3)];
             else if (inputs[EG_INPUT].isConnected()) {
@@ -863,6 +883,8 @@ case ENV_RELEASE: {
             sqrSum += sqrMix;
             sawSum += mainSaw;
             mixSum += mixOutVoice;
+            mixSumL += mixOutL;
+            mixSumR += mixOutR;
 
             outputs[EG_OUTPUT].setVoltage(v, envV[v] * 10.f);
             outputs[SINE_OUT].setVoltage(sineV * 5.f, v);
@@ -876,13 +898,15 @@ case ENV_RELEASE: {
         float sqrOut = sqrSum * invVoices;
         float sawOut = sawSum * invVoices;
         float mixOut = mixSum * invVoices;
-float filterIn = 0.f;
+float filterIn = 0.f, filterInR = 0.f;
 if (inputs[VCA_IN_INPUT].isConnected())
-    filterIn = inputs[VCA_IN_INPUT].getVoltage();
+    filterIn = filterInR = inputs[VCA_IN_INPUT].getVoltage();
 else if (inputs[FLT_INPUT].isConnected())
-    filterIn = inputs[FLT_INPUT].getVoltage();
-else
-    filterIn = mixOut;
+    filterIn = filterInR = inputs[FLT_INPUT].getVoltage();
+else {
+    filterIn = mixSumL * invVoices;
+    filterInR = mixSumR * invVoices;
+}
 
 // final filter output (always defined)
 float fltOut = 0.f;
@@ -894,9 +918,10 @@ float cutCvAmt   = params[CUT_CV_PARAM].getValue();
 
 float envMod = powf(envFilter, 0.6f) * envAmt;
 
+// an empty CUTOFF CV jack takes the LFO: CUTOFF CV is then the wobble depth (+-5 octaves at full)
 float cutCvIn = inputs[CUT_CV_INPUT].isConnected()
     ? clamp(inputs[CUT_CV_INPUT].getVoltage() / 10.f, -1.f, 1.f)
-    : 0.f;
+    : cutLfo * 0.5f;
 
 float cutCvMod = cutCvIn * cutCvAmt;
 
@@ -929,17 +954,16 @@ float resKnob = clamp(params[RES_PARAM].getValue() + (seq.on ? seq.res : 0.f), 0
 float k = 5.6f * powf(resKnob, 1.3f);
 
 // --- HARD CLOSE ---
+float fltOutR = 0.f;
 if (rawCutoff <= 0.0001f) {
-    for (int i = 0; i < 4; i++) ladder[i] = 0.f;
-    ladderIn = 0.f;
+    for (int i = 0; i < 4; i++) { ladder[i] = 0.f; ladderR[i] = 0.f; }
+    ladderIn = ladderInR = 0.f;
     fltOut = 0.f;
 }
 else {
     float drive = params[DRIVE_PARAM].getValue();
     float pre = 1.f + drive * drive * 9.f + ACC * 1.5f;
     float bias = 0.15f * drive;
-    float x0 = tanhf(filterIn * pre + bias) - tanhf(bias);
-    x0 += (random::uniform() - 0.5f) * 1e-4f;   // a breath of noise, so full RES can start ringing
 
     // cutoff in Hz: 20 Hz..20 kHz, an octave every tenth of the range
     float hdt = 0.5f * dt;
@@ -947,18 +971,33 @@ else {
     float g = 1.f - std::exp(-2.f * float(M_PI) * fc * hdt);
     float comp = 1.f + 0.6f * k;
 
-    float sum = 0.f;
-    for (int os = 0; os < 2; os++) {
-        float xin = os == 0 ? 0.5f * (ladderIn + x0) : x0;
-        float u = tanhf(xin * comp - k * ladder[3]);
-        ladder[0] += g * (u - tanhf(ladder[0]));
-        ladder[1] += g * (tanhf(ladder[0]) - tanhf(ladder[1]));
-        ladder[2] += g * (tanhf(ladder[1]) - tanhf(ladder[2]));
-        ladder[3] += g * (tanhf(ladder[2]) - tanhf(ladder[3]));
-        sum += ladder[3];
-    }
-    ladderIn = x0;
-    fltOut = tanhf(sum * 0.5f * 1.4f);
+    auto runLadder = [&](float in, float* st, float& last) {
+        float x0 = tanhf(in * pre + bias) - tanhf(bias);
+        x0 += (random::uniform() - 0.5f) * 1e-4f;   // a breath of noise, so full RES can start ringing
+        float sum = 0.f;
+        for (int os = 0; os < 2; os++) {
+            float xin = os == 0 ? 0.5f * (last + x0) : x0;
+            float u = tanhf(xin * comp - k * st[3]);
+            st[0] += g * (u - tanhf(st[0]));
+            st[1] += g * (tanhf(st[0]) - tanhf(st[1]));
+            st[2] += g * (tanhf(st[1]) - tanhf(st[2]));
+            st[3] += g * (tanhf(st[2]) - tanhf(st[3]));
+            sum += st[3];
+        }
+        last = x0;
+        return tanhf(sum * 0.5f * 1.4f);
+    };
+    fltOut = runLadder(filterIn, ladder, ladderIn);
+    fltOutR = runLadder(filterInR, ladderR, ladderInR);
+}
+// the stereo side only above ~150 Hz: wide on top, one solid mono low end
+{
+    float mid = 0.5f * (fltOut + fltOutR), side = 0.5f * (fltOut - fltOutR);
+    float a = 1.f - std::exp(-2.f * float(M_PI) * 150.f * dt);
+    sideLP += a * (side - sideLP);
+    side -= sideLP;
+    fltOut = mid + side;
+    fltOutR = mid - side;
 }
 
         float vcaEnv = envFilter;
@@ -971,17 +1010,19 @@ else {
         float accentGain = 1.f + ACC * 0.6f;
         float vcaGain = vcaLevel * vcaCV * accentGain;
 
-        float vcaOut = fltOut * vcaEnv * vcaGain;
-        vcaOut = warmth(vcaOut);
+        float vcaOutL = warmth(fltOut * vcaEnv * vcaGain);
+        float vcaOutR = warmth(fltOutR * vcaEnv * vcaGain);
+        float vcaOut = 0.5f * (vcaOutL + vcaOutR);   // the mono VCA OUT
+        float fltMono = 0.5f * (fltOut + fltOutR);
 
         outputs[TRI_OUTPUT].setVoltage(triOut * 5.f);
         outputs[SQR_OUTPUT].setVoltage(sqrOut * 5.f);
         outputs[SAW_OUTPUT].setVoltage(sawOut * 5.f);
         outputs[MIX_OUTPUT].setVoltage(mixOut * params[MIX_OUT_LEVEL_PARAM].getValue() * 5.f);
-        outputs[FLT_OUTPUT].setVoltage(fltOut * 5.f);
+        outputs[FLT_OUTPUT].setVoltage(fltMono * 5.f);
         outputs[VCA_OUT_OUTPUT].setVoltage(vcaOut * 5.f);
-outputs[STEREO_L_OUTPUT].setVoltage(vcaOut * 5.f);
-outputs[STEREO_R_OUTPUT].setVoltage(vcaOut * 5.f);
+outputs[STEREO_L_OUTPUT].setVoltage(vcaOutL * 5.f);
+outputs[STEREO_R_OUTPUT].setVoltage(vcaOutR * 5.f);
 
         outputs[LFO_TRI_OUTPUT].setVoltage(lfoTriRaw);
         outputs[LFO_SQR_OUTPUT].setVoltage(lfoSqrRaw);
@@ -1020,7 +1061,7 @@ outputs[STEREO_R_OUTPUT].setVoltage(vcaOut * 5.f);
 
         lights[VCA_OUT_LEVEL_LIGHT].setBrightness(params[VCA_OUT_LEVEL_PARAM].getValue());
         lights[VCA_OUT_OUTPUT_LIGHT].setBrightness(clamp(fabsf(vcaOut) / 5.f, 0.f, 1.f));
-        lights[FLT_OUTPUT_LIGHT].setBrightness(clamp(fabsf(fltOut) / 5.f, 0.f, 1.f));
+        lights[FLT_OUTPUT_LIGHT].setBrightness(clamp(fabsf(fltMono) / 5.f, 0.f, 1.f));
 
         int voiceSel = (int)std::round(params[VOICE_SELECT_PARAM].getValue());
         voiceSel = clamp(voiceSel, 0, 3);
@@ -1049,8 +1090,8 @@ outputs[STEREO_R_OUTPUT].setVoltage(vcaOut * 5.f);
             setParamLED(FLT_LED + 2 * 3, paramQuantities[RES_PARAM]->getScaledValue());
             setParamLED(FLT_LED + 3 * 3, paramQuantities[LFO_RATE_PARAM]->getScaledValue());
         }
-        localBusMain.L[0] = vcaOut;
-        localBusMain.R[0] = vcaOut;
+        localBusMain.L[0] = vcaOutL;
+        localBusMain.R[0] = vcaOutR;
     }
 };
 // extra-small LED

@@ -2821,8 +2821,19 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
 
     // ---- RES KICK: the Kick through a Resonator (membrane or tube body, tuned to the key, low): a ringing,
     // pitched boom. Returns the Resonator, or NULL (then the Kick goes to the mixer as it is).
-    void kickResTone(engine::Module* rs, std::mt19937& rng) {
+    // genres with a distorted kick (hard techno, industrial, indus techno, acid techno, hardcore, mid-tempo, neuro)
+    static bool distKick(int g) { return g >= 0 && g < rdz::NG && rdz::GSOUND[g].drive[1] >= 0.55f; }
+    void kickResTone(engine::Module* rs, std::mt19937& rng, int g = -1) {
         auto uni = [&](float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); };
+        if (distKick(g)) {   // the DISTORTED KICK body (Nick's setting): a low membrane, mostly wet, hard excited
+            resBody(rs, 2);
+            setP(rs, "Body tuning", uni(0.14f, 0.20f));       // ~50-60 Hz
+            setP(rs, "Resonance", uni(0.38f, 0.46f));
+            setP(rs, "Exciter strength", uni(0.58f, 0.68f));
+            setP(rs, "Material damping", uni(0.38f, 0.46f));
+            setP(rs, "Dry/wet", uni(0.8f, 0.9f));
+            return;
+        }
         static const int bodies[4] = {2, 3, 2, 1};   // membrane, tube, membrane, wood
         resBody(rs, bodies[std::uniform_int_distribution<int>(0, 3)(rng)]);
         setP(rs, "Body tuning", resTune(std::max(0, rd()->hKey), uni(0, 1) < 0.5f ? 2 : 3));
@@ -2832,9 +2843,11 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         setP(rs, "Dry/wet", uni(0.28f, 0.55f));
     }
     app::ModuleWidget* kickRes(app::ModuleWidget* kick, float& x, float y, int track, std::mt19937& rng, history::ComplexAction* h) {
-        app::ModuleWidget* rs = spawn("SynTHBloK", "Resonator", x, y, h, [&](engine::Module* mod) { kickResTone(mod, rng); });
+        int g = clamp((int) std::round(rd()->params[SynTHBloKRandroyd::GENRE_PARAM].getValue()), 0, rdz::NG - 1);   // the genre being built
+        app::ModuleWidget* rs = spawn("SynTHBloK", "Resonator", x, y, h, [&](engine::Module* mod) { kickResTone(mod, rng, g); });
         if (!rs) return NULL;
         wire(port(kick, true, "Kick"), port(rs, false, "In L"), rdz::ramp(track), h);
+        if (distKick(g)) wire(port(kick, true, "Kick"), port(rs, false, "In R"), rdz::ramp(track), h);   // both sides, as patched by hand
         return rs;
     }
     // a lead line struck on a Resonator: the DUO's lead pitch + gate, an octave up, ringing
@@ -2863,7 +2876,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
                 bool bell = false;
                 for (app::PortWidget* pw : mw->getInputs())
                     if (engine::PortInfo* pi = pw->getPortInfo()) if (pi->name == "V/Oct" && APP->scene->rack->getTopCable(pw)) bell = true;
-                if (bell) bellLeadTone(mw->module, rng); else kickResTone(mw->module, rng);
+                if (bell) bellLeadTone(mw->module, rng); else kickResTone(mw->module, rng, g);
             }
         }
     }
@@ -3018,7 +3031,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             else if (!mutate) {
                 if (slug == "Kick") { if (r == 9) boomTone(mw->module, rng); else rigTone(mw->module, NULL, g, rng); }
                 else if (slug == "SnareHat") { if (r == 3) metalTone(mw->module, NULL, rng); else rigTone(NULL, mw->module, g, rng); }
-                else if (slug == "Resonator") { if (r == 10) bellTone(mw->module, rng); else if (r == 3) metalTone(NULL, mw->module, rng); else kickResTone(mw->module, rng); }
+                else if (slug == "Resonator") { if (r == 10) bellTone(mw->module, rng); else if (r == 3) metalTone(NULL, mw->module, rng); else kickResTone(mw->module, rng, g); }
                 else did = false;
             }
             else did = false;
@@ -3149,7 +3162,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             for (int t = 0; t < layers; t++) {
                 bool ok;
                 if (t == 0) {
-                    bool res = chance(0.5f);   // RES on the kick
+                    bool res = chance(distKick(g) ? 0.9f : 0.5f);   // RES on the kick (nearly always on a distorted kick)
                     ok = drumR ? buildRig(t, g, rng, h, drumR == 2, res)
                                : buildDrums(t, g, bpm, rng, h, kit, false, chance(std::max(big ? 0.5f : 0.35f, rdz::GSOUND[g].hybrid)), res);
                 }
