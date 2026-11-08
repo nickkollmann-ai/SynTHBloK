@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <functional>
 
 namespace {
 
@@ -62,7 +63,7 @@ static std::vector<CaseStyle> builtInCases() {
         {"SUITCASE 9U BLUE", M_TOLEX, rgb(22, 34, 60), rgb(160, 162, 166), rgb(36, 40, 50), 18.f, E_SQUARE, X_HANDLE | X_LATCHES},
         {"TIERED WALNUT", M_WOOD, rgb(98, 62, 36), rgb(62, 38, 22), rgb(30, 30, 32), 20.f, E_SLANT, X_NONE},
         {"TIERED ASH", M_WOOD, rgb(196, 170, 130), rgb(150, 124, 88), rgb(40, 40, 42), 20.f, E_SLANT, X_NONE},
-        {"WEST COAST BOAT", M_WOOD, rgb(150, 96, 52), rgb(104, 62, 30), rgb(26, 26, 28), 22.f, E_ROUND, X_HANDLE},
+        {"WEST COAST BOAT", M_WOOD, rgb(150, 96, 52), rgb(104, 62, 30), rgb(26, 26, 28), 22.f, E_ROUND, X_NONE},
         {"SCAFFOLD", M_ANODIZED, rgb(18, 18, 20), rgb(36, 36, 40), rgb(30, 30, 32), 12.f, E_CAPS, X_NONE},
         {"POD RED", M_ANODIZED, rgb(150, 26, 26), rgb(100, 14, 14), rgb(40, 30, 30), 10.f, E_ROUND, X_NONE},
         {"POD BLUE", M_ANODIZED, rgb(28, 70, 150), rgb(16, 44, 104), rgb(30, 34, 44), 10.f, E_ROUND, X_NONE},
@@ -157,7 +158,7 @@ struct SynTHBloKBackdrop : Module {
     int caseIdx = 1;
     float depthMm = 65.f;   // the case depth, mm, as real builds come
     bool shadow = true, rails = true;
-    bool showTitle = true;
+    bool showTitle = false;   // the name above the case: optional, off unless turned on (NAME page or menu)
     std::string title;   // empty: the patch's file name
 
     SynTHBloKBackdrop() { config(0, 0, 0, 0); }
@@ -516,8 +517,9 @@ struct BackdropLayer : widget::TransparentWidget {
         nvgFill(vg);
     }
     static float topLip(const CaseStyle& cs) { return cs.extras & X_1U ? 22.f : 6.f; }
+    static float caseRadius(const CaseStyle& cs) { return cs.ends == E_ROUND ? std::max(6.f, std::min(cs.side * 0.8f, 16.f)) : 0.f; }
     void drawFrameFill(NVGcontext* vg, const CaseStyle& cs, float x, float y, float w, float h) {
-        float rad = cs.ends == E_ROUND ? 9.f : 0.f;
+        float rad = caseRadius(cs);
         switch (cs.material) {
             case M_ACRYLIC: {   // see-through: a tint, a bright cut edge and a diagonal glint
                 nvgBeginPath(vg); nvgRoundedRect(vg, x, y, w, h, rad); nvgFillColor(vg, nvgTransRGBA(cs.base, 70)); nvgFill(vg);
@@ -546,9 +548,9 @@ struct BackdropLayer : widget::TransparentWidget {
             }
             case M_WOOD: {   // grain: long wavy lines along the board
                 NVGpaint p = nvgLinearGradient(vg, x, y, x + w, y + h, nvgLerpRGBA(cs.base, nvgRGB(255, 230, 200), 0.08f), cs.base);
-                nvgBeginPath(vg); nvgRect(vg, x, y, w, h); nvgFillPaint(vg, p); nvgFill(vg);
+                nvgBeginPath(vg); nvgRoundedRect(vg, x, y, w, h, rad); nvgFillPaint(vg, p); nvgFill(vg);
                 nvgSave(vg);
-                nvgScissor(vg, x, y, w, h);
+                nvgScissor(vg, x + rad, y, w - 2.f * rad, h);   // the grain stays off the rounded corners
                 nvgBeginPath(vg);
                 bool vertical = h > w;
                 float len = vertical ? h : w, span = vertical ? w : h;
@@ -624,7 +626,18 @@ struct BackdropLayer : widget::TransparentWidget {
             nvgFillPaint(vg, sh);
             nvgFill(vg);
         }
-        if (d > 0.5f) {   // the 3D sides: right and bottom faces, darker
+        float rr = caseRadius(cs);
+        if (d > 0.5f && rr > 0.f) {   // a rounded case: its rounded outline swept back for the depth
+            int n = std::max(2, std::min(24, (int) (d / 1.5f)));
+            for (int k = n; k >= 1; k--) {
+                float o = d * k / n;
+                nvgBeginPath(vg);
+                nvgRoundedRect(vg, x + o, y + o, w, h, rr);
+                nvgFillColor(vg, nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.45f + 0.15f * k / n));
+                nvgFill(vg);
+            }
+        }
+        else if (d > 0.5f) {   // the 3D sides: right and bottom faces, darker
             nvgBeginPath(vg);
             nvgMoveTo(vg, x + w, y); nvgLineTo(vg, x + w + d, y + d); nvgLineTo(vg, x + w + d, y + h + d); nvgLineTo(vg, x + w, y + h);
             nvgClosePath(vg);
@@ -638,6 +651,16 @@ struct BackdropLayer : widget::TransparentWidget {
         }
         // the frame: the ends and lips, then the dark well the modules sit in
         drawFrameFill(vg, cs, x, y, w, h);
+        if (rr > 0.f && cs.material != M_ACRYLIC) {   // contoured: rounded cheeks and a rounded top, lit from above
+            nvgBeginPath(vg);
+            nvgRoundedRect(vg, x, y, w, h, rr);
+            nvgFillPaint(vg, nvgBoxGradient(vg, x + s * 0.5f, y + tt * 0.5f, w - s, h - tt * 0.5f - t * 0.5f, rr, std::max(s, 8.f), nvgRGBA(0, 0, 0, 0), nvgRGBA(0, 0, 0, 110)));
+            nvgFill(vg);
+            nvgBeginPath(vg);   // the highlight running round the top edge
+            nvgRoundedRect(vg, x + 1.5f, y + 1.f, w - 3.f, tt + rr, rr);
+            nvgFillPaint(vg, nvgLinearGradient(vg, x, y, x, y + tt + rr * 0.5f, nvgRGBA(255, 255, 255, 46), nvgRGBA(255, 255, 255, 0)));
+            nvgFill(vg);
+        }
         nvgBeginPath(vg);
         nvgRect(vg, in.pos.x, in.pos.y, in.size.x, in.size.y);
         nvgFillColor(vg, nvgRGB(10, 10, 11));
@@ -832,8 +855,8 @@ struct BackdropLayer : widget::TransparentWidget {
             std::shared_ptr<window::Font> font = APP->window->uiFont;
             if (font) {
                 nvgFontFaceId(args.vg, font->handle);
-                nvgFontSize(args.vg, 22.f);
-                nvgTextLetterSpacing(args.vg, 2.f);
+                nvgFontSize(args.vg, 13.f);   // small: a label, not a banner
+                nvgTextLetterSpacing(args.vg, 1.5f);
                 nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
                 float tx = bl.front().r.pos.x - cs.side, ty = bl.front().r.pos.y - (cs.material == M_NONE ? 12.f : topLip(cs) + ((cs.extras & X_HANDLE) ? 14.f : 6.f));
                 nvgFillColor(args.vg, nvgRGBA(0, 0, 0, 160));
@@ -949,12 +972,133 @@ struct NameOled : ui::TextField {
         e.consume(this);
     }
     void onSelect(const SelectEvent& e) override { cursor = selection = (int) getText().size(); ui::TextField::onSelect(e); }
+    void onButton(const ButtonEvent& e) override {
+        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) { cursor = selection = (int) getText().size(); e.consume(this); }
+    }
+    void onDragHover(const DragHoverEvent& e) override {}
+    void draw(const DrawArgs& args) override {}   // the OLED behind draws the glass
+    // one line in the NAME row: fixed sizes (no per-frame re-measuring at many sizes), scrolls with the caret;
+    // while typing only this text flashes (breathes), nothing else on the panel or the rack changes
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        bool ed = editing();
+        std::string t = getText();
+        bool own = !t.empty();
+        if (!ed && !own) { std::string pp = APP->patch->path; t = pp.empty() ? "CLICK TO NAME" : system::getStem(pp); }
+        if (!ed) t = string::uppercase(t);
+        float w = box.size.x, fs = 8.f;
+        nvgSave(args.vg);
+        nvgScissor(args.vg, 0, 0, w, box.size.y);
+        nvgFontFaceId(args.vg, font->handle);
+        nvgFontSize(args.vg, fs);
+        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        float cx = 0.f, scroll = 0.f;
+        if (ed) {
+            int c = clamp(cursor, 0, (int) t.size());
+            cx = nvgTextBounds(args.vg, 0, 0, t.c_str(), t.c_str() + c, NULL);
+            scroll = std::max(0.f, cx - (w - 3.f));
+        }
+        int a = ed ? (int) (150 + 105 * (0.5f + 0.5f * std::sin((float) system::getTime() * 6.f))) : 255;
+        nvgFillColor(args.vg, own || ed ? oled::amber(a) : oled::dim());
+        float mid = box.size.y * 0.5f;
+        nvgText(args.vg, -scroll, mid, t.c_str(), NULL);
+        if (ed && std::fmod(system::getTime(), 1.0) < 0.6) {
+            nvgBeginPath(args.vg);
+            nvgRect(args.vg, -scroll + cx + 0.5f, mid - fs * 0.45f, 1.f, fs * 0.9f);
+            nvgFill(args.vg);
+        }
+        nvgRestore(args.vg);
+    }
+};
+
+// ---- the OLED menu: the settings on the panel, so nobody has to dig in the right-click menu ----------------
+// Tabs BG / CASE / NAME along the top; each row is a small label over its value. Click the left half of a row
+// for the previous value, the right half for the next (on/off rows just flip), or scroll over it. Long values
+// slide sideways. On NAME, click the name and type (Enter: done).
+static const char* const kLookShort[kLookN] = {"PLAIN", "AMBER GRID", "OLED GLOW", "DIAMOND PLATE", "DEEP SPACE", "AMBER RAILS",
+    "CARBON WEAVE", "CIRCUIT", "SCANLINES", "HEX MESH", "BLUEPRINT", "PEGBOARD", "FOAM", "BRUSHED STEEL", "SUNSET FADE", "HALFTONE", "BRICK", "WOOD SLATS"};
+static const char* const kFitShort[4] = {"TILED", "FILL", "FIT", "CENTRED"};
+static const float kDepthMm[9] = {0.f, 25.f, 40.f, 50.f, 65.f, 84.f, 100.f, 120.f, 150.f};
+struct BackdropOled : widget::OpaqueWidget {
+    SynTHBloKBackdrop* module = NULL;
+    NameOled* name = NULL;
+    int page = 0, hover = -1;
+    static constexpr float kTabH = 12.f, kRowH = 19.f, kPad = 3.f;
+    struct Row { std::string label, value; std::function<void(int)> step; bool flip; };
+    std::vector<Row> rows() {
+        std::vector<Row> r;
+        SynTHBloKBackdrop* m = module;
+        if (!m) return r;
+        auto wrap = [](int v, int d, int n) { return ((v + d) % n + n) % n; };
+        if (page == 0) {
+            r.push_back({"BACKGROUND", m->showBg ? "ON" : "OFF", [=](int) { m->showBg = !m->showBg; }, true});
+            r.push_back({"LOOK", kLookShort[clamp(m->look, 0, kLookN - 1)], [=](int d) { m->look = wrap(m->look, d, kLookN); }, false});
+            r.push_back({"COLOUR", string::uppercase(kColorName[clamp(m->colorIdx, 0, kColorN - 1)]), [=](int d) { m->colorIdx = wrap(m->colorIdx, d, kColorN); }, false});
+            r.push_back({"IMAGE", m->imagePath.empty() ? "LOAD..." : string::uppercase(system::getStem(m->imagePath)), [=](int d) {
+                if (d < 0 && !m->imagePath.empty()) { m->imagePath.clear(); return; }   // left half: clear
+                osdialog_filters* f = osdialog_filters_parse("Images:png,jpg,jpeg,bmp,gif");
+                char* path = osdialog_file(OSDIALOG_OPEN, NULL, NULL, f);
+                osdialog_filters_free(f);
+                if (path) { m->imagePath = path; std::free(path); m->fit = 1; m->imgScale = 1.f; m->imgW = m->imgH = 1.f; m->imgX = m->imgY = 0.f; }
+            }, false});
+            if (!m->imagePath.empty()) {
+                r.push_back({"IMAGE FIT", kFitShort[clamp(m->fit, 0, 3)], [=](int d) { m->fit = wrap(m->fit, d, 4); }, false});
+                r.push_back({"DARKEN", string::f("%d%%", (int) std::round(m->imgDim * 100.f)), [=](int d) { m->imgDim = clamp(m->imgDim + d * 0.05f, 0.f, 0.9f); }, false});
+            }
+        }
+        else if (page == 1) {
+            const std::vector<CaseStyle>& lib = caseLibrary();
+            int n = (int) lib.size();
+            r.push_back({"CASE", lib[clamp(m->caseIdx, 0, n - 1)].name, [=](int d) { m->caseIdx = wrap(m->caseIdx, d, n); }, false});
+            int di = 0; for (int k = 0; k < 9; k++) if (std::fabs(kDepthMm[k] - m->depthMm) < std::fabs(kDepthMm[di] - m->depthMm)) di = k;
+            r.push_back({"DEPTH", m->depthMm < 1.f ? "FLAT" : string::f("%d MM", (int) std::round(m->depthMm)), [=](int d) { m->depthMm = kDepthMm[clamp(di + d, 0, 8)]; }, false});
+            r.push_back({"SHADOW", m->shadow ? "ON" : "OFF", [=](int) { m->shadow = !m->shadow; }, true});
+            r.push_back({"RAILS", m->rails ? "ON" : "OFF", [=](int) { m->rails = !m->rails; }, true});
+        }
+        else {
+            r.push_back({"PATCH NAME", "", nullptr, false});   // the name field sits in this row
+            r.push_back({"SHOW ON RACK", m->showTitle ? "ON" : "OFF", [=](int) { m->showTitle = !m->showTitle; }, true});
+            r.push_back({"USE FILE NAME", "CLEAR", [=](int) { m->title.clear(); }, true});
+        }
+        return r;
+    }
+    float rowY(int i) { return kTabH + 3.f + i * kRowH; }
+    int rowAt(Vec p) { if (p.y < kTabH + 3.f) return -1; int i = (int) ((p.y - kTabH - 3.f) / kRowH); return i; }
+    void step() override {
+        if (name) {   // the name field lives in the first NAME row
+            name->visible = page == 2;
+            name->box.pos = box.pos.plus(Vec(kPad, rowY(0) + 7.f));
+            name->box.size = Vec(box.size.x - 2.f * kPad, kRowH - 8.f);
+        }
+        OpaqueWidget::step();
+    }
+    void onButton(const ButtonEvent& e) override {
+        if (e.button != GLFW_MOUSE_BUTTON_LEFT || e.action != GLFW_PRESS) { OpaqueWidget::onButton(e); return; }
+        e.consume(this);
+        if (e.pos.y < kTabH) { page = clamp((int) (e.pos.x / (box.size.x / 3.f)), 0, 2); return; }
+        std::vector<Row> r = rows();
+        int i = rowAt(e.pos);
+        if (i < 0 || i >= (int) r.size() || !r[i].step) return;
+        r[i].step(e.pos.x < box.size.x * 0.5f && !r[i].flip ? -1 : 1);
+    }
+    void onHover(const HoverEvent& e) override { hover = rowAt(e.pos); OpaqueWidget::onHover(e); }
+    void onLeave(const LeaveEvent& e) override { hover = -1; }
+    void onHoverScroll(const HoverScrollEvent& e) override {
+        std::vector<Row> r = rows();
+        int i = rowAt(e.pos);
+        if (i < 0 || i >= (int) r.size() || !r[i].step) return;
+        if (r[i].label == "IMAGE") return;   // no file dialogs from a scroll wheel
+        r[i].step(e.scrollDelta.y > 0 ? -1 : 1);
+        e.consume(this);
+    }
     void draw(const DrawArgs& args) override {
         nvgBeginPath(args.vg);
-        nvgRoundedRect(args.vg, 0, 0, box.size.x, box.size.y, 2.f);
+        nvgRoundedRect(args.vg, 0, 0, box.size.x, box.size.y, 1.5f);
         nvgFillColor(args.vg, nvgRGB(10, 7, 3));
         nvgFill(args.vg);
-        nvgStrokeColor(args.vg, editing() ? oled::amber(200) : oled::outline(70));
+        nvgStrokeColor(args.vg, oled::outline(70));
         nvgStrokeWidth(args.vg, 0.8f);
         nvgStroke(args.vg);
     }
@@ -962,80 +1106,160 @@ struct NameOled : ui::TextField {
         if (layer != 1) return;
         std::shared_ptr<window::Font> font = APP->window->uiFont;
         if (!font) return;
-        nvgFontFaceId(args.vg, font->handle);
-        float pad = 4.f, w = box.size.x - 2.f * pad;
-        nvgFontSize(args.vg, 7.f);
-        nvgTextLetterSpacing(args.vg, 1.f);
-        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-        nvgFillColor(args.vg, oled::dim());
-        nvgText(args.vg, pad, pad - 1.f, editing() ? "TYPE A NAME  \xe2\x8f\x8e" : "PATCH NAME", NULL);
-        nvgTextLetterSpacing(args.vg, 0.f);
-        std::string t = getText();
-        if (editing()) {   // one line, shrinks to fit, the caret where you type
-            float fs = 13.f, bw = 0.f;
-            for (; fs > 7.f; fs -= 0.5f) { nvgFontSize(args.vg, fs); bw = nvgTextBounds(args.vg, 0, 0, t.c_str(), NULL, NULL); if (bw <= w) break; }
-            int c = clamp(cursor, 0, (int) t.size());
-            float cx = nvgTextBounds(args.vg, 0, 0, t.c_str(), t.c_str() + c, NULL);
-            float scroll = std::max(0.f, cx - w);
-            float ty = box.size.y * 0.58f;
-            nvgSave(args.vg);
-            nvgScissor(args.vg, pad, 0, w + 2.f, box.size.y);
-            nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-            nvgFillColor(args.vg, oled::amber());
-            nvgText(args.vg, pad - scroll, ty, t.c_str(), NULL);
-            if (std::fmod(system::getTime(), 1.0) < 0.6) {
-                nvgBeginPath(args.vg);
-                nvgRect(args.vg, pad - scroll + cx + 0.5f, ty - fs * 0.45f, 1.2f, fs * 0.9f);
-                nvgFill(args.vg);
+        NVGcontext* vg = args.vg;
+        nvgFontFaceId(vg, font->handle);
+        float W = box.size.x, tw = W / 3.f;
+        // tabs
+        static const char* const tabs[3] = {"BG", "CASE", "NAME"};
+        nvgFontSize(vg, 6.5f);
+        nvgTextLetterSpacing(vg, 0.6f);
+        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        for (int k = 0; k < 3; k++) {
+            if (k == page) {
+                nvgBeginPath(vg); nvgRect(vg, k * tw + 1.f, 1.f, tw - 2.f, kTabH - 2.f);
+                nvgFillColor(vg, oled::amber()); nvgFill(vg);
             }
-            nvgRestore(args.vg);
+            nvgFillColor(vg, k == page ? oled::ink() : oled::dim());
+            nvgText(vg, k * tw + tw * 0.5f + 0.3f, kTabH * 0.5f + 0.5f, tabs[k], NULL);
         }
-        else {   // up to three lines; the patch's file name, dimmed, until you type one
-            bool own = !t.empty();
-            if (!own) { std::string pp = APP->patch->path; t = pp.empty() ? "UNTITLED" : system::getStem(pp); }
-            t = string::uppercase(t);
-            float fs = 12.f;
-            nvgFontSize(args.vg, fs);
-            float b[4];
-            nvgTextBoxBounds(args.vg, 0, 0, w, t.c_str(), NULL, b);
-            if (b[3] - b[1] > fs * 3.3f) { fs = 9.f; nvgFontSize(args.vg, fs); }
-            nvgTextLineHeight(args.vg, 1.05f);
-            nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-            nvgFillColor(args.vg, own ? oled::amber() : oled::dim());
-            nvgSave(args.vg);
-            nvgScissor(args.vg, pad, 0, w, box.size.y - 2.f);
-            nvgTextBox(args.vg, pad, pad + 8.f, w, t.c_str(), NULL);
-            nvgRestore(args.vg);
+        nvgBeginPath(vg); nvgMoveTo(vg, 1.f, kTabH + 0.5f); nvgLineTo(vg, W - 1.f, kTabH + 0.5f);
+        nvgStrokeColor(vg, oled::outline(90)); nvgStrokeWidth(vg, 0.6f); nvgStroke(vg);
+        // rows
+        std::vector<Row> r = rows();
+        float iw = W - 2.f * kPad;
+        for (int i = 0; i < (int) r.size(); i++) {
+            float y = rowY(i);
+            if (y + kRowH > box.size.y) break;
+            bool hot = i == hover && r[i].step;
+            if (hot) {
+                nvgBeginPath(vg); nvgRect(vg, 1.f, y, W - 2.f, kRowH - 1.f);
+                nvgFillColor(vg, oled::amber(22)); nvgFill(vg);
+            }
+            nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+            nvgFontSize(vg, 5.5f);
+            nvgTextLetterSpacing(vg, 0.6f);
+            nvgFillColor(vg, oled::dim());
+            nvgText(vg, kPad, y + 1.5f, r[i].label.c_str(), NULL);
+            if (page == 2 && i == 0) continue;   // the name field draws itself
+            // the value, with arrows when it steps; slides sideways when it's too long and hovered
+            bool arrows = r[i].step && !r[i].flip;
+            float vx = kPad + (arrows ? 6.f : 0.f), vw = iw - (arrows ? 12.f : 0.f);
+            nvgFontSize(vg, 8.f);
+            nvgTextLetterSpacing(vg, 0.3f);
+            float bw = nvgTextBounds(vg, 0, 0, r[i].value.c_str(), NULL, NULL), off = 0.f;
+            if (bw > vw && hot) { float span = bw - vw + 8.f; off = std::fmod((float) system::getTime() * 18.f, span * 2.f); if (off > span) off = 2.f * span - off; }
+            nvgSave(vg);
+            nvgScissor(vg, vx, y, vw, kRowH);
+            nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+            nvgFillColor(vg, oled::amber());
+            float tx = bw <= vw ? vx + (vw - bw) * 0.5f : vx - off;
+            nvgText(vg, tx, y + 12.5f, r[i].value.c_str(), NULL);
+            nvgRestore(vg);
+            if (arrows) {
+                nvgFillColor(vg, hot ? oled::amber() : oled::outline(140));
+                for (int sd = 0; sd < 2; sd++) {
+                    float ax = sd ? W - kPad - 1.f : kPad + 1.f, ay = y + 12.5f, d = sd ? -1.f : 1.f;
+                    nvgBeginPath(vg); nvgMoveTo(vg, ax, ay); nvgLineTo(vg, ax + d * 3.5f, ay - 2.5f); nvgLineTo(vg, ax + d * 3.5f, ay + 2.5f); nvgClosePath(vg); nvgFill(vg);
+                }
+            }
         }
+        nvgTextLetterSpacing(vg, 0.f);
     }
 };
-// NAME: a slim button that starts the typing (selection moves on release, so the click doesn't take it back)
+
+// NAME: a square key: opens the NAME page and starts the typing (on release, so the click doesn't take it back)
 struct NameButton : widget::OpaqueWidget {
     NameOled* field = NULL;
+    BackdropOled* menu = NULL;
     void onButton(const ButtonEvent& e) override {
         if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) e.consume(this);
     }
     void onDragEnd(const DragEndEvent& e) override {
-        if (e.button == GLFW_MOUSE_BUTTON_LEFT && field) APP->event->setSelectedWidget(field);
+        if (e.button != GLFW_MOUSE_BUTTON_LEFT || !field) return;
+        if (menu) { menu->page = 2; menu->step(); }
+        field->visible = true;
+        APP->event->setSelectedWidget(field);
     }
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
-        bool on = field && field->editing();
         nvgBeginPath(args.vg);
-        nvgRoundedRect(args.vg, 0.5f, 0.5f, box.size.x - 1.f, box.size.y - 1.f, box.size.y * 0.5f);
-        nvgFillColor(args.vg, on ? oled::litFill() : nvgRGB(24, 18, 12));
+        nvgRoundedRect(args.vg, 0.5f, 0.5f, box.size.x - 1.f, box.size.y - 1.f, 2.2f);   // square, softly rounded corners
+        nvgFillColor(args.vg, nvgRGB(24, 18, 12));
         nvgFill(args.vg);
-        nvgStrokeColor(args.vg, oled::outline(on ? 200 : 110));
+        nvgStrokeColor(args.vg, oled::outline(110));
         nvgStrokeWidth(args.vg, 0.8f);
         nvgStroke(args.vg);
         std::shared_ptr<window::Font> font = APP->window->uiFont;
         if (!font) return;
         nvgFontFaceId(args.vg, font->handle);
-        nvgFontSize(args.vg, 7.5f);
-        nvgTextLetterSpacing(args.vg, 1.5f);
+        nvgFontSize(args.vg, 6.5f);
+        nvgTextLetterSpacing(args.vg, 0.8f);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFillColor(args.vg, on ? oled::ink() : oled::amber());
-        nvgText(args.vg, box.size.x * 0.5f + 0.75f, box.size.y * 0.5f + 0.5f, "NAME", NULL);
+        nvgFillColor(args.vg, oled::amber());
+        nvgText(args.vg, box.size.x * 0.5f + 0.4f, box.size.y * 0.5f + 0.5f, "NAME", NULL);
+        nvgTextLetterSpacing(args.vg, 0.f);
+    }
+};
+
+// ---- a picture of the Rack window, for the case snapshots (Rack keeps its own screenshot call internal) --------
+// Reads what is on screen with OpenGL (looked up in opengl32.dll, which Rack has loaded) and writes a 24-bit BMP.
+#ifdef ARCH_WIN
+extern "C" __declspec(dllimport) void* __stdcall GetModuleHandleA(const char* name);
+extern "C" __declspec(dllimport) void* __stdcall GetProcAddress(void* module, const char* name);
+static bool snapWindow(const std::string& path) {
+    typedef void (__stdcall *ReadPixels)(int, int, int, int, unsigned, unsigned, void*);
+    typedef void (__stdcall *ReadBuffer)(unsigned);
+    typedef void (__stdcall *GetIntegerv)(unsigned, int*);
+    void* gl = GetModuleHandleA("opengl32.dll");
+    if (!gl) return false;
+    ReadPixels readPixels = (ReadPixels) GetProcAddress(gl, "glReadPixels");
+    ReadBuffer readBuffer = (ReadBuffer) GetProcAddress(gl, "glReadBuffer");
+    GetIntegerv getIntegerv = (GetIntegerv) GetProcAddress(gl, "glGetIntegerv");
+    if (!readPixels || !readBuffer || !getIntegerv) return false;
+    int vp[4] = {0, 0, 0, 0};
+    getIntegerv(0x0BA2, vp);   // GL_VIEWPORT: Rack's last frame covers the whole window
+    int w = vp[2], h = vp[3];
+    if (w <= 0 || h <= 0) return false;
+    std::vector<unsigned char> px((size_t) w * h * 3);
+    readBuffer(0x0404);   // GL_FRONT: what is on screen
+    readPixels(0, 0, w, h, 0x80E0, 0x1401, px.data());   // GL_BGR, GL_UNSIGNED_BYTE (rows bottom-up, as a BMP keeps them)
+    readBuffer(0x0405);   // back to GL_BACK
+    int row = (w * 3 + 3) & ~3;
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return false;
+    unsigned size = 54 + (unsigned) row * h;
+    unsigned char hd[54] = {'B', 'M'};
+    auto put = [&](int at, unsigned v) { for (int k = 0; k < 4; k++) hd[at + k] = (v >> (8 * k)) & 255; };
+    put(2, size); put(10, 54); put(14, 40); put(18, (unsigned) w); put(22, (unsigned) h);
+    hd[26] = 1; hd[28] = 24; put(34, (unsigned) row * h);
+    std::fwrite(hd, 1, 54, f);
+    std::vector<unsigned char> line(row, 0);
+    for (int y = 0; y < h; y++) {
+        std::memcpy(line.data(), px.data() + (size_t) y * w * 3, (size_t) w * 3);
+        std::fwrite(line.data(), 1, row, f);
+    }
+    std::fclose(f);
+    return true;
+}
+#else
+static bool snapWindow(const std::string& path) { return false; }
+#endif
+
+// the header, as on every MTX module (EchoTitle): SynTHBloK in white, the module's name in orange
+struct BackdropTitle : TransparentWidget {
+    void draw(const DrawArgs& args) override {
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
+        nvgFontSize(args.vg, 11.f);
+        nvgFillColor(args.vg, nvgRGB(0xff, 0xff, 0xff));
+        nvgText(args.vg, 0.f, mm2px(3.5f), "SynTHBloK", NULL);
+        nvgFontSize(args.vg, 10.f);
+        nvgTextLetterSpacing(args.vg, 0.8f);
+        nvgFillColor(args.vg, nvgRGB(0xff, 0x7a, 0x00));
+        nvgText(args.vg, 0.f, mm2px(6.4f), "BACKDROP", NULL);
+        nvgTextLetterSpacing(args.vg, 0.f);
     }
 };
 
@@ -1048,18 +1272,59 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         p->module = module;
         p->widget = this;
         addChild(p);
-        NameOled* nf = new NameOled;   // the name OLED and its button, at the top of the well
+        addChild(createWidget<BackdropTitle>(mm2px(Vec(8.5f, 0.f))));
+        BackdropOled* om = new BackdropOled;   // the OLED menu fills the well; the name field rides in its NAME page
+        om->module = module;
+        om->box.pos = mm2px(Vec(5.6f, 13.6f));
+        om->box.size = mm2px(Vec(19.28f, 81.f));
+        addChild(om);
+        NameOled* nf = new NameOled;
         nf->module = module;
-        nf->box.pos = mm2px(Vec(5.8f, 14.f));
-        nf->box.size = mm2px(Vec(18.88f, 20.f));
-        addChild(nf);
+        nf->visible = false;
+        om->name = nf;
+        addChild(nf);   // after the menu, so it gets the clicks in its row
         NameButton* nb = new NameButton;
         nb->field = nf;
-        nb->box.size = mm2px(Vec(11.f, 4.2f));
-        nb->box.pos = Vec(box.size.x * 0.5f - nb->box.size.x * 0.5f, mm2px(37.f));
+        nb->menu = om;
+        nb->box.size = mm2px(Vec(7.6f, 7.0f));   // nearly square
+        nb->box.pos = Vec(box.size.x * 0.5f - nb->box.size.x * 0.5f, mm2px(97.3f));
         addChild(nb);
         addChild(createWidget<ThemedScrew>(Vec(RACK_GRID_WIDTH * 0.5f, 0)));
         addChild(createWidget<ThemedScrew>(Vec(box.size.x - RACK_GRID_WIDTH * 1.5f, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
+    }
+    // CASE SNAPSHOTS (a dev aid): if Rack's user folder holds SynTHBloK/snap_cases.txt when this BACKDROP opens, it
+    // steps through every case and saves a picture of the Rack window for each to SynTHBloK/case_shots/
+    // (NN_NAME.bmp), then puts the case back and writes done.txt. The trigger file is removed first, so it runs once.
+    int shotI = -1, shotWait = 0, shotKeep = 0;
+    bool shotChecked = false;
+    std::string shotDir;
+    void shotStep(SynTHBloKBackdrop* m) {
+        // runs only when the trigger file is there (it never ships; only the dev workflow writes it)
+        if (!shotChecked) {
+            shotChecked = true;
+            std::string trig = asset::user("SynTHBloK/snap_cases.txt");
+            INFO("BACKDROP snapshots: looking for %s: %s", trig.c_str(), system::exists(trig) ? "found" : "none");
+            if (system::exists(trig)) {
+                system::remove(trig);
+                shotDir = asset::user("SynTHBloK/case_shots");
+                system::createDirectories(shotDir);
+                shotKeep = m->caseIdx;
+                shotI = 0; shotWait = -240;   // ~4 s for the patch to settle first
+            }
+        }
+        if (shotI < 0) return;
+        const std::vector<CaseStyle>& lib = caseLibrary();
+        if (shotWait == 0) m->caseIdx = shotI;
+        if (++shotWait < 14) return;   // a few frames on screen before the picture
+        std::string n = lib[shotI].name;
+        for (char& c : n) if (c == ' ') c = '_';
+        if (!snapWindow(system::join(shotDir, string::f("%02d_%s.bmp", shotI, n.c_str())))) WARN("BACKDROP snapshot %d failed", shotI);
+        shotWait = 0;
+        if (++shotI >= (int) lib.size()) {
+            shotI = -1;
+            m->caseIdx = shotKeep;
+            if (FILE* f = std::fopen(system::join(shotDir, "done.txt").c_str(), "w")) { std::fprintf(f, "%d\n", (int) lib.size()); std::fclose(f); }
+        }
     }
     ~SynTHBloKBackdropWidget() {
         if (gOwner == this && gLayer) {
@@ -1080,6 +1345,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
             APP->scene->rack->addChildAbove(gLayer, APP->scene->rack->children.front());
             gOwner = this;
         }
+        if (gOwner == this) shotStep(m);
     }
 
     void appendContextMenu(Menu* menu) override {

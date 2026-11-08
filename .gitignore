@@ -31,3 +31,5 @@ tools/.shell_token
 tools/.wb-app/
 # notes from Claude for the workbench FOR YOU box (local only)
 tools/claude_inbox.json
+# BACKDROP case snapshots for review (local only)
+tools/case_shots/

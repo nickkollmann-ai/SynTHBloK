@@ -46,20 +46,13 @@ p = ['<?xml version="1.0" encoding="UTF-8"?>',
      '<rect x="0" y="0" width="%g" height="%g" fill="url(#fxg)"/>' % (W, H),
      '<path fill="#080808" d="M0,0 H%g V7 H0 Z"/>' % W,
      '<path d="M0,7 H%g" stroke="#ff7a00" stroke-width="0.3" stroke-opacity="0.75" fill="none"/>' % W,
-     # right-aligned, so the top-left screw (x 2.5-7.6 mm) never sits on the name
-     text_path('SynTHBloK-B', W - 2.0, 3.5, 2.25, REG, anchor='end', fill='#ffffff'),
-     text_path('BACKDROP', W - 2.0, 6.3, 1.92, BOLD, anchor='end', fill='#ff7a00')]
+     ]   # the header words are drawn by the module, like every MTX module (SynTHBloK white, the name orange)
 # the card and its dark well (plain: no big lettering)
 p.append(frame(2.5, 9.0, W - 5.0, 116.5))
-p.append(well(5.0, 12.0, W - 10.0, 86.0))
-# what it does, small, under the well
-for i, line in enumerate(['BACKGROUND', 'CASE', 'TITLE']):
-    p.append(text_path(line, W / 2, 101.6 + i * 2.2, 1.05, REG, fill='#cfcfcf'))
+p.append(well(5.0, 12.0, W - 10.0, 93.5))   # the OLED menu + the NAME key (the old labels made room for it)
 # the status light's ring and label
 p.append('<circle cx="%g" cy="%g" r="2.6" fill="#0c0c0c" stroke="#2c2c2c" stroke-width="0.25"/>' % (W / 2, LED_Y))
-p.append(text_path('ON THE RACK', W / 2, LED_Y + 5.2, 0.95, fill='#ff7a00'))
-p.append(text_path('RIGHT-CLICK: SETTINGS', W / 2, 121.6, 0.85, REG, fill='#8a8a8a'))
-p.append(text_path('NoiZee ToyZ', W / 2, 127.6, 1.0, REG, fill='#6b4217'))
+p.append(text_path('NoiZee ToyZ', W / 2, 127.9, 1.944, REG, fill='#808080'))   # the same footer as the MTX modules
 p.append('</svg>')
 open(os.path.join(ROOT, 'res', 'SynTHBloKBackdrop.svg'), 'w', encoding='utf-8').write('\n'.join(p) + '\n')
 print('wrote res/SynTHBloKBackdrop.svg')
