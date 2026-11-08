@@ -233,6 +233,8 @@ struct SynTHBloKRandroyd : Module {
     static constexpr float CPU_BUDGET = 0.55f, CPU_GUARD = 0.90f;
     float layerCost = 0.12f;   // starts cautious: a fresh install rolls MED-sized tracks, not FULL
     bool cpuGuard = true;
+    int guardMask = 0;        // tracks the CPU GUARD parked (UI thread)
+    float guardWatch = 0.f;   // seconds the meter has sat over the guard's limit (for the display)
     std::atomic<int> sceneOut{-1};
     dsp::PulseGenerator trigPulse;
     midi::InputQueue midiIn;
@@ -981,6 +983,26 @@ struct RdMidi : OpaqueWidget {
 };
 
 // ---------------------------------------------------------------------------
+// PARKED TAG: laid over a module RANDROYD parked (bypassed, Rack dims it): a quiet pill in the middle,
+// "PARKED", and "CPU GUARD" under it when the guard did it. It shows only while the module is bypassed.
+// ---------------------------------------------------------------------------
+struct RdParkTag : TransparentWidget {
+    engine::Module* mod = NULL;
+    bool guard = false;
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1 || !mod || !mod->isBypassed()) return;
+        float W = box.size.x, H = box.size.y;
+        float pw = std::min(W - mm2px(2.f), mm2px(24.f)), ph = mm2px(guard ? 8.f : 5.2f);
+        float x = (W - pw) * 0.5f, y = H * 0.42f - ph * 0.5f;
+        float pulse = 0.75f + 0.25f * std::sin((float) system::getTime() * 2.2f);   // a slow breath, not a blink
+        rdBox(args.vg, x, y, pw, ph, nvgRGBA(18, 12, 4, 200), oled::amber((int) (110 * pulse)), 0.8f, ph * 0.5f);
+        rdFont(args.vg);
+        rdText(args.vg, W * 0.5f, y + mm2px(guard ? 2.7f : 2.6f), "PARKED", 7.5f, oled::amber((int) (230 * pulse)), NVG_ALIGN_CENTER);
+        if (guard) rdText(args.vg, W * 0.5f, y + mm2px(5.7f), "CPU GUARD", 5.2f, oled::amber((int) (150 * pulse)), NVG_ALIGN_CENTER);
+    }
+};
+
+// ---------------------------------------------------------------------------
 // CPU meter + headroom line
 // ---------------------------------------------------------------------------
 struct RdCpu : TransparentWidget {
@@ -1000,7 +1022,14 @@ struct RdCpu : TransparentWidget {
             float cost = module ? module->layerCost : 0.12f;
             int room = std::max(0, (int) std::floor((SynTHBloKRandroyd::CPU_BUDGET - load) / cost));
             std::string line = load > 0.85f ? "CPU LIMIT" : (room > 0 ? string::f("ROOM FOR ~%d MORE PARTS", room) : "NEAR THE LIMIT");
-            rdText(args.vg, 0.f, mm2px(5.4f), line, 5.2f, load > 0.85f ? rdz::red() : oled::amber(170), NVG_ALIGN_LEFT);
+            NVGcolor lc = load > 0.85f ? rdz::red() : oled::amber(170);
+            // the guard at work: watching (over the limit, counting down) or how many parts it parked
+            if (module && module->cpuGuard) {
+                int n = 0; for (int t = 0; t < 8; t++) n += module->guardMask >> t & 1;
+                if (n) { line = string::f("CPU GUARD: %d PART%s PARKED", n, n > 1 ? "S" : ""); lc = nvgRGBA(255, 178, 26, 230); }
+                else if (module->guardWatch > 0.2f) { line = string::f("CPU GUARD: WATCHING  %.0f", std::max(0.f, 3.f - module->guardWatch)); lc = rdz::red(); }
+            }
+            rdText(args.vg, 0.f, mm2px(5.4f), line, 5.2f, lc, NVG_ALIGN_LEFT);
         }
         Widget::drawLayer(args, layer);
     }
@@ -1116,10 +1145,13 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         }
         guardCool -= dt;
         guardT = (m->cpuGuard && load > SynTHBloKRandroyd::CPU_GUARD) ? guardT + dt : 0.f;
+        m->guardWatch = guardT;
+        for (int t = 0; t < 8; t++) if ((m->guardMask >> t & 1) && !trackParked(t)) m->guardMask &= ~(1 << t);   // woken (or undone)
         if (guardT < 3.f || guardCool > 0.f) return;
         for (int t = 7; t >= 1; t--)   // the last-added parts go first; drums (T1) keep playing
             if (trackLive(t) && !trackParked(t)) {
-                parkTrack(t, true);
+                parkTrack(t, true, true);
+                m->guardMask |= 1 << t;
                 m->layerCost = clamp(m->layerCost * 1.25f, 0.03f, 0.4f);
                 m->say(string::f("CPU LIMIT: T%d PARKED TO STOP CRACKLES  ·  WAKE IT IN THE TRACK VIEW, OR SET SIZE LOWER", t + 1));
                 break;
@@ -4605,13 +4637,23 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     }
 
     // PARK: bypass the track's row (no CPU, Rack dims it); again = wake. One undo step.
-    void parkTrack(int t, bool park) {
+    void parkTrack(int t, bool park, bool byGuard = false) {
         SynTHBloKRandroyd* m = rd();
         history::ComplexAction* h = new history::ComplexAction;
         h->name = park ? "RANDROYD park track" : "RANDROYD wake track";
+        if (!park) m->guardMask &= ~(1 << t);
         for (int64_t id : m->trackMods[t]) {
             app::ModuleWidget* mw = findMw(id);
-            if (!mw || mw->module->isBypassed() == park) continue;
+            if (!mw) continue;
+            // the PARKED tag over the module (it hides itself whenever the module runs)
+            RdParkTag* tag = NULL;
+            for (widget::Widget* c : mw->children) if (RdParkTag* pt = dynamic_cast<RdParkTag*>(c)) tag = pt;
+            if (park) {
+                if (!tag) { tag = new RdParkTag; tag->mod = mw->module; mw->addChild(tag); }
+                tag->box = math::Rect(Vec(0, 0), mw->box.size);
+                tag->guard = byGuard;
+            }
+            if (mw->module->isBypassed() == park) continue;
             APP->engine->bypassModule(mw->module, park);
             history::ModuleBypass* hb = new history::ModuleBypass;
             hb->moduleId = id;
