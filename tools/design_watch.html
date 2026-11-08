@@ -592,6 +592,54 @@ header button:hover,.modes button:hover,footer .nav:hover{box-shadow:0 0 10px #0
 #csig u:hover{color:#fff}
 @keyframes csig{0%,100%{opacity:.62;box-shadow:0 0 12px rgba(var(--sc),.18)}50%{opacity:.95;box-shadow:0 0 28px rgba(var(--sc),.45)}}
 @keyframes csring{0%{transform:scale(1);opacity:.7}100%{transform:scale(1.18,1.6);opacity:0}}
+/* ===== ONE LOOK: PATCH MAP, PATCHES, the patch generator and OPEN IN RACK wear the THINKING theme =====
+   (square edges, the #070b10 header with green letters, OLED cards with the cyan glow and scanlines, the green
+   accent where magenta was, green scrollbars). Placed last, so it wins over the older magenta pop-up styles. */
+#patch,#ro{--mg:var(--ok)}
+body:not(.popup) #patch{inset:0;top:var(--tabs-h,80px)!important;border-radius:0;border:0;background:var(--bg);box-shadow:none}
+body:not(.popup) #patch.on{animation:none}
+#patch-bg{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none}
+#patch .scr{display:none}
+body:not(.popup) #patch>.head{min-height:0;padding:8px 14px;background:#070b10;border-bottom:1px solid var(--line)}
+#patch .pbrand{flex-direction:row;align-items:baseline;gap:8px}
+#patch .pbrand s{color:var(--ok);font-size:12px;font-weight:600;letter-spacing:.16em}
+#patch .pbrand i{color:var(--ok);font-size:12px;font-weight:600;letter-spacing:.16em;margin-top:0}
+#patch .pbrand i::before{content:'· ';color:var(--mut)}
+#patch #patch-at{color:var(--mut);font-weight:400}
+#patch .acts a,#patch .acts button{border-radius:0;background:transparent;border:1px solid var(--line);color:var(--tx)}
+#patch #patch-close{border:1px solid var(--line);color:var(--tx);font-size:16px;padding:2px 9px;border-radius:0}
+#patch #rack-open{background:var(--ok);border-color:var(--ok);color:#011}
+/* the panels as THINKING's OLED cards */
+#sbank,#minfo,#patch-info>*,#pinfo{background:radial-gradient(120% 90% at 50% 0%,#04161c 0%,#010407 70%)!important;border:0!important;border-radius:0!important;
+  box-shadow:inset 0 0 0 1px #0f3b46,inset 0 0 24px #00e5ff10!important}
+#patch-top #patch-side{background:var(--bg)!important}
+#patch-info{background:var(--bg)}
+#sbank .sb-spot.on,#sbank .sb-banks .on{text-shadow:0 0 6px #3dff9a88}
+#sbank #gen-btn{background:var(--ok)!important;border-color:var(--ok)!important;color:#011!important;border-radius:2px;box-shadow:0 0 10px #3dff9a55!important}
+#sbank #gen-btn:hover{box-shadow:0 0 18px #3dff9acc!important}
+/* the map: the readout's deep dark, rails kept so modules read like Rack */
+#patch-map{background:#02030a;box-shadow:inset 0 0 0 1px #0f3b46}
+#patch-map .zoom button,#patch-map button{border-radius:0}
+#patch *{scrollbar-color:rgba(61,255,154,.5) rgba(61,255,154,.05)}
+#patch ::-webkit-scrollbar-track{background:rgba(61,255,154,.04)}
+#patch ::-webkit-scrollbar-thumb{background:rgba(61,255,154,.45);box-shadow:0 0 6px rgba(61,255,154,.5)}
+/* OPEN IN RACK: the same card, no rounded magenta box */
+#ro{background:#05070bcc}
+#ro .box{background:radial-gradient(120% 90% at 50% 0%,#04161c 0%,#010407 70%);border:1px solid #0f3b46;border-radius:0;box-shadow:inset 0 0 24px #00e5ff10,0 30px 80px #000c}
+#ro .box::before{background:linear-gradient(90deg,transparent,var(--cy),var(--ok),transparent)}
+#ro .top{background:#070b10;border-bottom:1px solid var(--line)!important}
+#ro .top b{color:var(--ok);font-weight:600}
+#ro .bot button{border-radius:0}
+#ro .note{background:#3dff9a0d}
+#ro .go{box-shadow:0 0 14px #3dff9a66}
+#ro .pv{background:#02030a}
+/* the tabs: one active style for every page, THINKING's green line */
+#wbtabs .tab.on{color:var(--ok)!important;box-shadow:inset 0 2px 0 var(--ok)!important;border-color:var(--line)!important}
+/* the top bar and the track bank in the same green */
+header b{color:var(--ok)}header>b{text-shadow:0 0 10px #3dff9a55}
+header::after{background:linear-gradient(90deg,transparent,var(--cy),var(--ok),transparent)!important}
+.modes button.on{background:var(--ok)!important;border-color:var(--ok)!important;color:#011!important}
+#sbank button.on{background:var(--ok);color:#011;border-color:#8dffc4}
 </style>
 </head>
 <body>
@@ -633,7 +681,7 @@ header button:hover,.modes button:hover,footer .nav:hover{box-shadow:0 0 10px #0
 </main>
 <footer><button type="button" class="nav" id="s-prev" title="Previous (←)">&lsaquo;</button><div id="strip"></div><button type="button" class="nav" id="s-next" title="Next (→)">&rsaquo;</button><span id="s-count"></span></footer>
 <div id="patch-bg"></div>
-<div id="patch" role="dialog" aria-modal="true" aria-label="SynTHBloK patches"><i class="scr"></i><i class="scr"></i><i class="scr"></i><i class="scr"></i><div class="head"><span><span class="pbrand"><s>SynTHBloK</s><i>PATCHES</i></span><span class="pt">PATCHES</span> <b id="patch-at">waiting for tools/patch_feed.json</b></span><span class="acts"><button type="button" id="rack-open" hidden title="Open this patch in VCV Rack">OPEN IN RACK</button><button type="button" id="patch-close" aria-label="Close">&times;</button></span></div>
+<div id="patch" role="dialog" aria-modal="true" aria-label="SynTHBloK patches"><i class="scr"></i><i class="scr"></i><i class="scr"></i><i class="scr"></i><div class="head"><span><span class="pbrand"><s>SynTHBloK</s><i>PATCHES</i></span><span class="pt">PATCHES</span> <b id="patch-at"></b></span><span class="acts"><button type="button" id="rack-open" hidden title="Open this patch in VCV Rack">OPEN IN RACK</button><button type="button" id="patch-close" aria-label="Close">&times;</button></span></div>
   <div id="patch-body"><div id="patch-pick" hidden></div><div id="patch-top"><div id="patch-side"><div id="sbank" aria-label="Save bank"><div class="sb-head"><div class="sb-hl"><div class="sb-top"><b>TRACKS</b><span id="sb-at">BANK 1 · 0/16</span></div><div class="sb-banks" id="sb-banks"></div></div><button type="button" id="gen-btn" title="Generate a new patch (any style) and show it on the map; Rack is left alone"><i>GEN</i><s>ERATE</s></button></div><div class="sb-list" id="sb-list"></div><div class="sb-soft"><button type="button" id="sb-save" title="Save the patch on the map: click, then pick a spot">SAVE</button><button type="button" id="sb-clear" title="Delete a saved spot: click, pick a spot, click it again">CLEAR</button></div><div class="sb-msg" id="sb-msg">pick a bank · SAVE keeps the patch on the map</div></div></div><div id="minfo" aria-label="Module"><div class="mi-top"><b>MODULE</b><span id="mi-kind">-</span></div><div class="mi-scroll" id="mi-body"></div></div></div><div id="patch-map"><div id="patch-zoom"><button type="button" data-z="1.25" title="Zoom in">+</button><button type="button" data-z="0.8" title="Zoom out">&minus;</button><button type="button" data-z="0" title="Fit">&#9634;</button></div></div><div id="patch-info"><div id="pinfo"><div class="pi-top"><b>PATCH</b><span id="pi-kind">-</span></div><div class="pi-name" id="pi-name">no patch on the map</div><div class="pi-stats"><div><i>MODULES</i><b id="pi-m">-</b></div><div><i>CABLES</i><b id="pi-c" class="mg">-</b></div><div><i>ROWS</i><b id="pi-r">-</b></div></div><div class="pi-file" id="pi-file"></div><div class="pi-mods" id="pi-mods"></div><div id="patch-list"></div></div></div></div></div>
 <div id="ro"><div class="box"><div class="top"><span>OPEN IN <b>VCV RACK</b></span><button type="button" class="x" title="Close">&times;</button></div>
   <div class="mid"><h3 id="ro-name"></h3><div class="sub" id="ro-sub"></div><div class="pv" id="ro-pv"></div><div class="mods" id="ro-mods"></div>
@@ -2318,6 +2366,23 @@ async function scanInbox() {
   try { TabLight.ping('think'); } catch (e) {}
 }
 scanInbox(); setInterval(scanInbox, 4000);
+// SELF-UPDATE: when design_watch.html changes on disk the page reloads itself (same tab), so a new layout or look
+// shows without pressing F5.
+(() => {
+  let stamp = null;
+  try { const t = sessionStorage.getItem('wb-tab'); sessionStorage.removeItem('wb-tab');
+        if (t === 'map') document.getElementById('patch-btn').click(); else if (t === 'lib') document.getElementById('lib-btn').click(); else if (t === 'think') document.getElementById('think-btn').click(); } catch (e) {}
+  setInterval(async () => {
+    const r = await fetch('/tools/design_watch.html?t=' + Date.now(), { method: 'HEAD', cache: 'no-store' }).catch(() => null);
+    if (!r || !r.ok) return;
+    const s = (r.headers.get('Last-Modified') || '') + (r.headers.get('Content-Length') || '');
+    if (stamp === null) { stamp = s; return; }
+    if (s === stamp) return;
+    const on = id => document.getElementById(id).classList.contains('on');
+    try { sessionStorage.setItem('wb-tab', on('think-btn') ? 'think' : on('patch-btn') ? 'map' : on('lib-btn') ? 'lib' : 'wb'); } catch (e) {}
+    location.reload();
+  }, 5000);
+})();
 // ---- CLAUDE SIGNAL: what THINKING wants you to see, as a beacon over the whole workbench ----
 const csig = { think: null, hot: null, hidden: '' };
 function drawSignal() {
