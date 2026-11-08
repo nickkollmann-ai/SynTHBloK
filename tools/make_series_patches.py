@@ -743,7 +743,27 @@ def gen_one(style=None):
     save_vcv(p, os.path.join(RACK_PATCHES, name + '.vcv'))
     return name + '.vcv'
 
+def regen_gen():
+    """rebuild every GEN_ patch from the old engine (no LIGHT/MED/FULL in its name) in its own style; the originals
+    move to Rack's patches/_old_GEN/ (kept, not deleted)"""
+    import re, time
+    key = lambda st: st.replace(' & ', 'n').replace(' ', '').replace('-', '')
+    styles = {key(st): st for st in PG.G}
+    old_dir = os.path.join(RACK_PATCHES, '_old_GEN'); os.makedirs(old_dir, exist_ok=True)
+    for f in sorted(os.listdir(RACK_PATCHES)):
+        m = re.match(r'GEN_(\d{4})_(\d{6})_([^_]+)_(.*)\.vcv$', f)
+        if not m or re.search(r'_(LIGHT|MED|FULL)_', f): continue
+        style = styles.get(m.group(3))
+        seed = int(m.group(1) + m.group(2))
+        n = random.Random(seed).randrange(1, len(PG.NAMES) + 1)
+        name, p = build(n, seed, style, 'GEN_%s_%s' % (m.group(1), m.group(2)))
+        save_vcv(p, os.path.join(RACK_PATCHES, name + '.vcv'))
+        shutil.move(os.path.join(RACK_PATCHES, f), os.path.join(old_dir, f))
+        print('rebuilt', f, '->', name + '.vcv')
+
 if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == '--regen-gen':
+        regen_gen(); sys.exit(0)
     if len(sys.argv) > 1 and sys.argv[1] == '--gen':   # --gen [style]: one new patch; prints {"file": ...}
         print(json.dumps({'file': gen_one(sys.argv[2] if len(sys.argv) > 2 else None)}))
         sys.exit(0)

@@ -9,7 +9,7 @@ cp tools/new-build.yml .github/workflows/build.yml
 
 echo "== adding files"
 git add -u
-git add singles res patches docs convert_patches.bat save_to_github.bat regen_patches.bat save_to_github.sh make_plugins.bat tools/release.sh tools/publish_release.sh \
+git add singles res patches docs convert_patches.bat save_to_github.bat regen_patches.bat regen_gen.bat start_pc_stats.bat tools/pc_stats.ps1 save_to_github.sh make_plugins.bat tools/release.sh tools/publish_release.sh \
   src/SynTHBloKRandroyd.cpp src/SynTHBloKRandroyd_layout.hpp \
   tools/lineup.json tools/modules.json tools/make_plugins.py tools/convert_slugs.py \
   tools/make_randroyd_panel.py tools/new-build.yml 2>/dev/null || true

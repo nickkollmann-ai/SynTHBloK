@@ -312,7 +312,7 @@ footer .nav:hover{border-color:var(--cy)}
 #think>.head b{color:var(--ok);letter-spacing:.16em;font-weight:600}
 #think>.head span{color:var(--mut)}
 #think-x{background:none;border:1px solid var(--line);color:var(--tx);font:inherit;font-size:16px;line-height:1;padding:2px 9px;cursor:pointer}
-#think-body{display:grid;grid-template-columns:minmax(260px,.9fr) minmax(0,1.4fr) minmax(280px,1fr);grid-template-rows:minmax(300px,58vh) minmax(0,1fr);gap:0;min-height:0}
+#think-body{display:grid;grid-template-columns:minmax(260px,.9fr) minmax(0,1.4fr) minmax(280px,1fr);grid-template-rows:minmax(420px,66vh) minmax(0,1fr);gap:0;min-height:0}
 @media(max-width:1000px){#think-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(220px,45vh) auto auto minmax(0,1fr);overflow:auto}#t-mind,#t-plan,#t-log{grid-column:1!important;grid-row:auto!important}}
 /* MIND: a living painting of the work (WebGL field + planets for the plan + bursts for decisions) */
 #t-mind{grid-column:1/-1;grid-row:1;position:relative;overflow:hidden;border-bottom:1px solid var(--line);background:#02030a}
@@ -355,6 +355,40 @@ footer .nav:hover{border-color:var(--cy)}
 #t-log .e.think i{color:var(--cy)}#t-log .e.do i{color:var(--or)}#t-log .e.check i{color:var(--ok)}#t-log .e.fix i{color:var(--bad)}#t-log .e.ask i{color:var(--mg)}
 #t-log .e.new{animation:tnew 1.6s ease}
 @keyframes tnew{0%{background:#00e5ff22}100%{background:transparent}}
+/* PC pill: the live machine in the top bar (tools/pc_stats.json); click opens CLAUDE · THINKING */
+#pc-pill{display:none;align-items:center;gap:8px;background:transparent;border:1px solid var(--line);color:var(--mut);font:inherit;font-size:11px;letter-spacing:.08em;padding:2px 10px;cursor:pointer;white-space:nowrap;transition:border-color .3s,box-shadow .3s}
+#pc-pill.on{display:inline-flex}
+header button,header>span{white-space:nowrap}
+@media(max-width:1750px){header>b+span{display:none}}
+@media(max-width:1350px){#pc-pill .spark{display:none}}
+#pc-pill:hover{border-color:var(--cy);box-shadow:0 0 12px #00e5ff33}
+#pc-pill b{font-weight:500;color:var(--tx)}
+#pc-pill .spark{display:inline-flex;align-items:flex-end;gap:1px;height:12px}
+#pc-pill .spark i{width:2px;background:var(--cy);opacity:.85;transition:height .6s ease}
+#pc-pill .warm{color:var(--or)}#pc-pill .hot{color:var(--bad);animation:hotblink 1s steps(2,jump-none) infinite}
+@keyframes hotblink{50%{opacity:.45}}
+/* LIFE: a slow aurora behind everything, a signal flowing under the top bar (faster when the PC works harder),
+   a heartbeat on the live dot, and soft light on whatever is hovered */
+body{background:radial-gradient(1200px 700px at var(--ax,20%) var(--ay,10%),#00e5ff0d,transparent 60%),radial-gradient(900px 600px at calc(100% - var(--ax,20%)) 90%,#ff00aa0b,transparent 60%),var(--bg);animation:aurora 38s ease-in-out infinite alternate}
+@property --ax{syntax:'<percentage>';inherits:true;initial-value:20%}
+@property --ay{syntax:'<percentage>';inherits:true;initial-value:10%}
+@keyframes aurora{0%{--ax:12%;--ay:8%}50%{--ax:55%;--ay:30%}100%{--ax:85%;--ay:12%}}
+header{position:relative}
+header::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent,var(--cy),var(--mg),transparent);background-size:40% 100%;background-repeat:no-repeat;animation:flow var(--flow,6s) linear infinite;opacity:.9}
+@keyframes flow{0%{background-position:-40% 0}100%{background-position:140% 0}}
+header>b{text-shadow:0 0 10px #ff00aa66;animation:brand 6s ease-in-out infinite}
+@keyframes brand{50%{text-shadow:0 0 18px #ff00aaaa,0 0 2px #fff4}}
+#live{animation:beat 1.6s ease-in-out infinite}
+@keyframes beat{0%,100%{opacity:.65}12%{opacity:1;text-shadow:0 0 8px var(--ok)}24%{opacity:.75}36%{opacity:1}}
+header button,.modes button,footer .nav,#strip button{transition:border-color .25s,box-shadow .25s,color .25s,transform .15s}
+header button:hover,.modes button:hover,footer .nav:hover{box-shadow:0 0 10px #00e5ff2e;color:var(--tx)}
+#strip button:hover{transform:translateY(-2px);box-shadow:0 8px 24px #000a,0 0 0 1px #00e5ff55}
+#think-body .card{transition:background .6s}
+#think-body .card.flash{animation:cardflash 1.4s ease}
+@keyframes cardflash{0%{background:#00e5ff14}100%{background:transparent}}
+#think-body .card h4{position:relative}
+#think-body .card h4::after{content:"";display:inline-block;width:5px;height:5px;margin-left:8px;border-radius:50%;background:var(--cy);opacity:.5;vertical-align:middle;animation:tpulse 2.4s ease-in-out infinite}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
@@ -363,6 +397,7 @@ footer .nav:hover{border-color:var(--cy)}
   <button type="button" id="patch-btn" title="Rack's live patch">PATCH MAP<b id="patch-n"></b></button>
   <button type="button" id="lib-btn" title="Saved patches: patches/ and Rack's patches folder">PATCHES<b id="lib-n"></b></button>
   <div id="git"><span id="g-commit">COMMIT<b>-</b></span><i>→</i><span id="g-push">PUSH<b>-</b></span></div>
+  <button type="button" id="pc-pill" title="This PC, live (tools/pc_stats.json): click for CLAUDE · THINKING"><span class="spark" id="pc-spark"></span><span id="pc-txt"></span></button>
   <button type="button" id="think-btn" class="idle" title="What Claude is doing and why (tools/claude_thinking.json)"><i></i>THINKING<b id="think-now">-</b></button>
   <span id="live">● watching</span></header>
 <main>
@@ -1276,6 +1311,11 @@ const Mind = (() => {
   let act = .3, energy = .3, heat = 0, logHot = false, thinkHot = false, compiling = false;
   let plan = [], nowT = '', mode = 'idle', running = false, last = 0, born = Date.now(), sampleT = 0, procT = 0;
   let bDone = 0, bTotal = 35, glitch = 0, seenBuild = new Set(), evTimes = [];
+  // HARDWARE: tools/pc_stats.json (tools/pc_stats.ps1), eased toward each new sample so the band never jumps
+  let hw = null; const hwS = {}, hwPeak = [], hwWarn = {};
+  const hwHist = { ct: new Float32Array(90), gt: new Float32Array(90), cpu: new Float32Array(90), gpu: new Float32Array(90) }; let hwHistT = 0;
+  const tCol = (c, warm = 70, hot = 85) => c == null ? C.dim : c >= hot ? C.rd : c >= warm ? C.am : C.gr;
+  const ease = (k, v, dt, r = 4) => { if (v == null || isNaN(v)) return hwS[k] || 0; if (hwS[k] == null) hwS[k] = v; hwS[k] += (v - hwS[k]) * Math.min(1, dt * r); return hwS[k]; };
 
   // ---- the alien script ----
   const H = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
@@ -1333,6 +1373,89 @@ const Mind = (() => {
     ctx.globalAlpha = 1;
   }
 
+  function spark(x, y, w, h, arr, lo, hi, col, a = .9) {
+    ctx.strokeStyle = col; ctx.globalAlpha = a; ctx.lineWidth = 1.2; ctx.beginPath();
+    const n = arr.length;
+    for (let k = 0; k < n; k++) { const v = arr[(hwHistT + k) % n]; const px = x + k / (n - 1) * w, py = y + h - Math.max(0, Math.min(1, (v - lo) / (hi - lo))) * h; k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+    ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  function meter(x, y, w, label, v, max, txt, col) {
+    font(8); ctx.fillStyle = '#4b7f8c'; ctx.fillText(label, x, y);
+    ctx.textAlign = 'right'; ctx.fillStyle = col; ctx.fillText(txt, x + w, y); ctx.textAlign = 'left';
+    bar(x, y + 3, w, 4, max ? v / max : 0, col, 24);
+  }
+  function drawHW(x, y, w, h, t, dt) {
+    const stale = !hw || Date.now() - hw.t > 15000;
+    panel(x, y, w, h, `HARDWARE · ${hw ? hw.host : 'THIS PC'}${hw && hw.model ? ' · ' + hw.model : ''}`, stale ? C.dim : C.gr);
+    if (!hw) { font(9); ctx.fillStyle = '#3d6c78'; ctx.fillText('awaiting telemetry · tools/pc_stats.ps1', x + 14, y + 36); return; }
+    const c = hw.cpu || {}, g = hw.gpu, r = hw.ram || {}, d = hw.disk || {}, n = hw.net || {};
+    const zone = (hw.zones || []).slice().sort((a, b) => b.c - a.c)[0];
+    const iy = y + 30, ih = h - 36, gap = 14;
+    const w1 = w * .33, w2 = w * .27, w3 = w * .2, w4 = w - w1 - w2 - w3 - gap * 4;
+    let cx = x + 12;
+    // CPU: load, clock, every thread as a live column with a falling peak cap
+    const load = ease('cpu', c.load, dt), mhz = ease('mhz', c.mhz, dt, 2);
+    font(8); ctx.fillStyle = '#4b7f8c'; ctx.fillText(`CPU  ${c.name || ''} · ${c.cores || '?'}C/${c.threads || '?'}T`, cx, iy);
+    font(22, 700); ctx.fillStyle = load > 85 ? C.rd : load > 60 ? C.am : C.cy; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8;
+    ctx.fillText(`${load.toFixed(0)}%`, cx, iy + 28); ctx.shadowBlur = 0;
+    font(8); ctx.fillStyle = C.cy; ctx.fillText(`${(mhz / 1000).toFixed(2)} GHz`, cx, iy + 41);
+    if (zone) { ctx.fillStyle = tCol(ease('zone', zone.c, dt, 2), 75, 90); ctx.fillText(`${zone.name} ${ease('zone', zone.c, 0).toFixed(0)}°C`, cx, iy + 53); }
+    const th = c.perThread || [], bx = cx + 74, bw = w1 - 80, cols = Math.max(1, th.length), colW = bw / cols, bh = ih - 12;
+    th.forEach((v, i) => {
+      const e = ease('t' + i, v, dt, 6) / 100, wob = .015 * Math.sin(t * 9 + i * 1.7) * (e > .02 ? 1 : 0);
+      const hh = Math.max(1, (e + wob) * bh), px = bx + i * colW;
+      const grd = ctx.createLinearGradient(0, iy + bh, 0, iy);
+      grd.addColorStop(0, 'rgba(95,246,255,.25)'); grd.addColorStop(.6, 'rgba(95,246,255,.8)'); grd.addColorStop(1, e > .8 ? C.rd : C.am);
+      ctx.fillStyle = '#0a1a20'; ctx.fillRect(px + 1, iy, colW - 2, bh);
+      ctx.fillStyle = grd; ctx.fillRect(px + 1, iy + bh - hh, colW - 2, hh);
+      hwPeak[i] = Math.max((hwPeak[i] || 0) - dt * .25, e);
+      ctx.fillStyle = C.wh; ctx.globalAlpha = .8; ctx.fillRect(px + 1, iy + bh - hwPeak[i] * bh - 1, colW - 2, 1.5); ctx.globalAlpha = 1;
+    });
+    font(7); ctx.fillStyle = '#3d6c78'; ctx.fillText('THREADS', bx, iy + bh + 9);
+    cx += w1 + gap;
+    // GPU
+    if (g) {
+      const gl = ease('gpu', g.load, dt), gt = ease('gt', g.temp, dt, 2);
+      font(8); ctx.fillStyle = '#4b7f8c'; ctx.fillText(`GPU  ${String(g.name || '').replace(/NVIDIA |GeForce /g, '')}`, cx, iy);
+      ctx.textAlign = 'right'; ctx.fillStyle = C.cy; ctx.fillText(`${ease('gmhz', g.mhz, dt, 2).toFixed(0)} MHz`, cx + w2, iy); ctx.textAlign = 'left';
+      font(22, 700); ctx.fillStyle = gl > 85 ? C.rd : gl > 60 ? C.am : C.cy; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8;
+      ctx.fillText(`${gl.toFixed(0)}%`, cx, iy + 28);
+      const lw = ctx.measureText(`${gl.toFixed(0)}%`).width;
+      ctx.fillStyle = tCol(gt, 70, 83); ctx.shadowColor = ctx.fillStyle; ctx.fillText(`${gt.toFixed(0)}°C`, cx + lw + 14, iy + 28); ctx.shadowBlur = 0;
+      const mw = w2;
+      meter(cx, iy + 42, mw, 'VRAM', ease('vram', g.memUsed, dt), g.memTotal, `${(hwS.vram / 1024).toFixed(1)} / ${(g.memTotal / 1024).toFixed(1)} GB`, C.cy);
+      meter(cx, iy + 58, mw * .55 - 6, 'POWER', ease('pw', g.power, dt), g.powerMax || 100, `${hwS.pw.toFixed(0)} W`, C.am);
+      meter(cx + mw * .55 + 6, iy + 58, mw * .45 - 6, 'FAN', ease('fan', g.fan, dt), 100, `${hwS.fan.toFixed(0)}%`, C.gr);
+    } else { font(9); ctx.fillStyle = '#3d6c78'; ctx.fillText('GPU  no nvidia-smi', cx, iy + 20); }
+    cx += w2 + gap;
+    // memory, storage, I/O
+    const ramU = ease('ram', r.usedMB, dt) / 1024, ramT = (r.totalMB || 1) / 1024;
+    meter(cx, iy, w3, 'RAM', ramU, ramT, `${ramU.toFixed(1)} / ${ramT.toFixed(0)} GB`, C.cy);
+    const used = (d.cSizeGB || 0) - (d.cFreeGB || 0), lowDisk = d.cSizeGB && d.cFreeGB / d.cSizeGB < .1;
+    meter(cx, iy + 18, w3, 'C:', used, d.cSizeGB || 1, `${(d.cFreeGB || 0).toFixed(0)} GB FREE`, lowDisk ? C.rd : C.gr);
+    meter(cx, iy + 36, w3, 'DISK I/O', ease('dk', d.busy, dt), 100, `${(hwS.dk || 0).toFixed(0)}%`, C.am);
+    font(8); ctx.fillStyle = '#4b7f8c'; ctx.fillText('NET', cx, iy + 56);
+    ctx.fillStyle = C.cy; ctx.fillText(`↓ ${ease('rx', n.rxKBs, dt).toFixed(1)}  ↑ ${ease('tx', n.txKBs, dt).toFixed(1)} KB/s`, cx + 26, iy + 56);
+    const rk = hw.rack;
+    font(8, 700); ctx.fillStyle = rk ? C.mg : '#3d6c78';
+    ctx.fillText(rk ? `RACK  ${rk.cpu == null ? '…' : ease('rk', rk.cpu, dt).toFixed(1) + '%'} CPU · ${(rk.ramMB / 1024).toFixed(1)} GB` : 'RACK  offline', cx, iy + 70);
+    cx += w3 + gap;
+    // thermal history, 3 min
+    font(8); ctx.fillStyle = '#4b7f8c'; ctx.fillText('THERMAL  3 MIN', cx, iy);
+    const sy = iy + 6, sh = ih - 22;
+    ctx.strokeStyle = C.rd; ctx.globalAlpha = .35; ctx.setLineDash([3, 3]); ctx.beginPath();
+    const yHot = sy + sh - (85 - 30) / 70 * sh; ctx.moveTo(cx, yHot); ctx.lineTo(cx + w4, yHot); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    spark(cx, sy, w4, sh, hwHist.ct, 30, 100, C.am);
+    spark(cx, sy, w4, sh, hwHist.gt, 30, 100, C.mg);
+    font(8, 700);
+    if (zone) { ctx.fillStyle = C.am; ctx.fillText(`■ ${zone.name} ${zone.c.toFixed(0)}°`, cx, iy + ih - 4); }
+    if (g) { ctx.fillStyle = C.mg; ctx.textAlign = 'right'; ctx.fillText(`■ GPU ${g.temp}°`, cx + w4, iy + ih - 4); ctx.textAlign = 'left'; }
+    if (stale) {
+      ctx.fillStyle = '#010407'; ctx.globalAlpha = .7; ctx.fillRect(x + 1, y + 18, w - 2, h - 19); ctx.globalAlpha = 1;
+      font(10, 700); ctx.fillStyle = (t * 2 | 0) % 2 ? C.am : '#7a5a2a'; ctx.textAlign = 'center';
+      ctx.fillText('TELEMETRY LOST · tools/pc_stats.ps1 is not running', x + w / 2, y + h / 2 + 6); ctx.textAlign = 'left';
+    }
+  }
   function draw(t, dt) {
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     const W = cv.clientWidth, Hh = cv.clientHeight;
@@ -1363,7 +1486,8 @@ const Mind = (() => {
     ctx.textAlign = 'left';
     ctx.fillStyle = C.cy; ctx.globalAlpha = .4; ctx.fillRect(14, 27, W - 28, 1); ctx.globalAlpha = 1;
 
-    const top = 36, bot = Hh - Math.max(84, Hh * .17);   // the scope gets ~17 % of the height
+    const scopeH = Hh < 560 ? 64 : Math.max(84, Hh * .14), hwH = Hh < 560 ? 92 : Math.max(104, Math.min(138, Hh * .19));
+    const top = 36, bot = Hh - scopeH - hwH - 16;   // main readout, then HARDWARE, then the scope
     const lw = Math.min(330, W * .29), rw = Math.min(440, W * .34);
     const cx0 = 14 + lw + 12, cw = W - 28 - lw - rw - 24;
 
@@ -1482,7 +1606,8 @@ const Mind = (() => {
     ctx.restore();
 
     // ---- oscilloscope ----
-    const oy = bot + 8, oh = Hh - oy - 10;
+    drawHW(14, bot + 8, W - 28, hwH, t, dt);
+    const oy = bot + hwH + 16, oh = Hh - oy - 10;
     panel(14, oy, W - 28, oh, '', C.cy);
     font(8, 600); ctx.fillStyle = C.cy; ctx.fillText('ACTIVITY  5 MIN', 24, oy + 13);
     const ox = 110, ow = W - 28 - 110 - 10;
@@ -1542,7 +1667,8 @@ const Mind = (() => {
     act *= Math.exp(-dt / 45);
     const floor = Date.now() - thinkSeen < 60 * 1000 ? .45 : 0;
     const tgt = mode === 'idle' && !compiling ? Math.min(act, .15) : Math.max(act, floor, heat > .05 ? .85 : 0);
-    energy += (tgt - energy) * dt * (tgt > energy ? 2.5 : .5);
+    const machine = hw && Date.now() - hw.t < 15000 ? (hwS.cpu || 0) / 100 * .5 : 0;   // the PC's own load keeps the readout breathing
+    energy += (Math.max(tgt, machine) - energy) * dt * (tgt > energy ? 2.5 : .5);
     heat += ((compiling ? 1 : 0) - heat) * dt * (compiling ? 1.5 : .5);
     P.forEach(p => { p.lv *= Math.exp(-dt / 8); });
     proc('FORGE').lv = Math.max(proc('FORGE').lv, heat);
@@ -1557,6 +1683,23 @@ const Mind = (() => {
     start() { if (running) return; running = true; last = 0; requestAnimationFrame(frame); },
     stop() { running = false; },
     setPlan(p) { plan = p || []; },
+    setHW(j) {
+      if (!j || (hw && j.t === hw.t)) return;
+      hw = j;
+      const z = (j.zones || []).slice().sort((a, b) => b.c - a.c)[0];
+      const i = hwHistT % 90;
+      hwHist.ct[i] = z ? z.c : 0; hwHist.gt[i] = j.gpu ? j.gpu.temp : 0; hwHist.cpu[i] = (j.cpu || {}).load || 0; hwHist.gpu[i] = j.gpu ? j.gpu.load : 0;
+      hwHistT++;
+      if (hwHistT === 1) for (const k in hwHist) hwHist[k].fill(hwHist[k][0]);
+      // thermal alarms, once per crossing (5 degrees of hysteresis)
+      const warn = (k, v, lim, label) => {
+        if (v == null) return;
+        if (!hwWarn[k] && v >= lim) { hwWarn[k] = true; push('fix', `THERMAL · ${label} ${v.toFixed(0)}°C`); hit('FORGE', .4); }
+        else if (hwWarn[k] && v < lim - 5) { hwWarn[k] = false; push('check', `THERMAL · ${label} back to ${v.toFixed(0)}°C`); }
+      };
+      warn('z', z && z.c, 92, z ? z.name : 'CPU'); warn('g', j.gpu && j.gpu.temp, 83, 'GPU');
+      if ((j.cpu || {}).load > 85) hit('FORGE', .2);
+    },
     setNow(j) { nowT = (j.now && j.now.title) || j.task || ''; if (j.mode) mode = j.mode; },
     pulse(a) { act = Math.min(1, Math.max(act, a)); },
     rest() { act = 0; mode = 'idle'; },
@@ -1616,6 +1759,7 @@ async function scanThink() {
   try { j.mode === 'idle' ? Mind.rest() : Mind.pulse(.8); } catch (e) {}
   if (thinkSeen) { btn.classList.remove('hot'); void btn.offsetWidth; btn.classList.add('hot'); }
   thinkSeen = up;
+  document.querySelectorAll('#think-body .card').forEach(c => { c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash'); });
   thinkEl('t-at').textContent = 'updated ' + thinkTime(up) + (j.task ? ' · ' + j.task : '');
   thinkEl('t-goal').textContent = j.goal || '-';
   const now = j.now || {};
@@ -1640,6 +1784,35 @@ async function scanThink() {
   newEntries.slice(0, 6).reverse().forEach((e, i) => setTimeout(() => Mind.event(e.kind, e.text), i * 450));
   log.forEach(e => thinkLog.add((e.t || 0) + e.text));
 }
+// ---- THIS PC (tools/pc_stats.json, written every 2 s by tools/pc_stats.ps1) ----
+let hwSeen = 0; const pcLoad = [];
+async function scanHW() {
+  const r = await fetch('/tools/pc_stats.json?t=' + Date.now(), { cache: 'no-store' }).catch(() => null);
+  const pill = thinkEl('pc-pill');
+  if (!r || !r.ok) { pill.classList.remove('on'); return; }
+  let j; try { j = await r.json(); } catch (e) { return; }
+  const live = Date.now() - j.t < 15000;
+  pill.classList.toggle('on', true);
+  if (j.t === hwSeen) { if (!live) thinkEl('pc-txt').innerHTML = '<span class="warm">PC telemetry paused</span>'; return; }
+  hwSeen = j.t;
+  try { Mind.setHW(j); } catch (e) {}
+  const c = j.cpu || {}, g = j.gpu, z = (j.zones || []).slice().sort((a, b) => b.c - a.c)[0];
+  const cls = (v, warm, hot) => v >= hot ? 'hot' : v >= warm ? 'warm' : '';
+  pcLoad.push(c.load || 0); if (pcLoad.length > 16) pcLoad.shift();
+  thinkEl('pc-spark').innerHTML = pcLoad.map(v => `<i style="height:${Math.max(1, v / 100 * 12)}px"></i>`).join('');
+  thinkEl('pc-txt').innerHTML = `CPU <b>${(c.load || 0).toFixed(0)}%</b>` +
+    (z ? ` <span class="${cls(z.c, 80, 92)}">${z.c.toFixed(0)}°</span>` : '') +
+    (g ? ` · GPU <b>${g.load}%</b> <span class="${cls(g.temp, 75, 83)}">${g.temp}°</span>` : '') +
+    ` · RAM <b>${((j.ram || {}).usedMB / 1024 || 0).toFixed(1)}G</b>`;
+  pill.title = `${j.host} · ${j.model}\n${c.name} ${c.cores}C/${c.threads}T @ ${(c.mhz / 1000).toFixed(2)} GHz · ${c.load}%` +
+    (z ? `\nthermal zone ${z.name} ${z.c}°C` : '') +
+    (g ? `\n${g.name} · ${g.load}% · ${g.temp}°C · ${g.memUsed}/${g.memTotal} MiB · ${g.power} W · fan ${g.fan}%` : '') +
+    `\nRAM ${(j.ram.usedMB / 1024).toFixed(1)} / ${(j.ram.totalMB / 1024).toFixed(1)} GB · C: ${j.disk.cFreeGB} GB free` +
+    (j.rack ? `\nRack ${j.rack.cpu ?? '…'}% CPU · ${j.rack.ramMB} MB` : '\nRack not running') + '\nclick: CLAUDE · THINKING';
+  // the signal under the top bar flows faster as the PC works harder
+  document.documentElement.style.setProperty('--flow', (7 - 5.5 * Math.min(1, (c.load || 0) / 100)).toFixed(2) + 's');
+}
+thinkEl('pc-pill').onclick = () => thinkOpen(true);
 const thinkOpen = on => { thinkEl('think').classList.toggle('on', on); on ? (Mind.start(), Mind.event('think', 'READOUT online · listening to every process')) : Mind.stop(); };
 thinkEl('think-btn').onclick = () => thinkOpen(true);
 thinkEl('think-x').onclick = () => thinkOpen(false);
@@ -1648,7 +1821,7 @@ thinkEl('t-mind').onclick = () => Mind.event('ask', 'operator probe: ping from t
 
 async function tick(first) {
   try {
-    await Promise.all([scanArt(first), scanModules(first), scanLog(), scanCode(first), scanGit(first), scanFocus(first), scanChat(), scanPatch(), scanLib(), scanThink()]);
+    await Promise.all([scanArt(first), scanModules(first), scanLog(), scanCode(first), scanGit(first), scanFocus(first), scanChat(), scanPatch(), scanLib(), scanThink(), scanHW()]);
     if (!running && pendingReview) review(pendingReview);
     if (first) await cacheAll();
     if (first) show(latest());
