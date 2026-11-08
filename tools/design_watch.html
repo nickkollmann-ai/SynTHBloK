@@ -1081,7 +1081,7 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
 #cln-steps>div.wait{--scol:#ffb347}#cln-steps>div.on,#cln-steps>div.now{--scol:#5ff6ff}.gg.hot{--scol:#ff4466}
 #cln-cards>div{--scol:#ffb34777}#cln-log>div{--scol:#7dffb255}
 
-/* CORE · RUN THESE: .bat files Claude asked you to run that have not run yet (tools/run_queue.json) */
+/* RUN THESE (POWERSHELL tab, right column): .bat files Claude asked you to run that have not run yet (tools/run_queue.json) */
 #runq{display:none;position:absolute;left:14px;right:14px;bottom:12px;z-index:4;padding:10px 12px 8px;background:rgba(4,22,14,.55);backdrop-filter:blur(3px);
   border:1px solid #7dffb288;clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);animation:rqPulse 1.6s ease-in-out infinite}
 #runq.on{display:block}
@@ -1163,10 +1163,12 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
 #psx>.head b{color:var(--ok);letter-spacing:.18em;font-weight:600}#psx>.head span{color:var(--mut);font-size:10.5px}
 #psx>.head button,#ps-con h4 button{--hb:#5ff6ff88;background-color:#04161c;color:#5ff6ff;font:inherit;font-size:12px;padding:2px 10px;cursor:pointer;border:1px solid var(--hb);clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
 #ps-con h4 button{font-size:9px;letter-spacing:.16em;float:right;padding:1px 8px}
-#ps-body{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(0,2fr);grid-template-rows:minmax(0,1.3fr) minmax(0,1fr);gap:8px;padding:8px 10px 10px;min-height:0}
+#ps-body{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(0,2fr);grid-template-rows:auto minmax(0,1.3fr) minmax(0,1fr);gap:8px;padding:8px 10px 10px;min-height:0}
 #ps-body .hud{background:#010407;padding:14px 16px 10px;min-height:0;display:flex;flex-direction:column}
 #ps-body h4{margin:0 0 8px;font-size:9px;letter-spacing:.2em;color:#5f8792;font-weight:500}#ps-body h4 b{color:var(--hc);font-weight:600}
-#ps-q{grid-row:1/3;overflow:auto;--hc:#7dffb2}#ps-out{--hc:#5ff6ff}#ps-con{--hc:#ffb347;grid-column:2}
+#ps-q{grid-row:1/4;overflow:auto;--hc:#7dffb2}#ps-out{--hc:#5ff6ff;grid-column:2;grid-row:2}#ps-con{--hc:#ffb347;grid-column:2;grid-row:3}
+/* RUN THESE sits at the top of the POWERSHELL right column (moved from CORE, Nov 2026); it only shows when something waits */
+#ps-body #runq{position:relative;left:auto;right:auto;bottom:auto;grid-column:2;grid-row:1;max-height:34vh;overflow:auto}
 #ps-oname{color:#cfe2ea;letter-spacing:.06em;margin-left:8px}
 .psi{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:4px 8px;align-items:center;padding:7px 0;border-top:1px solid #0f3b46;font-size:10.5px;cursor:pointer}
 .psi>i{width:8px;height:8px;border-radius:50%;background:#1d3440}
@@ -1251,7 +1253,7 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
       <div id="t-inbox" role="status" aria-live="polite"></div>
       <div id="t-now"><h4>RIGHT NOW</h4><div class="title" id="t-title">-</div><div class="detail" id="t-detail"></div><div class="why" id="t-why"></div></div></div>
     <div id="core-right">
-    <div class="hud" id="core-space"><h4><b>STORAGE + SYSTEM</b> · C: F: and what runs</h4><div id="cs-copy" class="cs-none">no copy running</div><div id="cs-uf"></div><div id="cs-meters"></div><div id="t-sys"><div class="cs-h"><b>SYSTEM</b><span id="sys-at"></span></div><div id="sys-body"></div></div><div id="runq" role="status" aria-live="polite"><div class="rh"><b>RUN THESE</b><span id="runq-n"></span></div><div id="runq-list"></div></div></div>
+    <div class="hud" id="core-space"><h4><b>STORAGE + SYSTEM</b> · C: F: and what runs</h4><div id="cs-copy" class="cs-none">no copy running</div><div id="cs-uf"></div><div id="cs-meters"></div><div id="t-sys"><div class="cs-h"><b>SYSTEM</b><span id="sys-at"></span></div><div id="sys-body"></div></div></div>
     <div class="card oled hud" id="t-term"><div class="ob-head"><b>MSYS2</b><span id="term-st">MINGW64</span><button type="button" id="term-clear" title="Clear the screen">CLEAR</button></div>
       <pre id="term-out"></pre><div id="term-in"><span id="term-ps"></span><input id="term-cmd" autocomplete="off" spellcheck="false" placeholder="a command: make, git status, ls ..." /></div></div>
     <div class="card oled hud" id="t-brief"><div class="ob-tabs"><button type="button" data-tab="goal" class="on">GOAL<i id="t-qled" title="open questions for you"></i></button><button type="button" data-tab="plan">PLAN</button><button type="button" data-tab="log">DECISIONS</button></div>
@@ -1263,6 +1265,7 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
 <div id="psx" role="dialog" aria-label="PowerShell"><div class="head"><span><b>POWERSHELL · SCRIPTS + CONSOLE</b> &nbsp;<span id="ps-at">this PC only · admin scripts still ask Windows for your OK</span></span><button type="button" id="ps-x" aria-label="Close">&times;</button></div>
   <div id="ps-body">
     <div class="hud" id="ps-q"><h4><b>RUN QUEUE</b> · scripts waiting for you</h4><div id="ps-qlist"></div><h4 style="margin-top:12px"><b>RUNS</b> · this session</h4><div id="ps-runs"></div></div>
+    <div id="runq" role="status" aria-live="polite"><div class="rh"><b>RUN THESE</b><span id="runq-n"></span></div><div id="runq-list"></div></div>
     <div class="hud" id="ps-out"><h4><b>OUTPUT</b> <span id="ps-oname">pick a run</span></h4><div id="ps-uac">WINDOWS IS ASKING FOR ADMIN PERMISSION · click <b>Yes</b> on the prompt on your screen</div><pre id="ps-log"></pre></div>
     <div class="hud" id="ps-con"><h4><b>CONSOLE</b> · PowerShell in SynTHBloK <button type="button" id="ps-clear">CLEAR</button></h4><pre id="ps-term"></pre><div id="ps-in"><span id="ps-prompt">PS&gt;</span><input id="ps-cmd" autocomplete="off" spellcheck="false" placeholder="a command: Get-ChildItem, Get-Process claude, ..." /></div></div>
   </div></div>
@@ -3190,7 +3193,7 @@ function drawSignal() {
     else if (fresh && j.mode !== 'idle') { kind = ''; k = 'CLAUDE · WORKING'; t = (j.now && j.now.title) || j.task || ''; }
   }
   if (!kind && csig.hot) { kind = 'hot'; k = 'PC RUNNING HOT'; t = csig.hot; }   // the PC's heat, when THINKING has nothing louder
-  try { TabLight.state('think', kind === 'warn' ? 'warn' : kind === 'hot' ? 'hot' : (kind === 'ask' || csig.mail || (typeof RunQ !== 'undefined' && RunQ.items.length)) ? 'ask' : '');
+  try { TabLight.state('think', kind === 'warn' ? 'warn' : kind === 'hot' ? 'hot' : (kind === 'ask' || csig.mail) ? 'ask' : '');
         TabLight.busy('think', k === 'CLAUDE · WORKING' || csig.job); } catch (e) {}
   const sig = kind + '|' + t;
   const show = !!k && sig !== csig.hidden;
@@ -3907,7 +3910,7 @@ const psOpen = on => { document.getElementById('psx').classList.toggle('on', on)
 document.getElementById('ps-btn').onclick = () => { closePatches(); try { thinkOpen(false); } catch (e) {} ['lab', 'cln', 'acid', 'libre'].forEach(id => document.getElementById(id).classList.remove('on')); psOpen(true); };
 document.getElementById('ps-x').onclick = () => psOpen(false);
 document.getElementById('wbtabs').addEventListener('click', e => { const t = e.target.closest('.tab'); if (t && t.id !== 'ps-btn' && document.getElementById('psx').classList.contains('on')) psOpen(false); }, true);
-// start a queued script here (CORE's RUN THESE sends scripts here too)
+// start a queued script here (RUN THESE, above OUTPUT, sends scripts here too)
 async function psRun(id) {
   psOpen(true);
   let r; try { r = await psFetch('/ps/task', { id }); } catch (e) { r = { status: 0, j: { error: 'the workbench helper is not answering' } }; }
