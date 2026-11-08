@@ -116,8 +116,10 @@ main{display:grid;grid-template-columns:minmax(260px,.7fr) minmax(0,1fr) minmax(
 #patch.on{display:grid}
 #patch .head{position:sticky;top:0}
 #patch-close{background:transparent;border:1px solid var(--line);color:var(--cy);font:inherit;font-size:10px;letter-spacing:.12em;padding:1px 8px;cursor:pointer}
-#patch-body{display:grid;grid-template-columns:230px minmax(0,1fr) 380px;min-height:0}
-@media(max-width:1100px){#patch-body{grid-template-columns:200px minmax(0,1fr);grid-template-rows:minmax(0,1.3fr) minmax(0,1fr)}#patch-side{grid-column:1/-1}}
+#patch-body{display:grid;grid-template-columns:240px minmax(0,1.7fr) minmax(300px,1fr);min-height:0}   /* selector: the old left panel's width */
+#patch-side{order:-1;border-left:0!important;border-right:1px solid var(--line)}   /* the patch selector (TRACKS + GENERATE) sits left of the viewer */
+#patch-pick{display:none!important}   /* the saved-patch list is gone: patches come from TRACKS, GENERATE and PATCH MAP */
+@media(max-width:1100px){#patch-body{grid-template-columns:240px minmax(0,1fr);grid-template-rows:minmax(0,1.3fr) minmax(0,1fr)}#patch-map{grid-column:1/-1;order:-2}}
 #patch-pick{overflow:hidden auto;scrollbar-width:thin;border-right:1px solid var(--line);background:#070b10;font-size:11px}
 #patch-pick h4{margin:0;padding:8px 12px 3px;font-weight:500;font-size:10px;letter-spacing:.14em;color:var(--mut)}
 #patch-pick div{padding:5px 12px;cursor:pointer;color:#9fb6c0;border-left:2px solid transparent;line-height:15px}
@@ -220,43 +222,97 @@ body.popup #patch .scr:nth-child(3){left:3px;bottom:3px}body.popup #patch .scr:n
    SAVE flashes the list (click a spot to keep the patch on the map there); CLEAR flashes the saved spots red (click
    one, then again, to delete it). A saved spot opens its patch on the map. Kept in this browser (localStorage). */
 #patch-side{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--line);background:#070b10}
-#patch-side #patch-list{flex:1;min-height:0;border-left:0}
-#sbank{--am:255,190,90;margin:8px;padding:6px 7px 7px;background:#0e0903;border:1px solid rgba(255,180,90,.32);border-radius:3px;
-  font:11px/1 ui-monospace,"Cascadia Mono",Consolas,monospace;color:rgb(var(--am));box-shadow:inset 0 0 18px #000,0 0 10px rgba(255,140,30,.06);
-  text-shadow:0 0 4px rgba(255,160,60,.45);user-select:none;position:relative;overflow:hidden}
+/* MODULE OLED (under TRACKS): the module picked in the viewer or the list, its thumbnail and every connected jack.
+   Same cyan / magenta OLED as PATCH; everything stays inside it and scrolls inside it. */
+#patch-side #sbank{flex:none}
+#minfo{--pc:0,229,255;flex:1;min-height:120px;margin:0 8px 8px;display:flex;flex-direction:column;background:#02080b;border:1px solid rgba(0,229,255,.32);
+  border-radius:3px;padding:6px 7px 7px;font:11px/1.35 ui-monospace,"Cascadia Mono",Consolas,monospace;color:rgb(var(--pc));text-shadow:0 0 4px rgba(0,229,255,.4);
+  box-shadow:inset 0 0 18px #000,0 0 10px rgba(0,229,255,.05);position:relative;overflow:hidden}
+#minfo::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.18) 2px 3px)}
+#minfo .mi-top{display:flex;justify-content:space-between;align-items:baseline;letter-spacing:.14em;padding-bottom:5px;flex:none}
+#minfo .mi-top b{font-weight:700}#minfo .mi-top span{font-size:10px;color:var(--mg);text-shadow:0 0 4px #ff00aa66}
+#minfo .mi-scroll{flex:1;min-height:0;overflow:hidden auto;scrollbar-width:thin;scrollbar-color:rgba(0,229,255,.45) rgba(0,229,255,.06);padding-right:3px}
+#minfo .mi-scroll::-webkit-scrollbar{width:6px}#minfo .mi-scroll::-webkit-scrollbar-track{background:rgba(0,229,255,.06);border-radius:3px}
+#minfo .mi-scroll::-webkit-scrollbar-thumb{background:rgba(0,229,255,.45);border-radius:3px;box-shadow:0 0 6px rgba(0,229,255,.5)}
+#minfo .mi-head{display:grid;grid-template-columns:auto minmax(0,1fr);gap:9px;align-items:start;padding-bottom:6px;border-bottom:1px solid rgba(0,229,255,.2)}
+/* the thumbnail window: the module's own panel, a scan line sweeping it, a soft breathing glow */
+#minfo .mi-thumb{position:relative;width:54px;height:96px;border:1px solid rgba(0,229,255,.45);border-radius:2px;background:#061014;overflow:hidden;
+  box-shadow:0 0 8px rgba(0,229,255,.25);animation:mithumb 3.2s ease-in-out infinite}
+#minfo .mi-thumb img{width:100%;height:100%;object-fit:contain;display:block;filter:saturate(1.1) contrast(1.05)}
+#minfo .mi-thumb i{position:absolute;left:0;right:0;height:14px;top:-14px;background:linear-gradient(180deg,transparent,rgba(0,229,255,.28),transparent);animation:miscan 2.4s linear infinite}
+#minfo .mi-thumb s{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:15px;font-weight:700;color:rgba(0,229,255,.6)}
+@keyframes miscan{to{top:100%}}
+@keyframes mithumb{50%{box-shadow:0 0 14px rgba(0,229,255,.45)}}
+#minfo .mi-name{font-size:14px;color:var(--tx);letter-spacing:.03em;line-height:1.2;word-break:break-word}
+#minfo .mi-sub{font-size:10px;color:rgba(0,229,255,.6);margin-top:2px}
+#minfo .mi-tags{display:flex;flex-wrap:wrap;gap:3px;margin-top:6px}
+#minfo .mi-tags span{font-size:10px;padding:0 5px;border:1px solid rgba(0,229,255,.3);border-radius:2px}#minfo .mi-tags span em{font-style:normal;color:var(--mg)}
+#minfo h5{margin:7px 0 2px;font-size:9px;font-weight:500;letter-spacing:.16em;color:rgba(0,229,255,.55)}
+#minfo .mi-j{display:grid;grid-template-columns:9px minmax(0,1fr);gap:6px;align-items:start;padding:2px 2px;border-radius:2px;cursor:pointer}
+#minfo .mi-j i{width:8px;height:8px;margin-top:3px;border-radius:50%;box-shadow:0 0 5px currentColor}
+#minfo .mi-j span{white-space:normal;overflow-wrap:anywhere;color:rgba(0,229,255,.85)}   /* wraps: nothing hidden in the narrow column */
+#minfo .mi-j b{font-weight:500;color:var(--tx)}#minfo .mi-j em{font-style:normal;color:rgba(0,229,255,.45)}
+#minfo .mi-j:hover{background:rgba(0,229,255,.1)}#minfo .mi-j.on{background:rgba(255,0,170,.16)}#minfo .mi-j.on b{color:var(--mg)}
+#minfo .mi-none{padding:14px 2px;color:rgba(0,229,255,.5);letter-spacing:.06em;line-height:1.6}
+#minfo .mi-none b{color:rgba(0,229,255,.8);font-weight:500;animation:beat 1.6s ease-in-out infinite}
+#pinfo #patch-list h4{cursor:pointer}#pinfo #patch-list h4:hover{color:var(--mg)}
+/* PATCH OLED: the patch on the map, in an OLED like TRACKS but in the patch page's cyan / magenta */
+#patch-info{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--line);background:#070b10;padding:8px}
+#pinfo{--pc:0,229,255;flex:1;min-height:0;display:flex;flex-direction:column;background:#02080b;border:1px solid rgba(0,229,255,.32);border-radius:3px;
+  padding:7px 8px;font:11px/1.35 ui-monospace,"Cascadia Mono",Consolas,monospace;color:rgb(var(--pc));text-shadow:0 0 4px rgba(0,229,255,.4);
+  box-shadow:inset 0 0 18px #000,0 0 10px rgba(0,229,255,.05);position:relative;overflow:hidden}
+#pinfo::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.18) 2px 3px)}
+#pinfo .pi-top{display:flex;justify-content:space-between;align-items:baseline;letter-spacing:.14em;padding-bottom:4px}
+#pinfo .pi-top b{font-weight:700}#pinfo .pi-top span{font-size:10px;color:var(--mg);text-shadow:0 0 4px #ff00aa66}
+#pinfo .pi-name{font-size:14px;color:var(--tx);letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-bottom:4px}
+#pinfo .pi-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:5px 0;border-top:1px solid rgba(0,229,255,.2);border-bottom:1px solid rgba(0,229,255,.2)}
+#pinfo .pi-stats div{display:flex;flex-direction:column}#pinfo .pi-stats i{font-style:normal;font-size:9px;letter-spacing:.14em;color:rgba(0,229,255,.55)}
+#pinfo .pi-stats b{font-size:16px;font-weight:700;color:rgb(var(--pc))}#pinfo .pi-stats b.mg{color:var(--mg);text-shadow:0 0 4px #ff00aa66}
+#pinfo .pi-file{font-size:10px;color:rgba(0,229,255,.55);padding:4px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#pinfo .pi-mods{display:flex;flex-wrap:wrap;gap:3px;padding:3px 0 6px}
+#pinfo .pi-mods span{font-size:10px;padding:0 5px;border:1px solid rgba(0,229,255,.3);border-radius:2px;color:rgba(0,229,255,.85)}
+#pinfo .pi-mods span em{font-style:normal;color:var(--mg)}
+#pinfo #patch-list{flex:1;min-height:0;border:0;background:transparent;border-top:1px solid rgba(0,229,255,.2)}
+#pinfo #patch-list h4{padding:6px 2px 2px;color:rgba(0,229,255,.5)}
+#pinfo #patch-list div{padding:2px;color:rgba(0,229,255,.8)}
+#pinfo #patch-list b{color:var(--tx)}#pinfo #patch-list em{color:rgba(0,229,255,.45)}
+#pinfo #patch-list div:hover,#pinfo #patch-list div.on{background:rgba(0,229,255,.1);color:var(--tx)}
+#sbank{--am:0,229,255;margin:8px;padding:6px 7px 7px;background:#02080b;border:1px solid rgba(0,229,255,.32);border-radius:3px;
+  font:11px/1 ui-monospace,"Cascadia Mono",Consolas,monospace;color:rgb(var(--am));box-shadow:inset 0 0 18px #000,0 0 10px rgba(0,229,255,.05);
+  text-shadow:0 0 4px rgba(0,229,255,.4);user-select:none;position:relative;overflow:hidden}
 #sbank::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.18) 2px 3px)}
 #sbank .sb-head{display:flex;gap:7px;align-items:stretch;margin-bottom:5px}
 #sbank .sb-hl{flex:1;min-width:0}#sbank .sb-hl .sb-banks{margin-bottom:0}
 /* GENERATE: a square OLED key, lit amber; it pulses while a patch is being made */
-#sbank #gen-btn{flex:none;width:44px;height:44px;aspect-ratio:1;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
-  background:rgba(255,112,15,.92);color:#140a02;border:1px solid #ff9a3a;text-shadow:none;border-radius:3px;box-shadow:0 0 10px rgba(255,120,20,.35)}
+#sbank #gen-btn{flex:none;width:40px;height:40px;aspect-ratio:1;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  background:#ff00aa;color:#12000a;border:1px solid #ff5ccc;text-shadow:none;border-radius:3px;box-shadow:0 0 12px rgba(255,0,170,.45)}
 #sbank #gen-btn i{font-style:normal;font-size:13px;font-weight:700;letter-spacing:.06em;line-height:1}
 #sbank #gen-btn s{text-decoration:none;font-size:7px;letter-spacing:.14em;line-height:1}
-#sbank #gen-btn:hover{box-shadow:0 0 16px rgba(255,140,40,.7)}
+#sbank #gen-btn:hover{box-shadow:0 0 18px rgba(255,0,170,.8)}
 #sbank #gen-btn:disabled{cursor:wait;animation:genpulse .6s ease-in-out infinite alternate}
-@keyframes genpulse{from{background:rgba(255,112,15,.92)}to{background:#281908;color:rgb(255,190,90)}}
+@keyframes genpulse{from{background:#ff00aa}to{background:#06161b;color:#00e5ff}}
 #sbank .sb-top{display:flex;justify-content:space-between;align-items:baseline;padding:0 1px 5px;letter-spacing:.14em}
 #sbank .sb-top b{font-weight:700}#sbank .sb-top span{color:rgba(var(--am),.55);font-size:10px}
-#sbank .sb-banks{display:grid;grid-template-columns:repeat(8,1fr);gap:3px;margin-bottom:5px}
+#sbank .sb-banks{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;margin-bottom:5px}
 #sbank button{font:inherit;font-size:10px;letter-spacing:.08em;cursor:pointer;border-radius:2px;padding:2px 0;
-  background:#281908;color:rgba(var(--am),.8);border:1px solid rgba(255,180,90,.3);text-shadow:inherit}
-#sbank button:hover{border-color:rgba(255,180,90,.7)}
-#sbank button.on{background:rgba(255,112,15,.92);color:#140a02;text-shadow:none;border-color:#ff9a3a}
+  background:#06161b;color:rgba(var(--am),.8);border:1px solid rgba(0,229,255,.3);text-shadow:inherit}
+#sbank button:hover{border-color:rgba(0,229,255,.7)}
+#sbank button.on{background:#ff00aa;color:#12000a;text-shadow:none;border-color:#ff5ccc}
 #sbank button.dot{position:relative}#sbank button.dot::after{content:"";position:absolute;top:2px;right:3px;width:3px;height:3px;border-radius:50%;background:rgb(var(--am))}
-#sbank button.on.dot::after{background:#140a02}
-#sbank .sb-list{border-top:1px solid rgba(255,180,90,.2);border-bottom:1px solid rgba(255,180,90,.2);padding:2px 0}
-#sbank .sb-spot{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:6px;padding:2px 3px;line-height:13px;cursor:pointer;border-radius:2px}
+#sbank button.on.dot::after{background:#12000a}
+#sbank .sb-list{border-top:1px solid rgba(0,229,255,.2);border-bottom:1px solid rgba(0,229,255,.2);padding:2px 0}
+#sbank .sb-spot{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:5px;padding:2px 3px;line-height:13px;cursor:pointer;border-radius:2px}
 #sbank .sb-spot i{font-style:normal;color:rgba(var(--am),.5)}
 #sbank .sb-spot span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 #sbank .sb-spot em{font-style:normal;color:rgba(var(--am),.55);font-size:10px}
 #sbank .sb-spot.empty span{color:rgba(var(--am),.3);letter-spacing:.1em}
 #sbank .sb-spot.empty{cursor:default}
-#sbank .sb-spot:not(.empty):hover{background:rgba(255,160,60,.1)}
-#sbank .sb-spot.cur{background:rgba(255,112,15,.18)}
+#sbank .sb-spot:not(.empty):hover{background:rgba(0,229,255,.1)}
+#sbank .sb-spot.cur{background:rgba(255,0,170,.16)}
 #sbank .sb-spot.gone span{text-decoration:line-through;color:rgba(var(--am),.45)}
 #sbank.saving .sb-spot{cursor:pointer;animation:sbflash .7s steps(2,jump-none) infinite}
-#sbank.saving .sb-spot:hover{animation:none;background:rgba(255,112,15,.9);color:#140a02;text-shadow:none}
-#sbank.saving .sb-spot:hover i,#sbank.saving .sb-spot:hover em,#sbank.saving .sb-spot:hover span{color:#140a02}
+#sbank.saving .sb-spot:hover{animation:none;background:#ff00aa;color:#12000a;text-shadow:none}
+#sbank.saving .sb-spot:hover i,#sbank.saving .sb-spot:hover em,#sbank.saving .sb-spot:hover span{color:#12000a}
 #sbank.clearing .sb-spot:not(.empty){cursor:pointer;color:#ff5a3c;animation:sbflash .7s steps(2,jump-none) infinite}
 #sbank.clearing .sb-spot.arm{animation:sbflash .18s steps(2,jump-none) infinite;background:rgba(255,60,40,.25)}
 @keyframes sbflash{0%{opacity:1}100%{opacity:.25}}
@@ -430,7 +486,7 @@ header button:hover,.modes button:hover,footer .nav:hover{box-shadow:0 0 10px #0
 <footer><button type="button" class="nav" id="s-prev" title="Previous (←)">&lsaquo;</button><div id="strip"></div><button type="button" class="nav" id="s-next" title="Next (→)">&rsaquo;</button><span id="s-count"></span></footer>
 <div id="patch-bg"></div>
 <div id="patch" role="dialog" aria-modal="true" aria-label="SynTHBloK patches"><i class="scr"></i><i class="scr"></i><i class="scr"></i><i class="scr"></i><div class="head"><span><span class="pbrand"><s>SynTHBloK</s><i>PATCHES</i></span><span class="pt">PATCHES</span> <b id="patch-at">waiting for tools/patch_feed.json</b></span><span class="acts"><button type="button" id="rack-open" hidden title="Open this patch in VCV Rack">OPEN IN RACK</button><button type="button" id="patch-close" aria-label="Close">&times;</button></span></div>
-  <div id="patch-body"><div id="patch-pick"></div><div id="patch-map"><div id="patch-zoom"><button type="button" data-z="1.25" title="Zoom in">+</button><button type="button" data-z="0.8" title="Zoom out">&minus;</button><button type="button" data-z="0" title="Fit">&#9634;</button></div></div><div id="patch-side"><div id="sbank" aria-label="Save bank"><div class="sb-head"><div class="sb-hl"><div class="sb-top"><b>TRACKS</b><span id="sb-at">BANK 1 · 0/16</span></div><div class="sb-banks" id="sb-banks"></div></div><button type="button" id="gen-btn" title="Generate a new patch (any style) and show it on the map; Rack is left alone"><i>GEN</i><s>ERATE</s></button></div><div class="sb-list" id="sb-list"></div><div class="sb-soft"><button type="button" id="sb-save" title="Save the patch on the map: click, then pick a spot">SAVE</button><button type="button" id="sb-clear" title="Delete a saved spot: click, pick a spot, click it again">CLEAR</button></div><div class="sb-msg" id="sb-msg">pick a bank · SAVE keeps the patch on the map</div></div><div id="patch-list"></div></div></div></div>
+  <div id="patch-body"><div id="patch-pick" hidden></div><div id="patch-map"><div id="patch-zoom"><button type="button" data-z="1.25" title="Zoom in">+</button><button type="button" data-z="0.8" title="Zoom out">&minus;</button><button type="button" data-z="0" title="Fit">&#9634;</button></div></div><div id="patch-info"><div id="pinfo"><div class="pi-top"><b>PATCH</b><span id="pi-kind">-</span></div><div class="pi-name" id="pi-name">no patch on the map</div><div class="pi-stats"><div><i>MODULES</i><b id="pi-m">-</b></div><div><i>CABLES</i><b id="pi-c" class="mg">-</b></div><div><i>ROWS</i><b id="pi-r">-</b></div></div><div class="pi-file" id="pi-file"></div><div class="pi-mods" id="pi-mods"></div><div id="patch-list"></div></div></div><div id="patch-side"><div id="sbank" aria-label="Save bank"><div class="sb-head"><div class="sb-hl"><div class="sb-top"><b>TRACKS</b><span id="sb-at">BANK 1 · 0/16</span></div><div class="sb-banks" id="sb-banks"></div></div><button type="button" id="gen-btn" title="Generate a new patch (any style) and show it on the map; Rack is left alone"><i>GEN</i><s>ERATE</s></button></div><div class="sb-list" id="sb-list"></div><div class="sb-soft"><button type="button" id="sb-save" title="Save the patch on the map: click, then pick a spot">SAVE</button><button type="button" id="sb-clear" title="Delete a saved spot: click, pick a spot, click it again">CLEAR</button></div><div class="sb-msg" id="sb-msg">pick a bank · SAVE keeps the patch on the map</div></div><div id="minfo" aria-label="Module"><div class="mi-top"><b>MODULE</b><span id="mi-kind">-</span></div><div class="mi-scroll" id="mi-body"></div></div></div></div></div>
 <div id="ro"><div class="box"><div class="top"><span>OPEN IN <b>VCV RACK</b></span><button type="button" class="x" title="Close">&times;</button></div>
   <div class="mid"><h3 id="ro-name"></h3><div class="sub" id="ro-sub"></div><div class="pv" id="ro-pv"></div><div class="mods" id="ro-mods"></div>
   <div class="note">Rack closes the patch that is open now and opens this one. Rack saves what was open first, and a copy goes to <b>Rack2/autosave-before-open</b>.</div>
@@ -1118,11 +1174,24 @@ function drawPatch(fresh, refit) {
   map.insertAdjacentHTML('afterbegin', svg + plugs + '</svg>');
   if (keep) map.appendChild(keep);
   if (refit || !pView || pView.W !== W || pView.H !== H) fitView(W, H); else applyView();
+  // the PATCH OLED: what is on the map
+  {
+    const live = !!pShown.live, gen = !live && /^GEN_/.test(d.file || '');
+    document.getElementById('pi-kind').textContent = live ? 'LIVE · RACK NOW' : gen ? 'GENERATED' : d.lib === 'SynTHBloK' ? 'SYNTHBLOK PATCH' : "RACK'S PATCHES";
+    document.getElementById('pi-name').textContent = live ? 'Live patch' : String(d.name || d.file).replace(/_/g, ' ');
+    document.getElementById('pi-m').textContent = d.modules.length;
+    document.getElementById('pi-c').textContent = d.cables.length;
+    document.getElementById('pi-r').textContent = ys.length;
+    document.getElementById('pi-file').textContent = live ? `Rack autosave · ${time(d.t)}` : `${d.lib === 'SynTHBloK' ? 'patches/' : "Rack's patches/"}${d.file} · ${time(d.t)}`;
+    const count = {};
+    d.modules.forEach(m => { const n = pShort(m.name); count[n] = (count[n] || 0) + 1; });
+    document.getElementById('pi-mods').innerHTML = Object.keys(count).sort().map(n => `<span>${esc(n)}${count[n] > 1 ? ` <em>×${count[n]}</em>` : ''}</span>`).join('');
+  }
   // the list, grouped by the module each cable plugs into
   const groups = {};
   d.cables.forEach((c, k) => { if (mod[c.to] && mod[c.from]) (groups[c.to] = groups[c.to] || []).push(k); });
   const order = Object.keys(groups).sort((p, q) => pShort(mod[p].name).localeCompare(pShort(mod[q].name)));
-  document.getElementById('patch-list').innerHTML = order.map(id => `<h4>INTO ${esc(pShort(mod[id].name).toUpperCase())}</h4>` +
+  document.getElementById('patch-list').innerHTML = order.map(id => `<h4 data-id="${id}" title="Show this module">INTO ${esc(pShort(mod[id].name).toUpperCase())}</h4>` +
     groups[id].map(k => {
       const c = d.cables[k];
       return `<div data-k="${k}"${fresh.has(pKey(c)) ? ' class="in"' : ''} title="${esc(c.fn)} → ${esc(c.tn)}"><i style="background:${esc(c.color)}"></i>` +
@@ -1184,6 +1253,7 @@ function pickPatch(sel) {
   const map = document.getElementById('patch-map'), d = current();
   map.classList.toggle('sel', !!sel);
   document.querySelectorAll('#patch-map .on, #patch-list .on').forEach(e => e.classList.remove('on'));
+  drawModInfo();
   if (!sel || !d) return;
   const ks = sel.k !== undefined ? [sel.k] : d.cables.map((c, k) => (c.from == sel.id || c.to == sel.id) ? k : -1).filter(k => k >= 0);
   ks.forEach(k => {
@@ -1193,6 +1263,39 @@ function pickPatch(sel) {
   });
   if (sel.k !== undefined) { const r = document.querySelector(`#patch-list [data-k="${sel.k}"]`); if (r && sel.scroll) r.scrollIntoView({ block: 'nearest' }); }
 }
+// MODULE OLED: the picked module (a picked cable shows the module it plugs into, that cable lit)
+function drawModInfo() {
+  const body = document.getElementById('mi-body'), kind = document.getElementById('mi-kind'), d = current(), sel = patchSel;
+  if (!body) return;
+  const none = msg => { kind.textContent = '-'; body.innerHTML = `<div class="mi-none">${msg}</div>`; };
+  if (!d) return none('no patch on the map');
+  if (!sel) return none('<b>&gt;</b> click a module in the viewer,<br>&nbsp; a cable, or an INTO name in the list');
+  const cable = sel.k !== undefined ? d.cables[sel.k] : null;
+  const id = cable ? cable.to : sel.id;
+  const m = d.modules.find(x => x.id == id);
+  if (!m) return none('that module is not in this patch');
+  const byId = {}; d.modules.forEach(x => byId[x.id] = x);
+  const ys = [...new Set(d.modules.map(x => x.y))].sort((a, b) => a - b);
+  const ins = [], outs = [];
+  d.cables.forEach((c, k) => {
+    if (c.to == m.id && byId[c.from]) ins.push({ k, c, j: pJack(c.tn), o: pShort(byId[c.from].name), oj: pJack(c.fn) });
+    if (c.from == m.id && byId[c.to]) outs.push({ k, c, j: pJack(c.fn), o: pShort(byId[c.to].name), oj: pJack(c.tn) });
+  });
+  const row = (x, dir) => `<div class="mi-j${cable && x.k === sel.k ? ' on' : ''}" data-k="${x.k}" title="${esc(x.c.fn)} → ${esc(x.c.tn)}"><i style="background:${esc(x.c.color)};color:${esc(x.c.color)}"></i>` +
+    `<span><b>${esc(x.j)}</b> <em>${dir}</em> ${esc(x.o)} <em>·</em> ${esc(x.oj)}</span></div>`;
+  const initials = pShort(m.name).replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/).map(w => w[0] || '').join('').slice(0, 3).toUpperCase();
+  kind.textContent = cable ? 'CABLE INTO' : 'SELECTED';
+  body.innerHTML = `<div class="mi-head"><div class="mi-thumb">${m.img ? `<img src="${esc(m.img)}" alt="">` : `<s>${esc(initials)}</s>`}<i></i></div>` +
+    `<div><div class="mi-name">${esc(pShort(m.name))}</div><div class="mi-sub">${esc(m.plugin)}</div>` +
+    `<div class="mi-tags"><span>${m.w} HP</span><span>ROW <em>${ys.indexOf(m.y) + 1}</em></span><span>IN <em>${ins.length}</em></span><span>OUT <em>${outs.length}</em></span></div></div></div>` +
+    `<h5>IN · ${ins.length} CONNECTED</h5>` + (ins.length ? ins.map(x => row(x, '←')).join('') : '<div class="mi-none" style="padding:2px">nothing patched in</div>') +
+    `<h5>OUT · ${outs.length} CONNECTED</h5>` + (outs.length ? outs.map(x => row(x, '→')).join('') : '<div class="mi-none" style="padding:2px">nothing patched out</div>');
+  if (cable) { const r = body.querySelector('.mi-j.on'); if (r) r.scrollIntoView({ block: 'nearest' }); }
+}
+document.getElementById('mi-body').onclick = e => {   // a jack row picks its cable
+  const r = e.target.closest('[data-k]'); if (!r) return;
+  pickPatch({ k: +r.dataset.k, scroll: true });
+};
 // OPEN IN RACK: shown over a saved patch; the pop-up previews it, then asks tools/rack_open_server.py to open it
 const RACK_OPEN = 'http://127.0.0.1:8767';
 function syncOpenBtn() { document.getElementById('rack-open').hidden = pShown.live; }
@@ -1287,6 +1390,8 @@ document.addEventListener('keydown', e => {
   else closePatches();
 });
 document.getElementById('patch-list').onclick = e => {
+  const h = e.target.closest('h4[data-id]');   // an INTO heading picks its module
+  if (h) { pickPatch(patchSel && patchSel.id == h.dataset.id ? null : { id: h.dataset.id }); return; }
   const r = e.target.closest('[data-k]'); if (!r) return;
   pickPatch(patchSel && patchSel.k === +r.dataset.k ? null : { k: +r.dataset.k });
 };

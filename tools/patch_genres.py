@@ -86,10 +86,63 @@ genre('Trip-Hop', bpm=(80, 88), scales=[5, 0], keys=[0, 2, 7], prog=[[0, 5, 3, 4
       drums=['20000010', '00002000', '00000000', '10101010', '00000001', '00000000', '00000000', '00000000'],
       fill={1: '00002010'}, lead='10000100', bass='10000010', quad=['chords', 'bass'],
       rev=0.5, dly=0.35, drive=0.3, bright=0.35, glitch=True)
+# --- generated from RANDROYD (src/SynTHBloKRandroyd.cpp): the industrial / bass / psy lanes, same grooves and harmony ---
+genre('Industrial', bpm=(100, 112), scales=[3, 5], keys=[4, 9, 2], prog=[[0, 1, 0, 5], [0, 0, 1, 6]],
+      drums=['20000010', '00002000', '00002000', '10111011', '00000000', '00000100', '10010010', '01000001'],
+      fill={1: '00000222', 5: '00001110'}, lead='10010000', bass='10010010', quad=['bass', 'lead'],
+      rev=0.30, dly=0.25, drive=0.60, bright=0.40, glitch=True)
+genre('Hard Techno', bpm=(140, 150), scales=[3, 0], keys=[9, 5, 7], prog=[[0, 0, 1, 0], [0, 6, 0, 1]],
+      drums=['20002000', '00000000', '00002000', '01110111', '00100010', '00000000', '10101010', '00010001'],
+      fill={0: '00000022', 5: '00001111'}, lead='10001000', bass='01110111', quad=['bass', 'lead'],
+      rev=0.25, dly=0.20, drive=0.55, bright=0.45, glitch=True)
+genre('Industrial Techno', bpm=(130, 138), scales=[3, 5], keys=[2, 4, 9], prog=[[0, 0, 0, 1], [0, 1, 0, 6]],
+      drums=['20002000', '00001000', '00000000', '01010101', '00100010', '00100000', '10011010', '01000100'],
+      fill={1: '00001011', 6: '10101111'}, lead='10000100', bass='01010101', quad=['bass', 'chords'],
+      rev=0.40, dly=0.35, drive=0.50, bright=0.35, glitch=True)
+genre('Acid Techno', bpm=(136, 145), scales=[0, 3], keys=[9, 4, 7], prog=[[0, 0, 6, 0], [0, 1, 0, 6]],
+      drums=['20002000', '00000000', '00002000', '11011101', '00100010', '00000000', '00000000', '00000100'],
+      fill={2: '00002022', 5: '00000111'}, lead='11011011', bass='10110110', quad=['acid'],
+      rev=0.25, dly=0.35, drive=0.45, bright=0.55, glitch=False)
+genre('Hardcore', bpm=(165, 180), scales=[5, 0], keys=[9, 4, 2], prog=[[0, 5, 3, 4], [0, 6, 5, 4]],
+      drums=['20002000', '00000000', '00002000', '10101010', '00100010', '00000000', '00000000', '00010001'],
+      fill={0: '00002222', 1: '00001111'}, lead='10101010', bass='10101010', quad=['lead', 'bass'],
+      rev=0.20, dly=0.15, drive=0.80, bright=0.60, glitch=True)
+genre('Dubstep', bpm=(70, 75), scales=[0, 3, 5], keys=[5, 2, 7], prog=[[0, 0, 5, 6], [0, 6, 5, 4]],
+      drums=['20000000', '00002000', '00002000', '10111010', '00000010', '00000000', '00100000', '00000100'],
+      fill={1: '00000222', 5: '00001110'}, lead='10000010', bass='11011010', quad=['bass', 'lead'],
+      rev=0.35, dly=0.30, drive=0.55, bright=0.45, glitch=True)
+genre('Mid-Tempo', bpm=(98, 108), scales=[3, 0], keys=[1, 4, 6], prog=[[0, 0, 1, 0], [0, 6, 5, 6]],
+      drums=['20000010', '00002000', '00002000', '10101010', '00000000', '00000000', '00000100', '01000000'],
+      fill={1: '00000202', 7: '00001111'}, lead='10000100', bass='10010010', quad=['bass', 'lead'],
+      rev=0.35, dly=0.30, drive=0.50, bright=0.35, glitch=True)
+genre('Psy Bass', bpm=(74, 80), scales=[2, 7], keys=[7, 2, 9], prog=[[0, 3, 4, 3], [0, 6, 5, 6]],
+      drums=['20000010', '00002000', '00000000', '10111011', '00000010', '00100000', '00010010', '01000101'],
+      fill={5: '00000110', 6: '00001111'}, lead='10110110', bass='10010110', quad=['lead', 'chords'],
+      rev=0.50, dly=0.45, drive=0.30, bright=0.70, glitch=True)
+genre('Psydub', bpm=(70, 78), scales=[3, 2], keys=[2, 9, 4], prog=[[0, 0, 1, 0], [0, 6, 0, 5]],
+      drums=['20000000', '00002000', '00000000', '10101010', '00000010', '00000100', '00100010', '00010000'],
+      fill={5: '00001101'}, lead='00100110', bass='10010100', quad=['chords', 'bass'],
+      rev=0.65, dly=0.65, drive=0.15, bright=0.45, glitch=False)
+genre('Psytrance', bpm=(140, 146), scales=[3, 5], keys=[4, 9, 7], prog=[[0, 0, 0, 1], [0, 1, 0, 6]],
+      drums=['20002000', '00000000', '00000000', '01110111', '00100010', '00000000', '00010001', '01000100'],
+      fill={2: '00002020', 5: '00001111'}, lead='10110101', bass='01110111', quad=['bass', 'lead'],
+      rev=0.45, dly=0.45, drive=0.25, bright=0.60, glitch=False)
+genre('Jungle', bpm=(80, 88), scales=[0, 2], keys=[9, 2, 4], prog=[[0, 5, 3, 4], [0, 3, 6, 4]],
+      drums=['20100000', '00002001', '00000000', '10101010', '00000010', '00000100', '00000000', '00000000'],
+      fill={0: '00001000', 1: '00102022'}, lead='10000100', bass='10000010', quad=['bass', 'chords'],
+      rev=0.35, dly=0.25, drive=0.35, bright=0.45, glitch=True)
+genre('Neurofunk', bpm=(85, 88), scales=[0, 3, 5], keys=[5, 7, 2], prog=[[0, 0, 6, 5], [0, 1, 0, 6]],
+      drums=['20000100', '00002000', '00000000', '11111111', '00000000', '00000000', '00100000', '01000010'],
+      fill={1: '00200222', 7: '00001111'}, lead='10010000', bass='10110100', quad=['bass', 'lead'],
+      rev=0.30, dly=0.30, drive=0.50, bright=0.40, glitch=True)
+genre('Modular Techno', bpm=(122, 132), scales=[2, 0, 7], keys=[0, 7, 2], prog=[[0, 3, 4, 3], [0, 5, 3, 4]],
+      drums=['20002000', '00000000', '00001000', '10110110', '00100000', '01000100', '10010000', '00101001'],
+      fill={5: '00000111', 7: '11011011'}, lead='10100110', bass='10010010', quad=['lead', 'chords'],
+      rev=0.40, dly=0.45, drive=0.25, bright=0.50, glitch=False)
 NAMES = list(G)
 
 def pick(rng, n, pent_safe, style=None):
-    """the genre for patch n (they take turns, so all 16 show up; or the one named) and its key, scale, tempo
+    """the genre for patch n (they take turns, so every genre shows up; or the one named) and its key, scale, tempo
     and progression"""
     g = dict(G[style if style in G else NAMES[(n - 1) % len(NAMES)]])
     sc = rng.choice(g['scales'])
