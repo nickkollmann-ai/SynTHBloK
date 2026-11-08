@@ -161,13 +161,15 @@ main{display:grid;grid-template-columns:minmax(260px,.7fr) minmax(0,1fr) minmax(
 /* top row: TRACKS + MODULE side by side across the page; below: the viewer and the PATCH OLED */
 /* TRACKS runs the full height on the left; MODULE spans the top of the rest; viewer + PATCH below it */
 #patch-top{display:contents}
-#patch-top #patch-side{grid-column:1;grid-row:1/3;min-height:0;overflow:hidden auto;border-right:1px solid var(--line)!important;background:#070b10!important}
-#patch-top #minfo{grid-column:2/4;grid-row:1;min-width:0;height:316px;margin:8px}
-#patch-map{grid-column:2;grid-row:2}
-#patch-info{grid-column:3;grid-row:2}
+/* TRACKS + MODULE share a short top row; PATCH info runs the full height on the right; the map takes the rest */
+#patch-top #patch-side{grid-column:1;grid-row:1;height:340px;min-height:0;overflow:hidden;border-right:1px solid var(--line)!important;border-bottom:1px solid var(--line)!important;background:#070b10!important}
+#patch-top #patch-side #sbank .sb-list{min-height:0;overflow:hidden auto}
+#patch-top #minfo{grid-column:2;grid-row:1;min-width:0;height:324px;margin:8px}
+#patch-map{grid-column:1/3;grid-row:2}
+#patch-info{grid-column:3;grid-row:1/3}
 #patch-side{border:0!important;background:transparent!important}
 #patch-pick{display:none!important}   /* the saved-patch list is gone: patches come from TRACKS, GENERATE and PATCH MAP */
-@media(max-width:1100px){#patch-body{grid-template-columns:230px minmax(0,1fr);grid-template-rows:auto minmax(320px,1fr) auto;overflow:auto}#patch-top #minfo{grid-column:2}#patch-map{grid-column:2}#patch-info{grid-column:1/-1;grid-row:3;max-height:420px}#patch-top #patch-side{grid-row:1/3}}
+@media(max-width:1100px){#patch-body{grid-template-columns:230px minmax(0,1fr);grid-template-rows:auto minmax(320px,1fr) auto;overflow:auto}#patch-top #minfo{grid-column:2}#patch-map{grid-column:1/-1}#patch-info{grid-column:1/-1;grid-row:3;max-height:420px}#patch-top #patch-side{grid-row:1}}
 #patch-pick{overflow:hidden auto;scrollbar-width:thin;border-right:1px solid var(--line);background:#070b10;font-size:11px}
 #patch-pick h4{margin:0;padding:8px 12px 3px;font-weight:500;font-size:10px;letter-spacing:.14em;color:var(--mut)}
 #patch-pick div{padding:5px 12px;cursor:pointer;color:#9fb6c0;border-left:2px solid transparent;line-height:15px}

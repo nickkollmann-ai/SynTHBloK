@@ -5,7 +5,7 @@
 //    case, carbon, rack ears. Each has its frame, rails, side depth and shadow, drawn (no image files), and
 //    more can be added in Rack's user folder (SynTHBloK/cases.json)
 //  - the patch title above the first case
-// One BACKDROP dresses the rack; a second one stays quiet (its panel says so). Everything is in the menu.
+// One BACKDROP dresses the rack; a second one stays quiet (its light turns red). Everything is in the menu.
 #include "plugin.hpp"
 #include "OledUi.hpp"
 #include <osdialog.h>
@@ -504,73 +504,17 @@ static void* gOwner = NULL;
 } // namespace
 
 // ---------------------------------------------------------------------------------------------------------
-// THE PANEL: 4 HP, drawn (no SVG): dark, diamond plate, BACKDROP up the middle in amber
+// THE PANEL: res/SynTHBloKBackdrop.svg (tools/make_backdrop_panel.py), 6 HP, the SynTHBloK look. This widget
+// only adds the status light: amber while this BACKDROP dresses the rack, dim red if another one does.
 // ---------------------------------------------------------------------------------------------------------
 struct BackdropPanel : widget::Widget {
     SynTHBloKBackdrop* module = NULL;
     void* widget = NULL;
-    void draw(const DrawArgs& args) override {
-        NVGcontext* vg = args.vg;
-        float W = box.size.x, H = box.size.y;
-        nvgBeginPath(vg);
-        nvgRect(vg, 0, 0, W, H);
-        nvgFillColor(vg, nvgRGB(14, 12, 10));
-        nvgFill(vg);
-        // diamond plate, faint
-        nvgSave(vg);
-        nvgScissor(vg, 0, 0, W, H);
-        nvgBeginPath(vg);
-        float s = 9.f;
-        for (float y = 0; y < H + s; y += s)
-            for (float x = 0; x < W + s; x += s) {
-                bool alt = ((int) (y / s) + (int) (x / s)) & 1;
-                float cx = x + s * 0.5f, cy = y + s * 0.5f, a = s * 0.34f, b = s * 0.1f;
-                float dx = alt ? a : b, dy = alt ? b : a;
-                nvgMoveTo(vg, cx - dx, cy + dy); nvgLineTo(vg, cx + dx, cy - dy);
-            }
-        nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 14));
-        nvgStrokeWidth(vg, 1.2f);
-        nvgStroke(vg);
-        nvgRestore(vg);
-        // the frame
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, 2.5f, 2.5f, W - 5.f, H - 5.f, 3.f);
-        nvgStrokeColor(vg, nvgRGBA(255, 150, 40, 70));
-        nvgStrokeWidth(vg, 1.f);
-        nvgStroke(vg);
-        std::shared_ptr<window::Font> font = APP->window->uiFont;
-        if (!font) return;
-        nvgFontFaceId(vg, font->handle);
-        // the title on top
-        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
-        nvgFontSize(vg, 9.f);
-        nvgFillColor(vg, nvgRGB(230, 230, 230));
-        nvgText(vg, W * 0.5f, mm2px(5.f), "SynTHBloK", NULL);
-        nvgFontSize(vg, 7.f);
-        nvgFillColor(vg, oled::amber());
-        nvgText(vg, W * 0.5f, mm2px(8.4f), "BACKDROP", NULL);
-        // BACKDROP up the middle, big and faint
-        nvgSave(vg);
-        nvgTranslate(vg, W * 0.5f, H * 0.55f);
-        nvgRotate(vg, -M_PI / 2.f);
-        nvgFontSize(vg, 26.f);
-        nvgTextLetterSpacing(vg, 4.f);
-        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFillColor(vg, nvgRGBA(255, 150, 40, 60));
-        nvgText(vg, 0, 0, "BACKDROP", NULL);
-        nvgRestore(vg);
-        nvgTextLetterSpacing(vg, 0.f);
-        // the maker
-        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
-        nvgFontSize(vg, 6.f);
-        nvgFillColor(vg, nvgRGBA(255, 190, 90, 150));
-        nvgText(vg, W * 0.5f, H - mm2px(3.f), "NoiZee ToyZ", NULL);
-    }
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
         // the status light: amber while this BACKDROP dresses the rack, dim red if another one does
         bool mine = module && gOwner == widget;
-        float cx = box.size.x * 0.5f, cy = box.size.y - mm2px(8.f);
+        float cx = box.size.x * 0.5f, cy = mm2px(112.f);
         nvgBeginPath(args.vg);
         nvgCircle(args.vg, cx, cy, 6.f);
         nvgFillPaint(args.vg, nvgRadialGradient(args.vg, cx, cy, 1.f, 6.f, mine ? nvgRGBA(255, 160, 40, 200) : nvgRGBA(200, 40, 30, 120), nvgRGBA(0, 0, 0, 0)));
@@ -586,9 +530,7 @@ struct BackdropPanel : widget::Widget {
                 nvgFontSize(args.vg, 5.5f);
                 nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
                 nvgFillColor(args.vg, nvgRGB(200, 70, 50));
-                nvgText(args.vg, cx, cy - 8.f, "ANOTHER", NULL);
-                nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
-                nvgText(args.vg, cx, cy + 8.f, "IS ON", NULL);
+                nvgText(args.vg, cx, cy - 9.f, "ANOTHER IS ON", NULL);
             }
         }
     }
@@ -597,7 +539,7 @@ struct BackdropPanel : widget::Widget {
 struct SynTHBloKBackdropWidget : ModuleWidget {
     SynTHBloKBackdropWidget(SynTHBloKBackdrop* module) {
         setModule(module);
-        box.size = Vec(RACK_GRID_WIDTH * 4, RACK_GRID_HEIGHT);
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/SynTHBloKBackdrop.svg")));
         BackdropPanel* p = new BackdropPanel;
         p->box.size = box.size;
         p->module = module;
