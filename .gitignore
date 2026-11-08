@@ -26,3 +26,4 @@ tools/claude_thinking.json
 /singles/*/make.log
 jobs/
 tools/pc_stats.json
+site/
