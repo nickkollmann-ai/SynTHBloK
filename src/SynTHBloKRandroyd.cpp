@@ -43,17 +43,35 @@ static NVGcolor red(int a = 255) { return nvgRGBA(255, 90, 74, a); }
 
 // the 16 styles of tools/patch_genres.py (name, tempo range, first key, first scale)
 struct Genre { const char* name; int bpmLo, bpmHi, key, scale; };
-static const Genre GENRES[16] = {
+static const int NG = 29;   // genres: the first 16, then the industrial / bass / psy lanes
+static const Genre GENRES[NG] = {
     {"HOUSE", 122, 126, 9, 0}, {"DEEP HOUSE", 118, 122, 2, 2}, {"TECHNO", 128, 134, 5, 3}, {"ACID", 124, 130, 9, 3},
     {"TRANCE", 136, 140, 9, 0}, {"ELECTRO", 124, 130, 2, 3}, {"HIP-HOP", 86, 94, 1, 6}, {"TRAP", 68, 72, 6, 5},
     {"LO-FI", 74, 84, 0, 1}, {"SYNTHWAVE", 100, 110, 9, 0}, {"DRUM & BASS", 85, 88, 5, 0}, {"DUB", 70, 78, 9, 0},
-    {"AMBIENT", 66, 76, 2, 7}, {"FUNK", 108, 116, 4, 4}, {"AFROBEAT", 100, 108, 7, 4}, {"TRIP-HOP", 80, 88, 0, 5}};
+    {"AMBIENT", 66, 76, 2, 7}, {"FUNK", 108, 116, 4, 4}, {"AFROBEAT", 100, 108, 7, 4}, {"TRIP-HOP", 80, 88, 0, 5},
+    // industrial (NIN), hard techno (Surgeon), industrial techno (Ancient Methods), acid techno, hardcore
+    {"INDUSTRIAL", 100, 112, 4, 3}, {"HARD TECHNO", 140, 150, 9, 3}, {"INDUS TECHNO", 130, 138, 2, 3}, {"ACID TECHNO", 136, 145, 9, 0},
+    {"HARDCORE", 165, 180, 9, 5},
+    // bass music: dubstep wobble (Ganja White Night, half-time), mid-tempo (REZZ), psy bass (CloZee, Champagne Drip)
+    {"DUBSTEP", 70, 75, 5, 0}, {"MID-TEMPO", 98, 108, 1, 3}, {"PSY BASS", 74, 80, 7, 2},
+    // psy: psydub (OTT), psytrance (Shpongle's psy side); breaks: jungle, neurofunk (Dieselboy); modular techno
+    {"PSYDUB", 70, 78, 2, 3}, {"PSYTRANCE", 140, 146, 4, 3}, {"JUNGLE", 80, 88, 9, 0}, {"NEUROFUNK", 85, 88, 5, 0},
+    {"MODULAR TECH", 122, 132, 0, 2}};
+// each genre's lanes, for the generators: T techno-ish (rumble kick, rig drums), B broken beats, E echo / dub,
+// M boom bass, S sparse, W wobble (bass ratchets + glides), G gating / beat chop, X psy (lasers, rolls, fractal leads)
+enum { F_T = 1, F_B = 2, F_E = 4, F_M = 8, F_S = 16, F_W = 32, F_G = 64, F_X = 128 };
+static const int FLAGS[NG] = {
+    0, 0, F_T, F_T, 0, F_T, F_B | F_M, F_B | F_M, F_M, 0, F_B | F_M, F_E | F_M, F_E | F_S, F_B, F_B, F_B | F_E | F_M,
+    F_T | F_B | F_G, F_T | F_G, F_T | F_G, F_T, F_T | F_G,
+    F_B | F_M | F_W | F_G, F_B | F_M | F_W | F_G, F_B | F_E | F_X | F_W,
+    F_B | F_E | F_X, F_T | F_X, F_B | F_G, F_B | F_W | F_G, F_T | F_X};
+static inline bool has(int g, int f) { return g >= 0 && g < NG && (FLAGS[g] & f) != 0; }
 static const char* KEYS[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 static const char* SCALES[8] = {"MIN", "MAJ", "DORIAN", "PHRYG", "MIXO", "HARM MIN", "MIN PENT", "MAJ PENT"};
 // each genre's groove (tools/patch_genres.py): MTX-DRUM rows KICK SNARE CLAP CLOSED-HAT OPEN-HAT TOM METAL FM,
 // 8 sixteenths, '2' = accent; the fill adds to rows on pattern 4; reverb / delay / drive amounts; glitch styles
 struct GenreDrums { const char* rows[8]; const char* fill[8]; float rev, dly, drive; bool glitch; };
-static const GenreDrums GDRUMS[16] = {
+static const GenreDrums GDRUMS[NG] = {
     {{"20002000", "00000000", "00002000", "10101010", "00100010", "00000000", "00000000", "00000100"}, {"00000000", "00000001", "00000000", "00000000", "00000000", "00000110", "00000000", "00000000"}, 0.35f, 0.25f, 0.15f, false},  // House
     {{"20002000", "00000000", "00001000", "10111010", "00100010", "00000000", "00010010", "00000000"}, {"00000000", "00000000", "00001011", "00000000", "00000000", "00000000", "00000000", "00000000"}, 0.45f, 0.30f, 0.10f, false},  // Deep House
     {{"20002000", "00001000", "00000000", "01110111", "00100010", "00000000", "10001000", "00010001"}, {"00000000", "00001011", "00000000", "00000000", "00000000", "00000100", "00000000", "00000000"}, 0.30f, 0.30f, 0.30f, true},  // Techno
@@ -70,11 +88,24 @@ static const GenreDrums GDRUMS[16] = {
     {{"20100010", "00002000", "00000000", "11111111", "00100000", "00000000", "00000000", "00000000"}, {"00000000", "00002121", "00000000", "00000000", "00000000", "00000000", "00000000", "00000000"}, 0.25f, 0.15f, 0.20f, false},  // Funk
     {{"20000100", "00001001", "00000000", "10110110", "00000000", "00100100", "10010010", "00000000"}, {"00000000", "00000000", "00000000", "00000000", "00000000", "00000111", "00000000", "00000000"}, 0.30f, 0.20f, 0.15f, false},  // Afrobeat
     {{"20000010", "00002000", "00000000", "10101010", "00000001", "00000000", "00000000", "00000000"}, {"00000000", "00002010", "00000000", "00000000", "00000000", "00000000", "00000000", "00000000"}, 0.50f, 0.35f, 0.30f, true},  // Trip-Hop
+    {{"20000010", "00002000", "00002000", "10111011", "00000000", "00000100", "10010010", "01000001"}, {"00000000", "00000222", "00000000", "00000000", "00000000", "00001110", "00000000", "00000000"}, 0.30f, 0.25f, 0.60f, true},  // Industrial
+    {{"20002000", "00000000", "00002000", "01110111", "00100010", "00000000", "10101010", "00010001"}, {"00000022", "00000000", "00000000", "00000000", "00000000", "00001111", "00000000", "00000000"}, 0.25f, 0.20f, 0.55f, true},  // Hard Techno
+    {{"20002000", "00001000", "00000000", "01010101", "00100010", "00100000", "10011010", "01000100"}, {"00000000", "00001011", "00000000", "00000000", "00000000", "00000000", "10101111", "00000000"}, 0.40f, 0.35f, 0.50f, true},  // Industrial Techno
+    {{"20002000", "00000000", "00002000", "11011101", "00100010", "00000000", "00000000", "00000100"}, {"00000000", "00000000", "00002022", "00000000", "00000000", "00000111", "00000000", "00000000"}, 0.25f, 0.35f, 0.45f, false},  // Acid Techno
+    {{"20002000", "00000000", "00002000", "10101010", "00100010", "00000000", "00000000", "00010001"}, {"00002222", "00001111", "00000000", "00000000", "00000000", "00000000", "00000000", "00000000"}, 0.20f, 0.15f, 0.80f, true},  // Hardcore
+    {{"20000000", "00002000", "00002000", "10111010", "00000010", "00000000", "00100000", "00000100"}, {"00000000", "00000222", "00000000", "00000000", "00000000", "00001110", "00000000", "00000000"}, 0.35f, 0.30f, 0.55f, true},  // Dubstep
+    {{"20000010", "00002000", "00002000", "10101010", "00000000", "00000000", "00000100", "01000000"}, {"00000000", "00000202", "00000000", "00000000", "00000000", "00000000", "00000000", "00001111"}, 0.35f, 0.30f, 0.50f, true},  // Mid-Tempo
+    {{"20000010", "00002000", "00000000", "10111011", "00000010", "00100000", "00010010", "01000101"}, {"00000000", "00000000", "00000000", "00000000", "00000000", "00000110", "00001111", "00000000"}, 0.50f, 0.45f, 0.30f, true},  // Psy Bass
+    {{"20000000", "00002000", "00000000", "10101010", "00000010", "00000100", "00100010", "00010000"}, {"00000000", "00000000", "00000000", "00000000", "00000000", "00001101", "00000000", "00000000"}, 0.65f, 0.65f, 0.15f, false},  // Psydub
+    {{"20002000", "00000000", "00000000", "01110111", "00100010", "00000000", "00010001", "01000100"}, {"00000000", "00000000", "00002020", "00000000", "00000000", "00001111", "00000000", "00000000"}, 0.45f, 0.45f, 0.25f, false},  // Psytrance
+    {{"20100000", "00002001", "00000000", "10101010", "00000010", "00000100", "00000000", "00000000"}, {"00001000", "00102022", "00000000", "00000000", "00000000", "00000000", "00000000", "00000000"}, 0.35f, 0.25f, 0.35f, true},  // Jungle
+    {{"20000100", "00002000", "00000000", "11111111", "00000000", "00000000", "00100000", "01000010"}, {"00000000", "00200222", "00000000", "00000000", "00000000", "00000000", "00000000", "00001111"}, 0.30f, 0.30f, 0.50f, true},  // Neurofunk
+    {{"20002000", "00000000", "00001000", "10110110", "00100000", "01000100", "10010000", "00101001"}, {"00000000", "00000000", "00000000", "00000000", "00000000", "00000111", "00000000", "11011011"}, 0.40f, 0.45f, 0.25f, false},  // Modular Techno
 };
 // each genre's harmony and rhythms: scales, keys (MTX order), two 4-chord progressions (scale degrees),
 // the lead and bass rhythms (8 sixteenths), whether it is an acid style, and how bright its tones are
 struct GenreHarm { int scales[3]; int keys[3]; int prog[2][4]; const char* lead; const char* bass; bool acid; float bright; };
-static const GenreHarm GHARM[16] = {
+static const GenreHarm GHARM[NG] = {
     {{0, 2, 0}, {9, 5, 7}, {{0, 5, 2, 6}, {0, 3, 6, 5}}, "10010010", "00100010", false, 0.55f},  // House
     {{2, 0, 2}, {2, 0, 5}, {{0, 3, 0, 4}, {0, 5, 3, 4}}, "10001000", "10100010", false, 0.40f},  // Deep House
     {{3, 0, 3}, {5, 4, 7}, {{0, 0, 1, 0}, {0, 6, 0, 5}}, "10100100", "01110111", false, 0.45f},  // Techno
@@ -91,6 +122,19 @@ static const GenreHarm GHARM[16] = {
     {{4, 2, 4}, {4, 9, 7}, {{0, 3, 0, 6}, {0, 0, 3, 4}}, "10110100", "10110010", false, 0.55f},  // Funk
     {{4, 7, 4}, {7, 0, 5}, {{0, 3, 0, 4}, {0, 6, 3, 0}}, "10101001", "10010100", false, 0.50f},  // Afrobeat
     {{5, 0, 5}, {0, 2, 7}, {{0, 5, 3, 4}, {0, 3, 5, 4}}, "10000100", "10000010", false, 0.35f},  // Trip-Hop
+    {{3, 5, 3}, {4, 9, 2}, {{0, 1, 0, 5}, {0, 0, 1, 6}}, "10010000", "10010010", false, 0.40f},  // Industrial
+    {{3, 0, 3}, {9, 5, 7}, {{0, 0, 1, 0}, {0, 6, 0, 1}}, "10001000", "01110111", false, 0.45f},  // Hard Techno
+    {{3, 5, 3}, {2, 4, 9}, {{0, 0, 0, 1}, {0, 1, 0, 6}}, "10000100", "01010101", false, 0.35f},  // Industrial Techno
+    {{0, 3, 0}, {9, 4, 7}, {{0, 0, 6, 0}, {0, 1, 0, 6}}, "11011011", "10110110", true, 0.55f},   // Acid Techno
+    {{5, 0, 5}, {9, 4, 2}, {{0, 5, 3, 4}, {0, 6, 5, 4}}, "10101010", "10101010", false, 0.60f},  // Hardcore
+    {{0, 3, 5}, {5, 2, 7}, {{0, 0, 5, 6}, {0, 6, 5, 4}}, "10000010", "11011010", false, 0.45f},  // Dubstep
+    {{3, 0, 3}, {1, 4, 6}, {{0, 0, 1, 0}, {0, 6, 5, 6}}, "10000100", "10010010", false, 0.35f},  // Mid-Tempo
+    {{2, 7, 2}, {7, 2, 9}, {{0, 3, 4, 3}, {0, 6, 5, 6}}, "10110110", "10010110", false, 0.70f},  // Psy Bass
+    {{3, 2, 3}, {2, 9, 4}, {{0, 0, 1, 0}, {0, 6, 0, 5}}, "00100110", "10010100", false, 0.45f},  // Psydub
+    {{3, 5, 3}, {4, 9, 7}, {{0, 0, 0, 1}, {0, 1, 0, 6}}, "10110101", "01110111", false, 0.60f},  // Psytrance
+    {{0, 2, 0}, {9, 2, 4}, {{0, 5, 3, 4}, {0, 3, 6, 4}}, "10000100", "10000010", false, 0.45f},  // Jungle
+    {{0, 3, 5}, {5, 7, 2}, {{0, 0, 6, 5}, {0, 1, 0, 6}}, "10010000", "10110100", false, 0.40f},  // Neurofunk
+    {{2, 0, 7}, {0, 7, 2}, {{0, 3, 4, 3}, {0, 5, 3, 4}}, "10100110", "10010010", false, 0.50f},  // Modular Techno
 };
 // the SynTHBloK scale list: 0 minor 1 major 2 dorian 3 phrygian 4 mixolydian 5 harmonic minor 6 min pent 7 maj pent
 static const std::vector<int> SCALE_STEPS[8] = {{0, 2, 3, 5, 7, 8, 10}, {0, 2, 4, 5, 7, 9, 11}, {0, 2, 3, 5, 7, 9, 10}, {0, 1, 3, 5, 7, 8, 10},
@@ -108,8 +152,9 @@ static const char* OHAT_POOL[6] = {"00100010", "00000010", "00100000", "00000000
 static const int PROG_POOL[14][4] = {{0, 5, 3, 4}, {0, 3, 4, 3}, {0, 4, 5, 3}, {0, 6, 5, 4}, {0, 2, 3, 4}, {0, 5, 2, 3}, {0, 3, 5, 4},
                                      {0, 0, 3, 4}, {0, 6, 3, 4}, {5, 3, 0, 4}, {0, 4, 0, 5}, {0, 3, 6, 4}, {0, 5, 6, 4}, {3, 4, 0, 0}};
 // factory kits that suit each genre (0 808, 1 909, 2 TECH, 3 ELEC, 4 LOFI, 5 606, 6 HOUSE, 7 DUB, 8 INDUS)
-static const std::vector<int> KITS[16] = {{6, 1}, {6, 0}, {2, 1, 8}, {0, 1}, {1}, {3, 0}, {4, 0}, {0}, {4}, {5, 0},
-                                          {1, 2}, {7}, {4, 5}, {0, 4}, {4, 5}, {4, 7}};
+static const std::vector<int> KITS[NG] = {{6, 1}, {6, 0}, {2, 1, 8}, {0, 1}, {1}, {3, 0}, {4, 0}, {0}, {4}, {5, 0},
+                                          {1, 2}, {7}, {4, 5}, {0, 4}, {4, 5}, {4, 7},
+                                          {8, 2}, {2, 8}, {8}, {1, 2}, {8, 1}, {0, 3}, {0, 8}, {3, 0}, {7, 4}, {2, 1}, {1, 4}, {3, 8}, {2, 5}};
 static const char* KIT_NAMES[9] = {"808", "909", "TECH", "ELEC", "LOFI", "606", "HOUSE", "DUB", "INDUS"};
 // what each matrix column builds
 static const char* ROLES[8] = {"DRUMS", "BASS", "LEAD", "CHORDS", "PERC", "TEXTURE", "FX SEND", "MOD"};
@@ -120,7 +165,7 @@ struct SynTHBloKRandroyd : Module {
     enum ParamIds {
         NEWTRACK_PARAM, NEWRACK_PARAM, SHIFT_PARAM, GENRE_PARAM,
         ROLL_PARAM, MUTATEBTN_PARAM, STORE_PARAM, PARK_PARAM, UNDO_PARAM,
-        TAB_PARAM, SIZE_PARAM, MUTATE_PARAM, DENSITY_PARAM, FX_PARAM, NUM_PARAMS
+        TAB_PARAM, SIZE_PARAM, MUTATE_PARAM, DENSITY_PARAM, FX_PARAM, BPM_PARAM, RUN_PARAM, STOP_PARAM, RANDALL_PARAM, NUM_PARAMS
     };
     enum InputIds { CLOCK_INPUT, SCENE_INPUT, ROLL_INPUT, MUTATE_INPUT, NUM_INPUTS };
     enum OutputIds { TRIG_OUTPUT, SCENE_OUTPUT, CPU_OUTPUT, NUM_OUTPUTS };
@@ -171,6 +216,7 @@ struct SynTHBloKRandroyd : Module {
     int trackKit[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
     // the rack's harmony, set by its first track: every instrument plays in this key, scale and progression
     int hKey = -1, hScale = 0;
+    int uiBpm = 0; bool uiRun = false, uiSong = false;   // the song's tempo / transport, mirrored by the UI each frame
     int hProg[4] = {0, 0, 0, 0};
     std::string hLeadR, hBassR;   // this track's own lead / bass rhythms (8 sixteenths); empty = the genre's
     int trackRole[8] = {-1, -1, -1, -1, -1, -1, -1, -1};   // QUAD role: 0 bass 1 acid 2 lead 3 chords
@@ -190,7 +236,7 @@ struct SynTHBloKRandroyd : Module {
         configSwitch(SHIFT_PARAM, 0.f, 1.f, 0.f, "Shift (or hold the Shift key)", {"Off", "On"});
         std::vector<std::string> gn;
         for (const rdz::Genre& g : rdz::GENRES) gn.push_back(g.name);
-        configSwitch(GENRE_PARAM, 0.f, 15.f, 3.f, "Genre", gn);
+        configSwitch(GENRE_PARAM, 0.f, (float) (rdz::NG - 1), 3.f, "Genre", gn);
         configButton(ROLL_PARAM, "Roll: new sounds for the playing track (no track: smart random cables)");
         configButton(MUTATEBTN_PARAM, "Mutate: variations on every layer (no track: re-roll part of the cables)");
         configButton(STORE_PARAM, "Save your tweaks into the playing track's pad");
@@ -201,6 +247,12 @@ struct SynTHBloKRandroyd : Module {
         configParam(MUTATE_PARAM, 0.f, 1.f, 0.35f, "Mutate (share a re-roll changes)", "%", 0.f, 100.f);
         configParam(DENSITY_PARAM, 0.f, 1.f, 0.5f, "Density (cables per roll; layers per track)", "%", 0.f, 100.f);
         configParam(FX_PARAM, 0.f, 1.f, 0.5f, "FX (how wet new tracks are)", "%", 0.f, 100.f);
+        configParam(BPM_PARAM, 40.f, 240.f, 120.f, "Tempo (the song's: COMPOSER follows it, and a new track sets it)", " BPM");
+        paramQuantities[BPM_PARAM]->snapEnabled = true;
+        paramQuantities[BPM_PARAM]->randomizeEnabled = false;
+        configButton(RUN_PARAM, "Run: start the song from the top");
+        configButton(STOP_PARAM, "Stop the song");
+        configButton(RANDALL_PARAM, "Randomize the parts RANDROYD built (not RANDROYD, COMPOSER, the mixer or the master; one undo)");
         configInput(CLOCK_INPUT, "Clock (scene changes land on the bar)");
         configInput(SCENE_INPUT, "Next scene trigger");
         configInput(ROLL_INPUT, "Roll trigger");
@@ -215,7 +267,7 @@ struct SynTHBloKRandroyd : Module {
         return clamp(params[MUTATE_PARAM].getValue() + inputs[MUTATE_INPUT].getVoltage() / 10.f, 0.f, 1.f);
     }
     int cablesWanted() { return 4 + (int) std::round(params[DENSITY_PARAM].getValue() * 28.f); }
-    const rdz::Genre& genre() { return rdz::GENRES[clamp((int) std::round(params[GENRE_PARAM].getValue()), 0, 15)]; }
+    const rdz::Genre& genre() { return rdz::GENRES[clamp((int) std::round(params[GENRE_PARAM].getValue()), 0, rdz::NG - 1)]; }
     void say(const std::string& s) { notice = s; noticeTime = 3.5f; }
 
     void process(const ProcessArgs& args) override {
@@ -660,7 +712,9 @@ struct RdButton : app::ParamWidget {
     float fontSize = 7.f;
     bool held = false;
     std::function<void()> onPress;   // set: runs on the click itself (UI event, not inside step())
+    std::function<bool()> litFn;     // set: decides when the button shows lit (RUN / STOP)
     bool lit() {
+        if (litFn && module) return litFn() || held;
         ParamQuantity* pq = getParamQuantity();
         if (!module || !pq) return style == ORANGE || setTo == 0;
         if (setTo >= 0) return (int) std::round(pq->getValue()) == setTo;
@@ -714,17 +768,17 @@ struct RdGenre : app::ParamWidget {
         float W = box.size.x, H = box.size.y;
         oled::box(args, W, H);
         int g = 3;
-        if (ParamQuantity* pq = getParamQuantity()) g = clamp((int) std::round(pq->getValue()), 0, 15);
+        if (ParamQuantity* pq = getParamQuantity()) g = clamp((int) std::round(pq->getValue()), 0, rdz::NG - 1);
         const rdz::Genre& G = rdz::GENRES[g];
         rdFont(args.vg);
         rdText(args.vg, 6.f, mm2px(2.8f), "GENRE", 6.f, oled::dim(), NVG_ALIGN_LEFT);
-        rdText(args.vg, W - 6.f, mm2px(2.8f), string::f("< %d / 16 >", g + 1), 6.f, oled::dim(), NVG_ALIGN_RIGHT);
+        rdText(args.vg, W - 6.f, mm2px(2.8f), string::f("< %d / %d >", g + 1, rdz::NG), 6.f, oled::dim(), NVG_ALIGN_RIGHT);
         rdText(args.vg, 6.f, mm2px(8.2f), G.name, 11.f, oled::amber(), NVG_ALIGN_LEFT);
         rdText(args.vg, W - 6.f, mm2px(8.2f),
                string::f("%d BPM  %s %s", (G.bpmLo + G.bpmHi) / 2, rdz::KEYS[G.key], rdz::SCALES[G.scale]), 6.5f, oled::amber(200), NVG_ALIGN_RIGHT);
     }
     void step(int d) {
-        if (ParamQuantity* pq = getParamQuantity()) pq->setValue((float) (((int) std::round(pq->getValue()) + d + 16) % 16));
+        if (ParamQuantity* pq = getParamQuantity()) pq->setValue((float) (((int) std::round(pq->getValue()) + d + rdz::NG) % rdz::NG));
     }
     void onButton(const ButtonEvent& e) override {
         if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) {
@@ -808,6 +862,29 @@ struct RdCpu : TransparentWidget {
 
 // forward
 struct SynTHBloKRandroydWidget;
+// BPM ring: an amber arc inside the printed 40-240 scale, lit from 40 up to the knob
+struct RdBpmRing : TransparentWidget {
+    Module* module = NULL;
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        float v = module ? module->params[SynTHBloKRandroyd::BPM_PARAM].getValue() : 128.f;
+        float t = clamp((v - RDL::BPM_LO) / (RDL::BPM_HI - RDL::BPM_LO), 0.f, 1.f);
+        float cx = box.size.x / 2, cy = box.size.y / 2, r = mm2px(7.55f);
+        float a0 = -M_PI / 2 - 0.75f * M_PI, a1 = a0 + 1.5f * M_PI * t, aEnd = a0 + 1.5f * M_PI;
+        NVGcontext* vg = args.vg;
+        nvgLineCap(vg, NVG_ROUND);
+        nvgBeginPath(vg); nvgArc(vg, cx, cy, r, a0, aEnd, NVG_CW);
+        nvgStrokeColor(vg, nvgRGBA(255, 150, 50, 34)); nvgStrokeWidth(vg, mm2px(0.55f)); nvgStroke(vg);
+        if (t > 0.002f) {
+            nvgBeginPath(vg); nvgArc(vg, cx, cy, r, a0, a1, NVG_CW);
+            nvgStrokeColor(vg, nvgRGBA(255, 130, 30, 70)); nvgStrokeWidth(vg, mm2px(1.3f)); nvgStroke(vg);   // glow
+            nvgBeginPath(vg); nvgArc(vg, cx, cy, r, a0, a1, NVG_CW);
+            nvgStrokeColor(vg, nvgRGBA(255, 190, 90, 255)); nvgStrokeWidth(vg, mm2px(0.55f)); nvgStroke(vg);
+            nvgBeginPath(vg); nvgCircle(vg, cx + r * std::cos(a1), cy + r * std::sin(a1), mm2px(0.55f));
+            nvgFillColor(vg, nvgRGBA(255, 235, 190, 255)); nvgFill(vg);
+        }
+    }
+};
 
 // ---------------------------------------------------------------------------
 // TRACKS OLED: the bank's 16 save spots, a fixed numbered list (EMPTY, or name + date).
@@ -959,9 +1036,22 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         }
 
         // knobs, jacks
+        // BPM: the big knob, its lit ring; MUTATE / DENSITY / FX small beside it; RUN / STOP under them
+        RdBpmRing* ring = place(new RdBpmRing, RDL::BPM_X - 9.f, RDL::BPM_Y - 9.f, 18.f, 18.f);
+        ring->module = module;
+        addChild(ring);
+        addParam(createParamCentered<RoundLargeBlackKnob>(mm2px(Vec(RDL::BPM_X, RDL::BPM_Y)), module, SynTHBloKRandroyd::BPM_PARAM));
         int knobs[3] = {SynTHBloKRandroyd::MUTATE_PARAM, SynTHBloKRandroyd::DENSITY_PARAM, SynTHBloKRandroyd::FX_PARAM};
         for (int i = 0; i < 3; i++)
-            addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(RDL::KNOB_X[i], RDL::KNOB_Y)), module, knobs[i]));
+            addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(RDL::KNOB_X[i], RDL::KNOB_Y)), module, knobs[i]));
+        RdButton* run = button(module, SynTHBloKRandroyd::RUN_PARAM, "RUN", RDL::TR_X[0], RDL::TR_Y, RDL::TR_W, RDL::TR_H, RdButton::DARK, 7.5f);
+        run->onPress = [=]() { transport(true); };
+        run->litFn = [=]() { return module->uiSong && module->uiRun; };
+        RdButton* stop = button(module, SynTHBloKRandroyd::STOP_PARAM, "STOP", RDL::TR_X[1], RDL::TR_Y, RDL::TR_W, RDL::TR_H, RdButton::DARK, 7.5f);
+        stop->onPress = [=]() { transport(false); };
+        stop->litFn = [=]() { return module->uiSong && !module->uiRun; };
+        RdButton* rz = button(module, SynTHBloKRandroyd::RANDALL_PARAM, "RANDOMIZE", RDL::RZ_X, RDL::RZ_Y, RDL::RZ_W, RDL::RZ_H, RdButton::DARK, 7.f);
+        rz->onPress = [=]() { randomizeParts(); };
         for (int i = 0; i < 4; i++) {
             addInput(createInputCentered<PJ301MPort>(mm2px(Vec(RDL::IN_X[i], RDL::IN_Y)), module, i));
             addChild(JackLed::create(Vec(RDL::IN_X[i] + 3.6f, RDL::IN_Y - 3.6f), module, i, false));
@@ -1515,8 +1605,21 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         auto euclid = [&](int k, int rot) { std::string r(8, '0'); for (int i = 0; i < 8; i++) if (((i * k) % 8) < k) r[(i + rot) % 8] = '1'; return r; };
         std::string base[8];
         for (int r = 0; r < 8; r++) base[r] = G.rows[r];
+        // SIBLING GROOVES: now and then the kick / snare / clap come from a related genre (same lanes, a tempo
+        // within 15 %), so one genre has more than one groove
+        if (chance(0.25f + 0.15f * variety)) {
+            std::vector<int> sib;
+            int fam = rdz::FLAGS[g] & (rdz::F_T | rdz::F_B);
+            float mid = (rdz::GENRES[g].bpmLo + rdz::GENRES[g].bpmHi) * 0.5f;
+            for (int k = 0; k < rdz::NG; k++) {
+                float mk = (rdz::GENRES[k].bpmLo + rdz::GENRES[k].bpmHi) * 0.5f;
+                if (k != g && (rdz::FLAGS[k] & (rdz::F_T | rdz::F_B)) == fam && std::fabs(mk - mid) <= 0.15f * mid) sib.push_back(k);
+            }
+            if (!sib.empty()) { int k = sib[rnd((int) sib.size())]; for (int r = 0; r < 3; r++) base[r] = rdz::GDRUMS[k].rows[r]; }
+        }
+        bool chop = rdz::has(g, rdz::F_G);
         bool floor4 = std::string(G.rows[0]).compare(0, 5, "20002") == 0;
-        bool sparse = g == 12;   // ambient keeps its space
+        bool sparse = rdz::has(g, rdz::F_S);   // ambient keeps its space
         if (!sparse && chance(0.5f + 0.3f * variety)) base[3] = rdz::HAT_POOL[rnd(8)];
         if (!sparse && chance(0.4f)) base[4] = rdz::OHAT_POOL[rnd(6)];
         for (int i = 0; i < 8; i++) if (base[3][i] != '0' && base[4][i] != '0') base[3][i] = '0';   // an open hat chokes the closed one
@@ -1540,6 +1643,13 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
                 if (p == 6) { rows[1][6] = std::max(rows[1][6], '1'); rows[1][7] = '2'; if (rows[2][4] == '0' && G.rows[2][4] != '0') rows[2][4] = '2'; }
                 if (p == 4 && chance(0.5f)) { int i = rnd(8); if (rows[1][i] == '0' && rows[0][i] == '0') rows[1][i] = '1'; }
             }
+            // GATING / BEAT CHOP lanes: a stutter burst on a perc row, hats cut into gated pairs
+            if (chop && (p == 1 || p == 2 || p >= 4) && chance(0.6f)) {
+                int r = 5 + rnd(3), at = chance(0.5f) ? 4 : 6;
+                for (int i = at; i < 8; i++) rows[r][i] = i == 7 ? '2' : '1';
+            }
+            if (chop && p == 2 && chance(0.5f)) for (int i = 0; i < 8; i += 4) { rows[3][i + 2] = '0'; rows[3][i + 3] = '0'; }
+            if (chop && p == 6 && chance(0.6f)) { rows[0][6] = '1'; rows[0][7] = '1'; }   // a kick roll into the next bar
             if (p == 1) {   // ghost hats
                 for (int k = 0; k < 1 + (int) (variety * 2); k++) { int i = rnd(8); if (rows[3][i] == '0') rows[3][i] = '1'; }
             }
@@ -1660,6 +1770,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     void ensureHarmony(int g, std::mt19937& rng) {
         SynTHBloKRandroyd* m = rd();
         if (m->hKey >= 0) return;
+        g = clamp(g, 0, rdz::NG - 1);
         const rdz::GenreHarm& H = rdz::GHARM[g];
         auto pick3 = [&](const int* a) { return a[std::uniform_int_distribution<int>(0, 2)(rng)]; };
         auto chance = [&](float p) { return std::uniform_real_distribution<float>(0.f, 1.f)(rng) < p; };
@@ -1671,7 +1782,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         else { int pr = rnd(2); for (int i = 0; i < 4; i++) m->hProg[i] = H.prog[pr][i]; }
         if (chance(0.2f)) std::swap(m->hProg[1], m->hProg[2]);   // the same chords, a new order
         // this track's rhythms; slow, sparse styles stay sparse
-        int maxHits = g == 12 ? 3 : rdz::GENRES[g].bpmHi < 90 ? 5 : 8;
+        int maxHits = rdz::has(g, rdz::F_S) ? 3 : (rdz::GENRES[g].bpmHi < 90 && !rdz::has(g, rdz::F_W | rdz::F_G)) ? 5 : 8;
         m->hLeadR = varyRhythm(rng, H.lead, rdz::LEAD_POOL, variety, false, maxHits);
         m->hBassR = varyRhythm(rng, H.bass, rdz::BASS_POOL, variety, true, std::max(3, maxHits));
     }
@@ -1775,6 +1886,8 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         return out;
     }
     // a 303-style line: root-heavy, accents, slides
+    // FRACTAL leads (psy / modular lanes): each chord's line uses the motif's rhythm rotated, a self-similar phrase
+    static std::string rotR(const char* r, int k) { std::string s(r); k = ((k % 8) + 8) % 8; return s.substr(8 - k) + s.substr(0, 8 - k); }
     std::vector<int> acidLine(std::mt19937& rng, int root, const char* rhythm) {
         std::vector<int> tones = triad(root), out;
         static const int pickIdx[4] = {0, 0, 1, 2};
@@ -1787,12 +1900,11 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     // MTX QUAD notes + step sliders (ACC CUT GATE GLIDE PROB RATCH OCT RES) for patterns 1-4; 5-8 copy them.
     // keepFirst: pattern 1 stays as the module has it (MUTATE)
     std::vector<std::vector<int>> roleLines(int role, int g, std::mt19937& rng) {
-        const rdz::GenreHarm& H = rdz::GHARM[g];
         SynTHBloKRandroyd* m = rd();
         std::vector<std::vector<int>> lines;
         for (int p = 0; p < 4; p++) {
             int root = m->hProg[p];
-            if (role == 2) lines.push_back(leadLine(rng, root, leadR(g)));
+            if (role == 2) lines.push_back(leadLine(rng, root, rdz::has(g, rdz::F_X) && p ? rotR(leadR(g), 3 * p).c_str() : leadR(g)));
             else if (role == 1) lines.push_back(acidLine(rng, root, leadR(g)));
             else lines.push_back(bassLine(rng, root, bassR(g)));
         }
@@ -1809,7 +1921,6 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         return lines;
     }
     json_t* quadData(int role, int g, std::mt19937& rng, json_t* keepFirst = NULL) {
-        const rdz::GenreHarm& H = rdz::GHARM[g];
         SynTHBloKRandroyd* m = rd();
         auto uni = [&](float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); };
         json_t* d = json_object();
@@ -1824,7 +1935,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
                 lines.push_back(pad);
             }
             else if (role == 3) lines.push_back(stabLine(root, leadR(g)));
-            else if (role == 2) lines.push_back(leadLine(rng, root, leadR(g)));
+            else if (role == 2) lines.push_back(leadLine(rng, root, rdz::has(g, rdz::F_X) && p ? rotR(leadR(g), 3 * p).c_str() : leadR(g)));
             else if (role == 1) lines.push_back(acidLine(rng, root, leadR(g)));
             else lines.push_back(bassLine(rng, root, bassR(g)));
         }
@@ -1856,7 +1967,13 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
                 // ghosts: an offbeat note or two plays on chance, so each pass is a little different
                 for (int c = 1; c < 8; c += 2) if (line[c] && uni(0, 1) < (lifted ? 0.25f : 0.2f)) prob[c] = uni(0.55f, 0.85f);
                 if (lifted) for (int c = 0; c < 8; c++) if (line[c] && !orig[c] && uni(0, 1) < 0.5f) prob[c] = uni(0.6f, 0.9f);
+                // WOBBLE lanes: the bass rolls (2-3 hits a step) and slides; PSY lanes: the lead rolls more
+                if ((role <= 1 && rdz::has(g, rdz::F_W)) || (role == 2 && rdz::has(g, rdz::F_X)))
+                    for (int c = 0; c < 8; c++) if (line[c] && uni(0, 1) < (lifted ? 0.45f : 0.3f)) ratch[c] = uni(0, 1) < 0.6f ? 0.34f : 0.67f;
+                // GATING lanes: a chopped note or two plays on chance
+                if (rdz::has(g, rdz::F_G)) for (int c = 0; c < 8; c++) if (line[c] && c % 4 && uni(0, 1) < 0.3f) prob[c] = uni(0.45f, 0.7f);
             }
+            bool wob = role <= 1 && rdz::has(g, rdz::F_W), gated = rdz::has(g, rdz::F_G), psy = rdz::has(g, rdz::F_X);
             std::string hx;
             if (p == 0 && keepFirst) {
                 const char* old = json_string_value(json_array_get(json_object_get(keepFirst, "notes"), 0));
@@ -1870,11 +1987,12 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
                     float v;
                     if (b == 0) v = on && (c % 4 == 0 || (role == 1 && uni(0, 1) < 0.3f)) ? 1.f : 0.f;   // accent
                     else if (b == 1) v = 0.5f + uni(-0.08f, 0.08f);                                     // cutoff
-                    else if (b == 2) v = gate + uni(-0.1f, 0.1f);                                        // gate length
-                    else if (b == 3) v = (role == 1 && uni(0, 1) < 0.3f) ? 0.55f : 0.f;                  // glide
+                    else if (b == 2) v = (gated ? gate * 0.6f : gate) + uni(-0.1f, 0.1f);                // gate length (chopped shorter)
+                    else if (b == 3) v = ((role == 1 && uni(0, 1) < 0.3f) || (wob && on && uni(0, 1) < 0.35f)) ? 0.55f : 0.f;   // glide
                     else if (b == 4) v = prob[c];                                                        // probability
                     else if (b == 5) v = ratch[c];                                                       // ratchet
-                    else if (b == 6) v = ((role == 1 && uni(0, 1) < 0.15f) || (lifted && role == 2 && on && uni(0, 1) < 0.15f)) ? 0.75f : 0.5f;   // octave
+                    else if (b == 6) v = ((role == 1 && uni(0, 1) < 0.15f) || (lifted && role == 2 && on && uni(0, 1) < 0.15f)
+                                          || (psy && role == 2 && on && uni(0, 1) < 0.3f)) ? 0.75f : 0.5f;   // octave (psy lasers sit high)
                     else v = 0.5f;                                                                       // resonance
                     json_array_append_new(steps, json_real(v));
                 }
@@ -1990,7 +2108,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     // the effects after a QUAD. vary = ROLL: a new setting around the recipe's home
     void insertTone(engine::Module* mod, int recipe, int g, std::mt19937& rng, bool vary) {
         auto uni = [&](float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); };
-        bool echoGenre = g == 11 || g == 12 || g == 15;   // dub, ambient, trip-hop
+        bool echoGenre = rdz::has(g, rdz::F_E);   // dub, ambient, trip-hop, psy
         if (recipe == 4) {   // MORPH FILTER on the bass: low-pass with drive and a slow chaos drift
             setP(mod, "Cutoff", uni(0.5f, 0.72f));
             setP(mod, "Resonance", uni(0.15f, 0.42f));
@@ -2058,7 +2176,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     void rigTone(engine::Module* kick, engine::Module* sh, int g, std::mt19937& rng) {
         auto uni = [&](float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); };
         const rdz::GenreDrums& G = rdz::GDRUMS[g];
-        bool hard = g == 2 || g == 3 || g == 5;   // techno, acid, electro: rumble
+        bool hard = rdz::has(g, rdz::F_T);   // the techno lanes: rumble
         bool slow = rdz::GENRES[g].bpmHi < 100;
         if (kick) {
             setP(kick, "Tune", uni(44.f, 58.f));
@@ -2284,7 +2402,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         app::ModuleWidget* duo = m->trackMods[1].empty() ? NULL : findMw(m->trackMods[1][0]);
         if (!duo) return false;
         std::mt19937 rng(random::u32());
-        int g = clamp(m->trackGenre[1], 0, 15);
+        int g = clamp(m->trackGenre[1], 0, rdz::NG - 1);
         history::ModuleChange* hc = new history::ModuleChange;
         hc->name = mutate ? "RANDROYD mutate duo" : "RANDROYD roll duo";
         hc->moduleId = duo->module->id;
@@ -2408,7 +2526,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     // ROLL: new tones on a part's extra voices (the kick on a DUO / MTX-DRUM, the resonators)
     void retoneExtras(int t, std::mt19937& rng) {
         SynTHBloKRandroyd* m = rd();
-        int g = clamp(m->trackGenre[t], 0, 15);
+        int g = clamp(m->trackGenre[t], 0, rdz::NG - 1);
         for (size_t k = 1; k < m->trackMods[t].size(); k++) {
             app::ModuleWidget* mw = findMw(m->trackMods[t][k]);
             if (!mw) continue;
@@ -2535,7 +2653,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     bool rollLight(int t, bool mutate) {
         SynTHBloKRandroyd* m = rd();
         std::mt19937 rng(random::u32());
-        int g = clamp(m->trackGenre[t], 0, 15);
+        int g = clamp(m->trackGenre[t], 0, rdz::NG - 1);
         int r = m->trackRecipe[t];
         std::vector<app::ModuleWidget*> mws;
         for (int64_t id : m->trackMods[t]) mws.push_back(findMw(id));
@@ -2657,7 +2775,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         SynTHBloKRandroyd* m = rd();
         if (!m) return;
         if (m->mode == 1) { rackTrack(); return; }
-        int g = clamp((int) std::round(m->params[SynTHBloKRandroyd::GENRE_PARAM].getValue()), 0, 15);
+        int g = clamp((int) std::round(m->params[SynTHBloKRandroyd::GENRE_PARAM].getValue()), 0, rdz::NG - 1);
         const rdz::Genre& G = rdz::GENRES[g];
         uint32_t sd = random::u32();
         std::mt19937 rng(sd);
@@ -2686,10 +2804,10 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             setTempo(bpm);
             // casting: a recipe per part, leaning on the genre; a small track takes the light drums
             auto chance = [&](float p) { return std::uniform_real_distribution<float>(0.f, 1.f)(rng) < p; };
-            bool technoish = g == 2 || g == 3 || g == 5;
-            bool brokenish = g == 6 || g == 7 || g == 10 || g == 13 || g == 14 || g == 15;
-            bool echoish = g == 11 || g == 12 || g == 15;
-            bool boomish = g == 6 || g == 7 || g == 8 || g == 10 || g == 11 || g == 15;
+            bool technoish = rdz::has(g, rdz::F_T);
+            bool brokenish = rdz::has(g, rdz::F_B);
+            bool echoish = rdz::has(g, rdz::F_E);
+            bool boomish = rdz::has(g, rdz::F_M);
             bool big = layers >= 5;   // a big track leans on the small units, so it fits the CPU
             int drumR = 0;
             if (layers <= 3) drumR = brokenish ? 2 : 1;
@@ -2728,7 +2846,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
                 else {
                     int role = t == 1 ? ((rdz::GHARM[g].acid && std::uniform_int_distribution<int>(0, 9)(rng) < 6) ? 1 : 0) : (t == 2 ? 2 : 3);
                     int recipe = 0;
-                    if (t == 1 && layers >= 4 && chance(0.35f)) recipe = 4;              // bass + morph filter
+                    if (t == 1 && layers >= 4 && chance(rdz::has(g, rdz::F_W) ? 0.7f : 0.35f)) recipe = 4;   // bass + morph filter (wobble lanes lean on it)
                     if (t == 2 && chance(echoish ? 0.75f : 0.45f)) recipe = 5;           // lead + delay
                     if (t == 3 && chance(0.3f)) recipe = 6;                              // chords + dual filter
                     ok = buildQuad(t, g, rng, h, role, recipe);
@@ -3263,7 +3381,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     // NEW TRACK in RACK mode: the rack the first time, then a new song in it, saved into the next empty track
     void rackTrack() {
         SynTHBloKRandroyd* m = rd();
-        int g = clamp((int) std::round(m->params[SynTHBloKRandroyd::GENRE_PARAM].getValue()), 0, 15);
+        int g = clamp((int) std::round(m->params[SynTHBloKRandroyd::GENRE_PARAM].getValue()), 0, rdz::NG - 1);
         uint32_t sd = random::u32();
         std::mt19937 rng(sd);
         bool built = false;
@@ -3300,7 +3418,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         SynTHBloKRandroyd* m = rd();
         if (!rackReady()) { m->say("RACK MODE: PRESS NEW TRACK TO BUILD THE RACK"); return; }
         std::mt19937 rng(random::u32());
-        int g = clamp(m->trackGenre[0] >= 0 ? m->trackGenre[0] : (int) std::round(m->params[SynTHBloKRandroyd::GENRE_PARAM].getValue()), 0, 15);
+        int g = clamp(m->trackGenre[0] >= 0 ? m->trackGenre[0] : (int) std::round(m->params[SynTHBloKRandroyd::GENRE_PARAM].getValue()), 0, rdz::NG - 1);
         writeSong(g, rng, true);
         m->say(string::f("NEW SOUNDS + PATTERNS, SAME KEY AND CHORDS  ·  %s  ·  SAVE TO KEEP IT", arrName(m->arrKind)));
     }
@@ -3415,7 +3533,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         }
         if (!srcL) srcL = srcR;
         float x = box.pos.x, y = box.pos.y + (2 + track) * rowH();
-        int g = clamp(m->trackGenre[track] >= 0 ? m->trackGenre[track] : 0, 0, 15);
+        int g = clamp(m->trackGenre[track] >= 0 ? m->trackGenre[track] : 0, 0, rdz::NG - 1);
         app::ModuleWidget* fxm = spawn("SynTHBloK", growModel(kind), x, y, h, [&](engine::Module* mod) { growTone(mod, kind, g, rng); });
         const char *inL, *inR, *outL, *outR;
         growPorts(kind, inL, inR, outL, outR);
@@ -3484,6 +3602,67 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         if (app::ModuleWidget* song = findMw(rd()->composerId))
             for (engine::ParamQuantity* pq : song->module->paramQuantities)
                 if (pq && pq->name.compare(0, 5, "Tempo") == 0) pq->setValue((float) bpm);
+    }
+    // RANDOMIZE: Rack's own randomize on every part RANDROYD built (each module's randomize-enabled controls,
+    // and whatever its own randomize does), all in one undo step. RANDROYD itself, COMPOSER (the arrangement),
+    // the mixer and BloKMaster (the levels) and the Audio module are left alone.
+    void randomizeParts() {
+        SynTHBloKRandroyd* m = rd();
+        std::vector<int64_t> ids;
+        for (int t = 0; t < 8; t++) for (int64_t id : m->trackMods[t]) ids.push_back(id);
+        for (int64_t id : m->masterMods) ids.push_back(id);
+        std::set<int64_t> skip = {m->composerId, m->mixerId, m->masterId, m->audioId};
+        history::ComplexAction* h = new history::ComplexAction;
+        h->name = "RANDROYD randomize parts";
+        std::set<int64_t> done;
+        int n = 0;
+        for (int64_t id : ids) {
+            if (id < 0 || skip.count(id) || !done.insert(id).second) continue;
+            app::ModuleWidget* mw = findMw(id);
+            if (!mw || mw == this || !mw->module || !mw->model) continue;
+            if (mw->model == modelSynTHBloKRandroyd) continue;
+            if (mw->model->plugin && mw->model->plugin->slug == "Core") continue;
+            if (mw->model->slug == "MatrixSong" || mw->model->slug == "Mix8" || mw->model->slug == "BlokMaster") continue;
+            history::ModuleChange* hc = new history::ModuleChange;
+            hc->name = "randomize";
+            hc->moduleId = id;
+            hc->oldModuleJ = mw->module->toJson();
+            APP->engine->randomizeModule(mw->module);
+            hc->newModuleJ = mw->module->toJson();
+            h->push(hc);
+            n++;
+        }
+        if (h->isEmpty()) { delete h; m->say("NOTHING TO RANDOMIZE: PRESS NEW TRACK"); return; }
+        APP->history->push(h);
+        m->say(string::f("RANDOMIZED %d PARTS  ·  UNDO TAKES IT BACK", n));
+    }
+    // RUN / STOP: COMPOSER's RUN switch (RUN from stopped starts the song from the top)
+    void transport(bool run) {
+        SynTHBloKRandroyd* m = rd();
+        app::ModuleWidget* song = findMw(m->composerId);
+        if (!song) { m->say("NO SONG YET: PRESS NEW TRACK"); return; }
+        for (engine::ParamQuantity* pq : song->module->paramQuantities)
+            if (pq && pq->name.compare(0, 3, "Run") == 0) pq->setValue(run ? 1.f : 0.f);
+        m->say(run ? "RUN" : "STOP");
+    }
+    // the BPM knob and COMPOSER's tempo follow each other: turn the knob and the song follows; a new track,
+    // a load or COMPOSER's own knob change the song's tempo and the knob follows
+    int lastKnob = -1, lastSongBpm = -1;
+    void syncTempo() {
+        SynTHBloKRandroyd* m = rd();
+        app::ModuleWidget* song = findMw(m->composerId);
+        int knob = (int) std::round(m->params[SynTHBloKRandroyd::BPM_PARAM].getValue());
+        m->uiSong = song != NULL;
+        if (!song) { m->uiBpm = knob; m->uiRun = false; lastKnob = knob; lastSongBpm = -1; return; }
+        int st = curTempo(knob);
+        if (lastKnob >= 0 && knob != lastKnob && lastSongBpm >= 0) { setTempo(knob); st = knob; }
+        else if (st != lastSongBpm) { m->params[SynTHBloKRandroyd::BPM_PARAM].setValue((float) st); knob = (int) std::round(m->params[SynTHBloKRandroyd::BPM_PARAM].getValue()); }
+        lastKnob = knob; lastSongBpm = st;
+        m->uiBpm = st;
+        bool run = false;
+        for (engine::ParamQuantity* pq : song->module->paramQuantities)
+            if (pq && pq->name.compare(0, 3, "Run") == 0) run = pq->getValue() > 0.5f;
+        m->uiRun = run;
     }
     int curTempo(int fallback) {
         if (app::ModuleWidget* song = findMw(rd()->composerId))
@@ -3583,7 +3762,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             if (g < 0) g = m->trackGenre[t];
             json_array_append_new(layers, lj);
         }
-        g = clamp(g, 0, 15);
+        g = clamp(g, 0, rdz::NG - 1);
         int bpm = curTempo((rdz::GENRES[g].bpmLo + rdz::GENRES[g].bpmHi) / 2);
         json_object_set_new(root, "layers", layers);
         json_object_set_new(root, "genre", json_integer(g));
@@ -3618,7 +3797,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     // one layer back into the rack as row c, rewired to the clock and its mixer channel. Returns modules missing.
     int loadLayer(json_t* root, int c, history::ComplexAction* h) {
         SynTHBloKRandroyd* m = rd();
-        int g = clamp((int) json_integer_value(json_object_get(root, "genre")), 0, 15);
+        int g = clamp((int) json_integer_value(json_object_get(root, "genre")), 0, rdz::NG - 1);
         float x = box.pos.x, y = box.pos.y + (2 + c) * rowH();
         std::vector<app::ModuleWidget*> made;
         json_t* mods = json_object_get(root, "modules");
@@ -3755,7 +3934,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             return;
         }
         clearLayers();
-        int g = clamp((int) json_integer_value(json_object_get(root, "genre")), 0, 15);
+        int g = clamp((int) json_integer_value(json_object_get(root, "genre")), 0, rdz::NG - 1);
         int bpm = (int) json_integer_value(json_object_get(root, "bpm"));
         if (bpm <= 0) bpm = (rdz::GENRES[g].bpmLo + rdz::GENRES[g].bpmHi) / 2;
         m->hKey = (int) json_integer_value(json_object_get(root, "key"));
@@ -3955,7 +4134,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         if (cur) json_decref(cur);
         if (!mutate) quadTone(q->module, m->trackRole[t], m->trackGenre[t], rng, true);
         if (!mutate && m->trackMods[t].size() > 1 && m->trackRecipe[t] >= 4)
-            if (app::ModuleWidget* fxm = findMw(m->trackMods[t][1])) insertTone(fxm->module, m->trackRecipe[t], clamp(m->trackGenre[t], 0, 15), rng, true);
+            if (app::ModuleWidget* fxm = findMw(m->trackMods[t][1])) insertTone(fxm->module, m->trackRecipe[t], clamp(m->trackGenre[t], 0, rdz::NG - 1), rng, true);
         hc->newModuleJ = q->module->toJson();
         pushUndo(hc);
         m->rolled = true;
@@ -4049,6 +4228,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         infoTimer -= dt;
         if (infoTimer <= 0.f) { refreshInfo(); infoTimer = 0.25f; }
         followSong();
+        syncTempo();
     }
 
     void appendContextMenu(Menu* menu) override {
@@ -4337,6 +4517,26 @@ void RdOled::drawLayer(const DrawArgs& args, int layer) {
         }
         rdText(vg, mm2px(13.f), hy, upperTrim(name, 18), 11.f, oled::amber(), NVG_ALIGN_LEFT);
         if (!sub.empty()) rdText(vg, mm2px(13.f), hy + mm2px(3.8f), sub, 6.f, oled::dim(), NVG_ALIGN_LEFT);
+    }
+
+    // tempo readout, left of the tabs: the song's BPM, a dot that pulses each beat while it runs (a square: stopped)
+    {
+        int bpm = m ? (m->uiBpm > 0 ? m->uiBpm : (int) std::round(m->params[SynTHBloKRandroyd::BPM_PARAM].getValue())) : 132;
+        bool run = m ? (m->uiSong && m->uiRun) : true;
+        float rx = W - mm2px(33.f);
+        rdText(vg, rx, hy + mm2px(0.5f), "BPM", 5.5f, oled::dim(), NVG_ALIGN_RIGHT);
+        rdText(vg, rx - mm2px(5.2f), hy, string::f("%d", bpm), 13.f, oled::amber(), NVG_ALIGN_RIGHT);
+        float dx = rx - mm2px(17.f), dy = hy;
+        nvgBeginPath(vg);
+        if (run) {
+            float ph = std::fmod((float) system::getTime() * bpm / 60.f, 1.f);
+            nvgCircle(vg, dx, dy, mm2px(0.6f + 0.5f * std::exp(-ph * 5.f)));
+            nvgFillColor(vg, oled::amber((int) (90 + 165 * std::exp(-ph * 4.f))));
+        } else {
+            nvgRect(vg, dx - mm2px(0.7f), dy - mm2px(0.7f), mm2px(1.4f), mm2px(1.4f));
+            nvgFillColor(vg, oled::amber(m && m->uiSong ? 150 : 60));
+        }
+        nvgFill(vg);
     }
 
     if (t == 0) {   // ---- TRACK: the playing track's 8 layers ----

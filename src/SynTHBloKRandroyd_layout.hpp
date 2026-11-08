@@ -7,8 +7,12 @@ static const float GENRE_X = 5.00f, GENRE_Y = 100.00f, GENRE_W = 53.00f, GENRE_H
 static const float MIDI_X = 5.00f, MIDI_Y = 114.00f, MIDI_W = 53.00f, MIDI_H = 10.00f;
 static const float OLED_X = 63.00f, OLED_Y = 9.00f, OLED_W = 137.70f, OLED_H = 72.00f;
 static const float ACT_Y = 84.00f, ACT_H = 6.60f, ACT_X0 = 63.00f, ACT_PITCH = 27.60f, ACT_W = 26.80f;
-static const float KNOB_Y = 104.00f;
-static const float KNOB_X[3] = {73.00f, 91.00f, 109.00f};
+static const float BPM_X = 75.00f, BPM_Y = 106.00f, BPM_LO = 40.00f, BPM_HI = 240.00f;
+static const float KNOB_Y = 101.60f;
+static const float KNOB_X[3] = {93.00f, 105.00f, 117.00f};
+static const float TR_Y = 112.60f, TR_H = 5.80f, TR_W = 16.20f;
+static const float TR_X[2] = {87.50f, 104.60f};
+static const float RZ_X = 87.50f, RZ_Y = 119.30f, RZ_W = 33.30f, RZ_H = 5.00f;
 static const float IN_Y = 104.60f;
 static const float IN_X[4] = {127.00f, 137.00f, 147.00f, 157.00f};
 static const float OUT_Y = 120.60f;
