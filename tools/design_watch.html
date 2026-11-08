@@ -1163,16 +1163,10 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
 #psx>.head b{color:var(--ok);letter-spacing:.18em;font-weight:600}#psx>.head span{color:var(--mut);font-size:10.5px}
 #psx>.head button,#ps-con h4 button{--hb:#5ff6ff88;background-color:#04161c;color:#5ff6ff;font:inherit;font-size:12px;padding:2px 10px;cursor:pointer;border:1px solid var(--hb);clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
 #ps-con h4 button{font-size:9px;letter-spacing:.16em;float:right;padding:1px 8px}
-#ps-body{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(0,2fr);grid-template-rows:auto minmax(0,1.3fr) auto minmax(0,1fr);gap:8px;padding:8px 10px 10px;min-height:0}
+#ps-body{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(0,2fr);grid-template-rows:auto minmax(0,1.3fr) minmax(0,1fr);gap:8px;padding:8px 10px 10px;min-height:0}
 #ps-body .hud{background:#010407;padding:14px 16px 10px;min-height:0;display:flex;flex-direction:column}
 #ps-body h4{margin:0 0 8px;font-size:9px;letter-spacing:.2em;color:#5f8792;font-weight:500}#ps-body h4 b{color:var(--hc);font-weight:600}
-#ps-q{grid-row:1/5;overflow:auto;--hc:#7dffb2}#ps-out{--hc:#5ff6ff;grid-column:2;grid-row:2}#ps-con{--hc:#ffb347;grid-column:2;grid-row:4}
-/* CMD LIVE: a .bat from RUN THESE, live, between OUTPUT and CONSOLE. Shows while it runs (+20 s after); glows softly in its run LED colour */
-#ps-live{display:none!important;grid-column:2;grid-row:3;height:24vh;--lr:77,163,255;--hc:rgb(var(--lr))}#ps-live.on{display:flex!important}
-#ps-live[data-st=waiting]{--lr:125,255,178}#ps-live[data-st=needs-ok]{--lr:255,179,71}#ps-live[data-st=running]{--lr:77,163,255}#ps-live[data-st=done]{--lr:0,229,255}#ps-live[data-st=failed]{--lr:255,68,102}
-#ps-live.on{animation:psFlash 1.4s ease-in-out infinite}#ps-live[data-st=done].on,#ps-live[data-st=failed].on{animation:psFlash 2.8s ease-in-out 2;animation-fill-mode:forwards}
-@keyframes psFlash{0%,100%{background:rgba(var(--lr),.035);box-shadow:inset 0 0 0 1px rgba(var(--lr),.22)}50%{background:rgba(var(--lr),.12);box-shadow:inset 0 0 0 1px rgba(var(--lr),.55),inset 0 0 30px rgba(var(--lr),.16)}}
-#ps-lname{color:#cfe2ea;letter-spacing:.08em}
+#ps-q{grid-row:1/4;overflow:auto;--hc:#7dffb2}#ps-out{--hc:#5ff6ff;grid-column:2;grid-row:2}#ps-con{--hc:#ffb347;grid-column:2;grid-row:3}
 /* RUN THESE sits at the top of the POWERSHELL right column (moved from CORE, Nov 2026); it only shows when something waits */
 #ps-body #runq{position:relative;left:auto;right:auto;bottom:auto;grid-column:2;grid-row:1;max-height:34vh;overflow:auto}
 #ps-oname{color:#cfe2ea;letter-spacing:.06em;margin-left:8px}
@@ -1189,8 +1183,8 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
 #ps-qlist:empty::before,#ps-runs:empty::before{content:'nothing here';color:#3d6c78;font-size:10px}
 #ps-uac{display:none;margin:0 0 8px;padding:8px 10px;border:1px solid #ffb347;color:#ffb347;font-size:10.5px;letter-spacing:.08em;animation:rqPulse 1.6s ease-in-out infinite;background:rgba(40,24,4,.5)}
 #ps-uac.on{display:block}#ps-uac b{color:#fff}
-#ps-log,#ps-term,#ps-ltext{flex:1;min-height:0;overflow:auto;margin:0;font:11px/1.35 Consolas,'Cascadia Mono',monospace;color:#9fe3bb;white-space:pre-wrap;word-break:break-word}
-#ps-log .end,#ps-ltext .end{color:#5ff6ff}#ps-ltext .bad,#ps-log .bad,#ps-term .err{color:#ff4466}#ps-term .cmd{color:#ffb347}#ps-term .dim{color:#3d6c78}
+#ps-log,#ps-term{flex:1;min-height:0;overflow:auto;margin:0;font:11px/1.35 Consolas,'Cascadia Mono',monospace;color:#9fe3bb;white-space:pre-wrap;word-break:break-word}
+#ps-log .end{color:#5ff6ff}#ps-log .bad,#ps-term .err{color:#ff4466}#ps-term .cmd{color:#ffb347}#ps-term .dim{color:#3d6c78}
 #ps-in{display:flex;gap:6px;align-items:center;padding-top:6px;border-top:1px solid #0f3b46;font:11px Consolas,'Cascadia Mono',monospace}
 #ps-modes{float:right;display:flex;gap:4px;margin-right:6px}#ps-modes button{float:none;opacity:.55}#ps-modes button.on{opacity:1;background:#ffb347;color:#011;--hb:#ffb347}
 #ps-modes button[data-m=admin].on{background:#ff4466;--hb:#ff4466}#ps-modes button[data-m=admin].live:not(.on){color:#ff4466;opacity:1}
@@ -1278,7 +1272,6 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
     <div class="hud" id="ps-q"><h4><b>RUN QUEUE</b> · scripts waiting for you</h4><div id="ps-qlist"></div><h4 style="margin-top:12px"><b>RUNS</b> · this session</h4><div id="ps-runs"></div></div>
     <div id="runq" role="status" aria-live="polite"><div class="rh"><b>RUN THESE</b><span id="runq-n"></span></div><div id="runq-list"></div></div>
     <div class="hud" id="ps-out"><h4><b>OUTPUT</b> <span id="ps-oname">pick a run</span></h4><div id="ps-uac">WINDOWS IS ASKING FOR ADMIN PERMISSION · click <b>Yes</b> on the prompt on your screen</div><pre id="ps-log"></pre></div>
-    <div class="hud" id="ps-live" data-st=""><h4><b>CMD LIVE</b> <span id="ps-lname"></span></h4><pre id="ps-ltext"></pre></div>
     <div class="hud" id="ps-con"><h4><b>CONSOLE</b> · <span id="ps-mname">PowerShell in SynTHBloK</span> <button type="button" id="ps-clear">CLEAR</button><button type="button" id="ps-aend" title="close the admin console now">END ADMIN</button><span id="ps-modes"><button type="button" data-m="ps" class="on">PS</button><button type="button" data-m="cmd">CMD</button><button type="button" data-m="admin" title="PowerShell as administrator: Windows asks once, then it stays on until END or 15 min idle">ADMIN</button></span></h4><pre id="ps-term"></pre><div id="ps-in"><span id="ps-prompt">PS&gt;</span><input id="ps-cmd" autocomplete="off" spellcheck="false" placeholder="a command: Get-ChildItem, Get-Process claude, ..." /></div></div>
   </div></div>
 <div id="libre" role="dialog" aria-label="LIBRE hardware diagnostics"><div class="head"><span><b>LIBRE · HARDWARE DIAGNOSTICS</b> &nbsp;<span id="lb-at">waiting for LibreHardwareMonitor…</span></span><button type="button" id="libre-x" aria-label="Close">&times;</button></div>
@@ -3880,7 +3873,7 @@ document.getElementById('runq-list').addEventListener('click', async e => {
   const st = row.querySelector('.st');
   if (b.classList.contains('sh')) return runqShell(it, 'show', st);
   if (b.classList.contains('f')) { try { const d = JSON.parse(localStorage.getItem('wb-runq-dismiss') || '{}'); d[it.id] = it.added; localStorage.setItem('wb-runq-dismiss', JSON.stringify(d)); } catch (e) {} return runqTick(); }
-  if ((it.script || /\.bat$/i.test(it.path || '')) && !b.classList.contains('sh')) return psRun(it.id);   // scripts and .bat files run (and show their output) in the POWERSHELL tab
+  if (it.script && !b.classList.contains('sh')) return psRun(it.id);   // scripts run (and show their output) in the POWERSHELL tab
   st.textContent = 'opening…';
   try {
     if (!RunQ.token) RunQ.token = ((await getText('/tools/.shell_token')) || '').trim();
@@ -3930,14 +3923,13 @@ async function psRun(id) {
   PSX.sel = r.j.run; PSX.from = 0; document.getElementById('ps-log').textContent = ''; await psTick(); runqTick();
 }
 function psDraw() {
-  const q = (RunQ.items || []).filter(x => (x.script || /\.bat$/i.test(x.path || '')) && !PSX.runs.some(r => r.item === x.id && (r.state === 'waiting' || r.state === 'needs-ok' || r.state === 'running')));
+  const q = (RunQ.items || []).filter(x => x.script && !PSX.runs.some(r => r.item === x.id && (r.state === 'waiting' || r.state === 'needs-ok' || r.state === 'running')));
   const ql = document.getElementById('ps-qlist'), qk = q.map(x => x.id + x.added).join('|') + RunQ.copyBusy;
   if (ql.dataset.k !== qk) { ql.dataset.k = qk;
     ql.innerHTML = q.map(x => { const wait = x.blockWhile === 'copy' && RunQ.copyBusy;
-      return `<div class="psi waiting" data-q="${escS(x.id)}"><i></i><b title="${escS(x.script)}">${escS(x.name)}</b><button type="button"${wait ? ' disabled class="alt"' : ''}>${wait ? 'WAIT' : x.admin ? 'RUN AS ADMIN' : 'RUN'}</button><em>${x.script ? '' : '.bat · output in CMD LIVE · '}${escS(x.why || '')}</em></div>`; }).join(''); }
+      return `<div class="psi waiting" data-q="${escS(x.id)}"><i></i><b title="${escS(x.script)}">${escS(x.name)}</b><button type="button"${wait ? ' disabled class="alt"' : ''}>${wait ? 'WAIT' : x.admin ? 'RUN AS ADMIN' : 'RUN'}</button><em>${escS(x.why || '')}</em></div>`; }).join(''); }
   const lbl = { waiting: 'STARTING', 'needs-ok': 'WAITING FOR YOUR OK', running: 'RUNNING', done: 'DONE', failed: 'FAILED' };
   document.getElementById('ps-runs').innerHTML = PSX.runs.map(r => `<div class="psi ${r.state}${r.id === PSX.sel ? ' sel' : ''}" data-r="${escS(r.id)}"><i></i><b>${escS(r.name)}</b><span>${lbl[r.state] || r.state}</span><em>${new Date(r.started).toLocaleTimeString()}${r.admin ? ' · admin' : ''}</em></div>`).join('');
-  psLiveShow();
   const s = PSX.runs.find(r => r.id === PSX.sel);
   document.getElementById('ps-uac').classList.toggle('on', !!s && s.state === 'needs-ok');
   if (s) document.getElementById('ps-oname').textContent = `${s.name} · ${lbl[s.state] || s.state}`;
@@ -3951,7 +3943,7 @@ async function psTick() {
       r.j.text.split(/\r?\n/).forEach((ln, i, a) => { if (i === a.length - 1 && ln === '') return; const d = document.createElement('span');
         d.className = /^##END 0/.test(ln) ? 'end' : /^##END|ERROR|FAILED|could not/i.test(ln) ? 'bad' : ''; d.textContent = ln.replace(/^##START/, '▶ started').replace(/^##END 0/, '■ finished OK').replace(/^##END (\d+)/, '■ finished with errors ($1)') + '\n'; el.appendChild(d); });
       PSX.from = r.j.next; if (end) el.scrollTop = el.scrollHeight; } } catch (e) {} }
-  await psLiveTick(); psDraw();
+  psDraw();
 }
 setInterval(() => { if (document.getElementById('psx').classList.contains('on') || PSX.runs.some(r => r.state !== 'done' && r.state !== 'failed')) psTick(); else psDraw(); }, 1500);
 document.getElementById('ps-q').addEventListener('click', e => {
@@ -3959,27 +3951,6 @@ document.getElementById('ps-q').addEventListener('click', e => {
   if (b && q && !b.disabled) return psRun(q.dataset.q);
   if (r) { PSX.sel = r.dataset.r; PSX.from = 0; document.getElementById('ps-log').textContent = ''; psTick(); }
 });
-// CMD LIVE: the newest .bat run, live; it stays up 20 s after it finishes
-PSX.live = { run: '', from: 0, endAt: 0 };
-function psLiveRun() { return PSX.runs.find(r => r.kind === 'bat' && ['waiting', 'needs-ok', 'running'].includes(r.state)) || PSX.runs.find(r => r.id === PSX.live.run); }
-function psLiveShow() {
-  if (!PSX.live) return;
-  const L = PSX.live, r = psLiveRun(), el = document.getElementById('ps-live');
-  if (r && r.id !== L.run) { L.run = r.id; L.from = 0; L.endAt = 0; document.getElementById('ps-ltext').textContent = ''; }
-  if (r && (r.state === 'done' || r.state === 'failed') && !L.endAt) L.endAt = Date.now();
-  const on = !!r && (!L.endAt || Date.now() - L.endAt < 20000);
-  el.classList.toggle('on', on); if (r) el.dataset.st = r.state;
-  const lbl = { waiting: 'STARTING', 'needs-ok': 'WAITING FOR YOUR OK', running: 'RUNNING', done: 'DONE', failed: 'FAILED' };
-  if (r) document.getElementById('ps-lname').textContent = '· ' + r.name + ' · ' + (lbl[r.state] || r.state);
-}
-async function psLiveTick() {
-  psLiveShow(); const L = PSX.live; if (!L.run || !document.getElementById('ps-live').classList.contains('on')) return;
-  try { const r = await psFetch('/ps/task/out?run=' + encodeURIComponent(L.run) + '&from=' + L.from);
-    if (r.j.ok && r.j.text) { const el = document.getElementById('ps-ltext'), end = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
-      r.j.text.split(/\r?\n/).forEach((ln, i, a) => { if (i === a.length - 1 && ln === '') return; const d = document.createElement('span');
-        d.className = /^##END 0/.test(ln) ? 'end' : /^##END|ERROR|FAILED|could not/i.test(ln) ? 'bad' : ''; d.textContent = ln.replace(/^##START/, '▶ started').replace(/^##END 0/, '■ finished OK').replace(/^##END (\d+)/, '■ finished with errors ($1)') + '\n'; el.appendChild(d); });
-      L.from = r.j.next; if (end) el.scrollTop = el.scrollHeight; } } catch (e) {}
-}
 // the console
 const psPut = (t, c) => { const el = document.getElementById('ps-term'), d = document.createElement('span'); if (c) d.className = c; d.textContent = t; el.appendChild(d); el.scrollTop = el.scrollHeight; };
 psPut('PowerShell · runs in your SynTHBloK folder (cd carries over). One command at a time; Ctrl+C stops it; no prompts that wait for typing.\nCMD = Command Prompt. ADMIN = PowerShell as administrator (Windows asks you once; it closes after 15 min idle or on END ADMIN).\n', 'dim');
@@ -3997,7 +3968,6 @@ function psModeDraw() {
   el.innerHTML = PSX.mode === 'cmd' ? 'Command Prompt in SynTHBloK' : PSX.mode === 'ps' ? 'PowerShell in SynTHBloK'
     : a.alive ? 'PowerShell <span class="warn">AS ADMINISTRATOR</span> · <span class="ok">ON</span> · closes after 15 min idle'
     : a.starting ? '<span class="warn">WINDOWS IS ASKING FOR ADMIN PERMISSION · click Yes on the prompt on your screen</span>' : 'admin console is off · click ADMIN to start it';
-  document.getElementById('ps-cmd').placeholder = PSX.mode === 'cmd' ? 'a command: dir, ipconfig, where python, ...' : PSX.mode === 'admin' ? 'an admin command: whoami /groups, Get-Service, ...' : 'a command: Get-ChildItem, Get-Process claude, ...';
   psPrompt();
 }
 async function psAdminTick() {
