@@ -1,4 +1,4 @@
-"""Renders BACKDROP's ART backgrounds into res/backdrops/*.jpg (19: the first 10, plus the PSYCHEDELIC set) (1920 x 1200, dark, so modules stay the star).
+"""Renders BACKDROP's ART backgrounds into res/backdrops/*.jpg (44: the first 10, the PSYCHEDELIC set, and round 6 from Nick's Midjourney picks) (1920 x 1200, dark, so modules stay the star).
 
 They are made once, here, and shipped as pictures: Rack draws each as ONE textured rectangle, so the most detailed
 art costs no more CPU or GPU than a plain colour. Run: python tools/make_backdrop_art.py  (needs numpy, scipy, Pillow)
@@ -519,9 +519,423 @@ def spheres():
 
 PSY = (wildstyle, liquid, kaleido, biolum, forge, escher, biomorph, sticker, spheres)
 
+
+# ======== ROUND 6: 25 pieces drawn from Nick's 50 approved Midjourney picks (#65-#195 of the scan) ========
+# Shared bits: polar coordinates, a mirrored (butterfly) field, glossy orbs, escape-time fractals.
+def polar(cx=W / 2, cy=H / 2):
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    return x, y, np.sqrt((x - cx) ** 2 + (y - cy) ** 2), np.arctan2(y - cy, x - cx)
+
+
+def neon_ramp(t, cols=(4, 0, 3, 5, 2, 1, 4)):
+    st = [(i / (len(cols) - 1), NEON[c]) for i, c in enumerate(cols)]
+    return ramp(np.mod(t, 1), st)
+
+
+def escape(c, z, it=160):
+    """Smooth escape-time count for z -> z^2 + c (both arrays)."""
+    n = np.zeros(z.shape); alive = np.ones(z.shape, bool)
+    for i in range(it):
+        z[alive] = z[alive] ** 2 + (c[alive] if np.ndim(c) else c)
+        esc = alive & (np.abs(z) > 4)
+        n[esc] = i + 1 - np.log2(np.log2(np.abs(z[esc]) + 1e-9) + 1e-9)
+        alive &= ~esc
+    n[alive] = 0
+    return n, alive
+
+
+# 20 MOTION PAINT (#65): broad loaded-brush strokes sweeping round the edges, red / teal / gold, wet highlights
+def motion():
+    rng = np.random.default_rng(201)
+    ang = ndimage.gaussian_filter(noise(202, 3, 2, 0.5, W // 4, H // 4), 3) * np.pi * 3
+    base = ramp(noise(203, 4, 2), [(0, (10, 6, 8)), (1, (26, 12, 14))])
+    cols = [(224, 52, 46), (24, 168, 170), (246, 186, 70), (250, 238, 220), (120, 30, 60)]
+    im = Image.new('RGB', (W, H)); im.paste(Image.fromarray(base.astype(np.uint8)))
+    dr = ImageDraw.Draw(im)
+    for i in range(900):
+        px, py = rng.random() * W, rng.random() * H
+        c = np.array(cols[int(rng.integers(0, len(cols)))]) * (0.55 + 0.45 * rng.random())
+        w_ = int(rng.integers(3, 16)); pts = []
+        for k in range(int(rng.integers(12, 40))):
+            a = ang[min(int(py / 4), H // 4 - 1), min(int(px / 4), W // 4 - 1)]
+            px += np.cos(a) * 9; py += np.sin(a) * 9
+            if not (0 <= px < W and 0 <= py < H): break
+            pts.append((px, py))
+        if len(pts) > 2: dr.line(pts, fill=tuple(int(v) for v in c), width=w_, joint='curve')
+    img = np.asarray(im.filter(ImageFilter.GaussianBlur(1.2))).astype(float)
+    img = img * 0.85 + ndimage.gaussian_filter(img, (10, 10, 0)) * 0.3
+    save('motion', vignette(calm_centre(img, 0.65), 0.45))
+
+
+# 21 MIRROR SWIRL (#97-#111): the butterfly symmetry of the neon illusion paintings, swirls meeting on the centre line
+def mirror_swirl():
+    x, y, r, a = polar()
+    xm = np.abs(x - W / 2)
+    n = ndimage.gaussian_filter(noise(211, 5, 2, 0.55), 4)
+    t = np.sin(xm / 70 + np.sin(y / 90 + n * 5) * 2.4) + np.cos(np.hypot(xm - 520, y - H / 2) / 34 - n * 6)
+    band = np.clip(1 - np.abs(np.sin(t * 3.0)) / 0.18, 0, 1)
+    col = neon_ramp(t * 0.18 + n * 0.6 + y / H * 0.3)
+    img = col * (0.04 + 0.7 * band[..., None]) + col * ndimage.gaussian_filter(band, 6)[..., None] * 0.3
+    save('mirror_swirl', vignette(calm_centre(img, 0.8), 0.45))
+
+
+# 22 IRIS VORTEX (#67-#75): concentric eye-like vortices at the corners, a ring of colour round a dark pupil
+def iris():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    img = np.zeros((H, W, 3)) + np.array([8, 4, 12])
+    n = ndimage.gaussian_filter(noise(221, 4, 3, 0.5), 3)
+    for i, (cx, cy, R) in enumerate([(220, 200, 330), (W - 240, 240, 300), (260, H - 220, 280), (W - 210, H - 200, 340), (W / 2, -40, 260), (W / 2, H + 60, 280)]):
+        r = np.hypot(x - cx, y - cy) / R; a = np.arctan2(y - cy, x - cx)
+        fib = np.abs(np.sin(a * 40 + r * 6 + n * 4)) ** 3
+        ring = np.clip(1 - np.abs(r - 0.55) / 0.42, 0, 1)
+        col = neon_ramp(r * 0.8 + a / np.pi * 0.2 + i * 0.17)
+        irisc = col * (ring * (0.35 + 0.65 * fib))[..., None]
+        pupil = np.clip((0.16 - r) / 0.03, 0, 1)
+        img = img + irisc * (r < 1)[..., None]
+        img = img * (1 - pupil[..., None] * 0.95)
+        img += np.array([255, 250, 240]) * np.exp(-((x - cx + R * 0.09) ** 2 + (y - cy + R * 0.09) ** 2) / (R * 0.035) ** 2)[..., None] * 0.8
+    save('iris', vignette(calm_centre(img, 0.5), 0.4))
+
+
+# 23 ILLUSION TUNNEL (#113, #114): nested frames receding into a far vanishing point, each edge lit in a new colour
+def tunnel():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    u = np.abs(x - W / 2) / (W / 2); v = np.abs(y - H / 2) / (H / 2)
+    d = np.maximum(u, v) + 1e-3
+    depth = np.log(d) * 5.0
+    n = ndimage.gaussian_filter(noise(231, 4, 2, 0.5), 3)
+    edge = np.clip(1 - np.abs(np.sin(depth * np.pi + n * 1.5)) / 0.12, 0, 1)
+    col = neon_ramp(depth * 0.09 + n * 0.3)
+    img = col * (edge * 0.8 + ndimage.gaussian_filter(edge, 5) * 0.7)[..., None] * np.clip(d * 1.6, 0, 1)[..., None]
+    img += np.array([6, 4, 10])
+    save('tunnel', vignette(calm_centre(img, 0.45), 0.35))
+
+
+# 24 PRISM SHARDS (#119, #121): faceted crystal shards, each face its own colour, white-hot edges
+def prism():
+    rng = np.random.default_rng(241)
+    pts = rng.random((260, 2)) * [W, H]
+    y, x = np.mgrid[0:H:2, 0:W:2].astype(float)
+    d = (x[..., None] - pts[:, 0]) ** 2 + (y[..., None] - pts[:, 1]) ** 2
+    o = np.argsort(d, axis=2)
+    i0 = o[..., 0]; d0 = np.take_along_axis(d, o[..., :1], 2)[..., 0]; d1 = np.take_along_axis(d, o[..., 1:2], 2)[..., 0]
+    edge = np.clip(1 - (np.sqrt(d1) - np.sqrt(d0)) / 3.0, 0, 1)
+    hue = rng.random(260)[i0]; lit = (0.25 + 0.75 * rng.random(260))[i0]
+    grad = (x / W - y / H) * 0.6
+    col = neon_ramp(hue + grad * 0.3) * (lit * (0.35 + 0.65 * np.clip(0.5 + grad, 0, 1)))[..., None]
+    col += 255 * edge[..., None] * 0.7
+    img = np.asarray(Image.fromarray(np.clip(col, 0, 255).astype(np.uint8)).resize((W, H), Image.BILINEAR)).astype(float)
+    img = img * 0.8 + ndimage.gaussian_filter(img, (8, 8, 0)) * 0.4
+    save('prism', vignette(calm_centre(img * 0.75, 0.75), 0.45))
+
+
+def _geom_lines(r, a, n, folds):
+    seg = np.pi / folds; am = np.abs(np.mod(a, 2 * seg) - seg)
+    u, v = r * np.cos(am), r * np.sin(am)
+    k = np.clip(1 - np.abs(np.sin(u / 46 + np.cos(v / 30) + n * 2)) / 0.06, 0, 1)
+    k += np.clip(1 - np.abs(np.sin(r / 38)) / 0.03, 0, 1) * 0.6
+    k += np.clip(1 - np.abs(np.sin(am * folds + r / 120)) / 0.04, 0, 1) * 0.7
+    return k
+
+
+# 25 BRONZE MANDALA (#135-#157): sacred geometry in hammered bronze and verdigris teal, lit from above
+def bronze():
+    x, y, r, a = polar()
+    n = ndimage.gaussian_filter(noise(251, 4, 2, 0.5), 2)
+    k = _geom_lines(r, a, n, 8)
+    metal = ramp(n * 0.6 + k * 0.25, [(0, (40, 22, 10)), (0.4, (150, 94, 40)), (0.7, (230, 180, 100)), (1, (255, 236, 190))])
+    teal = np.array([40, 150, 140]) * (ndimage.gaussian_filter(k, 6) * 0.6)[..., None]
+    k = np.minimum(k, 1.6)
+    img = metal * (k * 1.3 + ndimage.gaussian_filter(k, 3) * 0.8 + 0.06)[..., None] + teal * 1.5 + np.array([6, 6, 8])
+    img *= np.clip((r - 120) / 420, 0.1, 1)[..., None]
+    save('bronze_mandala', vignette(img, 0.4))
+
+
+# 26 FLOWER OF LIFE (#135, #137): overlapping circles across the whole field, glowing where they cross
+def flower_of_life():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    R = 110.0; k = np.zeros((H, W))
+    for j in range(-1, int(H / (R * 0.866)) + 2):
+        for i in range(-1, int(W / R) + 2):
+            cx = i * R + (R / 2 if j % 2 else 0); cy = j * R * 0.866
+            k += np.clip(1 - np.abs(np.hypot(x - cx, y - cy) - R) / 2.2, 0, 1)
+    n = ndimage.gaussian_filter(noise(261, 3, 2, 0.5), 4)
+    col = neon_ramp(n * 0.8 + y / H * 0.3, cols=(1, 4, 0, 5, 1))
+    img = col * (np.minimum(k, 2) * 0.45 + ndimage.gaussian_filter(k, 5) * 0.45)[..., None] * (0.3 + n[..., None])
+    save('flower_of_life', vignette(calm_centre(img, 0.75), 0.45))
+
+
+def _fibres(seed, cols, count=320, steps=180, width=1, field=4.0):
+    rng = np.random.default_rng(seed)
+    ang = ndimage.gaussian_filter(noise(seed + 1, 3, 2, 0.5, W // 4, H // 4), 2) * np.pi * field
+    def draw(d, rng):
+        for i in range(count):
+            px, py = rng.random() * W, rng.random() * H; pts = []
+            for k in range(steps):
+                a = ang[min(int(py / 4), H // 4 - 1), min(int(px / 4), W // 4 - 1)] + rng.normal() * 0.15
+                px += np.cos(a) * 4; py += np.sin(a) * 4
+                if not (0 <= px < W and 0 <= py < H): break
+                pts.append((px, py))
+            if len(pts) > 3:
+                c = cols[i % len(cols)]; f = 0.3 + 0.7 * rng.random()
+                d.line(pts, fill=tuple(int(v * f) for v in c), width=width)
+    return glow_layer(draw, blur=(2, 8, 20), seed=seed)
+
+
+# 27 GOLD FILAMENT (#82): fine golden fibre-optic strands drifting on black
+def gold_filament():
+    img = _fibres(271, [(255, 196, 90), (255, 150, 40), (255, 236, 180)]) * 0.55 + np.array([6, 4, 2])
+    save('gold_filament', vignette(calm_centre(img, 0.7), 0.45))
+
+
+# 28 VIOLET NEURAL (#82, #189): purple and magenta neurons, bright somas, dendrites branching outward
+def violet_neural():
+    def draw(d, rng):
+        for i in range(60):
+            cx, cy = rng.random() * W, rng.random() * H
+            c = [(180, 80, 255), (255, 60, 200), (120, 140, 255)][i % 3]
+            def branch(px, py, a, ln, w_, depth):
+                if depth == 0 or ln < 6: return
+                ex, ey = px + np.cos(a) * ln, py + np.sin(a) * ln
+                d.line([(px, py), (ex, ey)], fill=tuple(int(v * (0.4 + 0.15 * depth)) for v in c), width=max(1, int(w_)))
+                for s_ in (-1, 1):
+                    if rng.random() < 0.8: branch(ex, ey, a + s_ * rng.uniform(0.25, 0.7), ln * rng.uniform(0.6, 0.85), w_ * 0.7, depth - 1)
+            for k in range(int(rng.integers(4, 8))): branch(cx, cy, rng.random() * 6.3, rng.uniform(30, 70), 3, 6)
+            d.ellipse([cx - 7, cy - 7, cx + 7, cy + 7], fill=(255, 220, 255))
+    img = glow_layer(draw, blur=(2, 7, 18), seed=281) * 0.6 + np.array([8, 2, 14])
+    save('violet_neural', vignette(calm_centre(img, 0.7), 0.45))
+
+
+# 29 COSMIC SWIRL (#76, #77): a spiral of star-stuff in every colour, arms wrapping the dark middle
+def cosmic_swirl():
+    x, y, r, a = polar()
+    n = noise(291, 7, 3, 0.6)
+    arm = np.sin(a * 3 - np.log(r + 30) * 5 + n * 3)
+    dens = np.clip(arm * 0.5 + 0.5, 0, 1) ** 3 * np.exp(-(r / 900) ** 2) * (0.4 + n)
+    col = neon_ramp(np.log(r + 30) * 0.25 + n * 0.4, cols=(4, 0, 3, 5, 1, 4))
+    img = col * dens[..., None] + ndimage.gaussian_filter(col * dens[..., None], (14, 14, 0)) * 0.8
+    img = stars(img * np.clip((r - 150) / 300, 0.05, 1)[..., None], 292, 2400)
+    save('cosmic_swirl', vignette(img, 0.4))
+
+
+# 30 DREAM CLOUDS (#86): billowing clouds in purple, green and blue, curling into one another
+def dream_clouds():
+    n1, n2 = noise(301, 8, 3, 0.6), noise(302, 8, 2, 0.6)
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    w = ndimage.map_coordinates(n1, [np.clip(y + (n2 - 0.5) * 260, 0, H - 1), np.clip(x + (n1 - 0.5) * 260, 0, W - 1)], order=1)
+    col = ramp(w, [(0, (6, 4, 16)), (0.35, (70, 30, 150)), (0.55, (40, 170, 120)), (0.75, (60, 110, 230)), (1, (240, 220, 255))])
+    curl = np.clip(1 - np.abs(np.sin(w * 30)) / 0.05, 0, 1) * 0.2
+    g = col.mean(2, keepdims=True); col = g + (col - g) * 1.5
+    img = col * (0.6 + curl[..., None]) * 0.85
+    save('dream_clouds', vignette(calm_centre(img, 0.6), 0.45))
+
+
+# 31 INK BLOOM (#88): ink dropped in water, plumes of magenta, blue and gold blooming from the edges
+def ink_bloom():
+    rng = np.random.default_rng(311)
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    img = np.zeros((H, W, 3)) + 4
+    for i in range(14):
+        cx, cy = rng.choice([rng.random() * W * 0.25, W - rng.random() * W * 0.25]), rng.random() * H
+        n = noise(312 + i, 6, 3, 0.6)
+        d = np.hypot(x - cx, y - cy) / rng.uniform(260, 520) + (n - 0.5) * 1.4
+        plume = np.clip(1 - d, 0, 1) ** 1.6
+        fil = np.clip(1 - np.abs(np.sin(n * 40)) / 0.1, 0, 1) * plume
+        c = np.array([(230, 40, 150), (40, 90, 240), (250, 190, 60), (40, 210, 200)][i % 4], float)
+        img += c * (plume * 0.45 + fil * 0.5)[..., None]
+    save('ink_bloom', vignette(calm_centre(img, 0.6), 0.45))
+
+
+# 32 GLASS WORLD (#90): big glass spheres, each holding a spiralling world, rim light and reflections
+def glass_world():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    img = ramp(noise(321, 4, 2), [(0, (6, 4, 12)), (1, (20, 10, 30))])
+    for i, (cx, cy, R) in enumerate([(250, 330, 230), (W - 260, 300, 250), (W / 2 - 560, H - 240, 190), (W / 2 + 560, H - 230, 210), (W / 2, H + 120, 300)]):
+        r = np.hypot(x - cx, y - cy) / R; a = np.arctan2(y - cy, x - cx); m = r < 1
+        sw = np.sin(a * 2 + np.log(r + 0.02) * 6 + i)
+        inside = neon_ramp(sw * 0.2 + r * 0.6 + i * 0.2) * (0.25 + 0.75 * np.clip(sw * 0.5 + 0.5, 0, 1))[..., None]
+        inside *= (0.5 + 0.5 * np.sqrt(np.clip(1 - r ** 2, 0, 1)))[..., None]
+        rim = np.clip(1 - np.abs(r - 0.97) / 0.04, 0, 1)
+        spec = np.exp(-((x - cx + R * 0.38) ** 2 + (y - cy + R * 0.42) ** 2) / (R * 0.12) ** 2)
+        img = np.where(m[..., None], inside, img) + 255 * (rim * 0.55 + spec * 0.8 * m)[..., None]
+    save('glass_world', vignette(img * 0.95, 0.45))
+
+
+# 33 COPPER MAZE (#96): Escher-style isometric stairs and blocks in copper, impossible and endless
+def copper_maze():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    s = 64.0
+    u = (x / s + y / (s * 0.577)) / 2; v = (y / (s * 0.577) - x / s) / 2
+    iu, iv = np.floor(u), np.floor(v)
+    h = (np.sin(iu * 1.7 + iv * 0.9) * 0.5 + 0.5 + noise(331, 3, 2, 0.5) * 0.5)
+    fu, fv = u - iu, v - iv
+    face = np.where(fu > fv, 0.55, 0.85) * (0.4 + 0.6 * h)
+    top = np.clip(1 - np.abs(fu - fv) / 0.06, 0, 1)
+    edge = np.clip(1 - np.minimum(np.minimum(fu, 1 - fu), np.minimum(fv, 1 - fv)) / 0.04, 0, 1)
+    col = ramp(face, [(0, (30, 14, 8)), (0.5, (150, 70, 30)), (0.8, (220, 130, 60)), (1, (255, 210, 150))])
+    img = col * (1 - edge * 0.7)[..., None] + np.array([255, 200, 140]) * top[..., None] * 0.25
+    save('copper_maze', vignette(calm_centre(img, 0.7), 0.45))
+
+
+# 34 TESSELLATION (#80, #81): interlocking Escher tiles that morph from birds to fish across the field (abstract shapes)
+def tessellate():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    s = 90.0; m = x / W
+    wx = x / s + 0.35 * np.sin(y / s * np.pi * (1 + m)); wy = y / s + 0.35 * np.sin(x / s * np.pi * (2 - m))
+    cell = (np.floor(wx) + np.floor(wy)) % 2
+    edge = np.clip(1 - np.minimum(np.abs(wx - np.round(wx)), np.abs(wy - np.round(wy))) / 0.05, 0, 1)
+    c1 = ramp(m, [(0, (240, 120, 40)), (1, (40, 200, 220))]); c2 = ramp(m, [(0, (40, 30, 90)), (1, (120, 30, 80))])
+    img = np.where(cell[..., None] > 0, c1 * 0.55, c2 * 0.7) * (1 - edge * 0.85)[..., None]
+    save('tessellation', vignette(calm_centre(img, 0.65), 0.45))
+
+
+# 35 VIOLET RIDGES (#127, #128): organic purple ridges like a living landscape, magenta crests
+def violet_ridges():
+    n = noise(351, 8, 3, 0.6)
+    ridged = 1 - np.abs(n * 2 - 1)
+    lines = np.clip(1 - np.abs(np.sin(ridged * 26)) / 0.12, 0, 1)
+    col = ramp(ridged, [(0, (12, 2, 24)), (0.5, (90, 20, 150)), (0.8, (200, 50, 200)), (1, (255, 170, 240))])
+    img = col * (0.45 + 0.9 * lines[..., None]) * 1.2
+    save('violet_ridges', vignette(calm_centre(img, 0.65), 0.45))
+
+
+# 36 SNOW GLOBES (#133, #134): little psychedelic worlds sealed in glass, a Mandelbrot swirl in each
+def snow_globes():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    img = np.zeros((H, W, 3)) + np.array([6, 4, 10])
+    rng = np.random.default_rng(361)
+    spots = [(200, 220), (560, 140), (980, 110), (1380, 150), (1720, 260), (170, 640), (1760, 700), (300, 1010), (720, 1080), (1180, 1070), (1600, 1020)]
+    for i, (cx, cy) in enumerate(spots):
+        cx += rng.normal() * 30; cy += rng.normal() * 30; R = rng.uniform(80, 135)
+        x0, y0 = int(max(cx - R, 0)), int(max(cy - R, 0)); x1, y1 = int(min(cx + R, W)), int(min(cy + R, H))
+        if x1 <= x0 or y1 <= y0: continue
+        yy, xx = y[y0:y1, x0:x1], x[y0:y1, x0:x1]
+        r = np.hypot(xx - cx, yy - cy) / R; m = r < 1
+        c = (xx - cx) / R * 1.3 - 0.6 + 1j * (yy - cy) / R * 1.3
+        nn, inside = escape(c, np.zeros(c.shape, complex), 90)
+        col = neon_ramp(nn * 0.04 + i * 0.13) * (nn > 0)[..., None]
+        rim = 255 * (np.clip(1 - np.abs(r - 0.98) / 0.03, 0, 1) * 0.5 + np.exp(-((xx - cx + R * 0.4) ** 2 + (yy - cy + R * 0.4) ** 2) / (R * 0.1) ** 2) * 0.8)
+        img[y0:y1, x0:x1] = np.where(m[..., None], col * 0.9 + rim[..., None], img[y0:y1, x0:x1])
+    save('snow_globes', vignette(img, 0.4))
+
+
+# 37 MANDELBROT (#134, #137): the whole set, its black body filling the middle, edges banded in neon
+def mandelbrot():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    sc = 3.6 / W
+    c = (-0.62 + (x - W / 2) * sc) + 1j * ((y - H / 2) * sc)
+    n, inside = escape(c, np.zeros(c.shape, complex), 400)
+    t = np.log1p(np.maximum(n, 0))
+    band = np.clip(np.sin(t * 6) * 0.5 + 0.5, 0, 1) ** 2
+    img = neon_ramp(t * 0.3) * (0.1 + 0.9 * band)[..., None] * np.clip((t - 0.6) / 1.8, 0, 1)[..., None] * (~inside)[..., None]
+    save('mandelbrot', vignette(img * 0.8, 0.4))
+
+
+# 38 JULIA BLOOM (#189): a Julia set opening like a flower, petals of cyan and rose
+def julia():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    z = (x - W / 2) / H * 2.3 + 1j * (y - H / 2) / H * 2.3
+    n, inside = escape(np.full(z.shape, -0.8 + 0.156j), z, 220)
+    t = np.log1p(np.maximum(n, 0)) * 0.22
+    img = neon_ramp(t, cols=(1, 0, 4, 5, 1)) * np.clip(t * 1.4, 0, 1)[..., None] * (~inside)[..., None]
+    img += ndimage.gaussian_filter(img, (6, 6, 0)) * 0.5
+    save('julia', vignette(calm_centre(img * 0.85, 0.6), 0.4))
+
+
+# 39 CORAL CELLS (#195): glowing cellular walls like living coral, blue-green with warm nuclei
+def coral_cells():
+    rng = np.random.default_rng(391)
+    pts = rng.random((900, 2)) * [W, H]
+    y, x = np.mgrid[0:H:2, 0:W:2].astype(float)
+    from scipy.spatial import cKDTree
+    dd, ii = cKDTree(pts).query(np.stack([x.ravel(), y.ravel()], 1), k=2)
+    d0, d1 = dd[:, 0].reshape(x.shape), dd[:, 1].reshape(x.shape)
+    wall = np.clip(1 - (d1 - d0) / 6, 0, 1); nuc = np.clip(1 - d0 / 7, 0, 1)
+    n = noise(392, 4, 2, 0.5, x.shape[1], x.shape[0])
+    col = np.array([40, 230, 210]) * wall[..., None] * (0.4 + n[..., None]) + np.array([255, 150, 60]) * nuc[..., None] * 0.8
+    col += np.array([10, 60, 120]) * (d0 / 40)[..., None].clip(0, 1) * 0.3
+    img = np.asarray(Image.fromarray(np.clip(col, 0, 255).astype(np.uint8)).resize((W, H), Image.BILINEAR)).astype(float)
+    img = img * 0.8 + ndimage.gaussian_filter(img, (6, 6, 0)) * 0.6
+    save('coral_cells', vignette(calm_centre(img, 0.7), 0.45))
+
+
+# 40 LOTUS KALEIDO (#189): an 8-petal kaleidoscope flower in soft neon, petals layered outward
+def lotus():
+    x, y, r, a = polar()
+    seg = np.pi / 8; am = np.abs(np.mod(a, 2 * seg) - seg)
+    petal = np.clip(1 - np.abs(np.sin(r / 60 - np.cos(am * 8) * 1.4)) / 0.15, 0, 1)
+    vein = np.clip(1 - np.abs(np.sin(am * 24 + r / 30)) / 0.05, 0, 1) * 0.4
+    col = neon_ramp(r / 700 + am * 0.3, cols=(0, 4, 1, 5, 0))
+    img = col * (petal * 0.7 + vein + ndimage.gaussian_filter(petal, 5) * 0.4)[..., None] * np.clip((r - 150) / 380, 0.08, 1)[..., None]
+    save('lotus', vignette(img, 0.4))
+
+
+# 41 NEON MARBLE (#97-#112): strata of neon paint folded like marble, wildstyle colours, black veins
+def neon_marble():
+    n = noise(411, 7, 3, 0.6)
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    t = np.sin(y / 70 + n * 9 + np.sin(x / 260) * 2)
+    vein = np.clip(1 - np.abs(t) / 0.05, 0, 1)
+    col = neon_ramp(t * 0.15 + n * 0.8)
+    strata = np.abs(np.sin(y / 70 + n * 9 + np.sin(x / 260) * 2) ) ** 3
+    img = col * (0.7 * strata * (1 - vein))[..., None] + np.array([4, 2, 8])
+    save('neon_marble', vignette(calm_centre(img, 0.7), 0.45))
+
+
+# 42 MELT (#66, #78): colours dripping down from the top edge, Dali-soft, pooling at the foot
+def melt():
+    rng = np.random.default_rng(421)
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    drip = np.zeros(W)
+    for i in range(70):
+        cx, w_, ln = rng.random() * W, rng.uniform(20, 80), rng.uniform(150, 700)
+        drip = np.maximum(drip, ln * np.clip(1 - ((np.arange(W) - cx) / w_) ** 2, 0, 1) ** 0.5)
+    top = (y < (180 + drip[None, :] * 0.8))
+    band = neon_ramp(x / W * 1.3 + y / H * 0.4)
+    img = np.where(top[..., None], band * 0.5, 0) + np.where((y > H - 150)[..., None], band[::-1] * 0.3, 0)
+    edge = top.astype(float); glow = ndimage.gaussian_filter(edge, 10)
+    img = ndimage.gaussian_filter(img, (2.5, 2.5, 0)) * 0.7
+    img += band * (glow - edge).clip(0, 1)[..., None] * 0.5 + np.array([6, 4, 10])
+    save('melt', vignette(img, 0.4))
+
+
+# 43 THIRD EYE (#67-#81): the eyes that run through the face pieces, abstracted into a field of glowing rings
+def third_eye():
+    rng = np.random.default_rng(431)
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    img = np.zeros((H, W, 3)) + np.array([8, 4, 12])
+    for i in range(40):
+        cx, cy, R = rng.random() * W, rng.random() * H, rng.uniform(26, 90)
+        if ((cx - W / 2) / (W * 0.3)) ** 2 + ((cy - H / 2) / (H * 0.3)) ** 2 < 1: continue
+        r = np.hypot((x - cx) / 1.6, y - cy) / R
+        lid = np.clip(1 - np.abs(r - 1) / 0.08, 0, 1)
+        iris_ = np.clip(1 - np.abs(np.hypot(x - cx, y - cy) / R - 0.45) / 0.25, 0, 1) * (r < 1)
+        pupil = np.hypot(x - cx, y - cy) / R < 0.15
+        c = np.array(NEON[i % 6], float)
+        img += c * (lid * 0.8 + iris_ * 0.5)[..., None]
+        img[pupil] *= 0.1
+    img += ndimage.gaussian_filter(img, (8, 8, 0)) * 0.5
+    save('third_eye', vignette(img, 0.4))
+
+
+# 44 RAINBOW SURF (#98): prismatic waves rolling across, crests catching white light
+def rainbow_surf():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    n = ndimage.gaussian_filter(noise(441, 5, 2, 0.55), 4)
+    t = y / H * 6 + np.sin(x / 180 + n * 4) * 1.2 + n * 2
+    crest = np.clip(1 - np.abs(np.sin(t * np.pi)) / 0.06, 0, 1)
+    col = neon_ramp(t * 0.12 + x / W * 0.2)
+    img = col * (0.25 + 0.5 * (np.sin(t * np.pi) * 0.5 + 0.5))[..., None] + 255 * crest[..., None] * 0.35
+    save('rainbow_surf', vignette(calm_centre(img * 0.6, 0.75), 0.45))
+
+
+R6 = (motion, mirror_swirl, iris, tunnel, prism, bronze, flower_of_life, gold_filament, violet_neural, cosmic_swirl,
+      dream_clouds, ink_bloom, glass_world, copper_maze, tessellate, violet_ridges, snow_globes, mandelbrot, julia,
+      coral_cells, lotus, neon_marble, melt, third_eye, rainbow_surf)
+
 if __name__ == '__main__':
     import sys
     wanted = set(sys.argv[1:])
-    for fn in (nebula, aurora, topo, synthwave, flow, crystal, scope, marble, circuit, spectrum) + PSY:
-        if not wanted or fn.__name__ in wanted or ('psy' in wanted and fn in PSY):
+    for fn in (nebula, aurora, topo, synthwave, flow, crystal, scope, marble, circuit, spectrum) + PSY + R6:
+        if not wanted or fn.__name__ in wanted or ('psy' in wanted and fn in PSY) or ('r6' in wanted and fn in R6):
             fn()

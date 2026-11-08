@@ -98,6 +98,11 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   Species woods: `python3 tools/make_wood_textures.py [slugs]` -> res/cases/wood_*.png (full colour, not overlays); the
   SIDE MATERIAL entries with a `tex` use them, with WOOD FINISH (OILED/SATIN/GLOSS, json `sideFinish`).
   OVERVIEW's BUILDER · LIVE card mirrors the BUILDER preview (CASE ROUNDS now live only in COMPARE).
+  BACKDROP's MY IMAGES / MY PRESETS: folders `<Rack user>/SynTHBloK/backdrop-images` and `backdrop-presets` (presets are the
+  module's JSON minus the title), stepped on the OLED (BG page: MY IMAGES; THEME page: MY PRESET, SAVE PRESET) and in the menu.
+  Round 6 art (`make_backdrop_art.py r6`): 25 "Dream" pieces drawn from Nick's 50 approved Midjourney picks; themes can now
+  set a side material + wood finish (Theme.sideMat / sideFinish, SW_* names for the species woods).
+  Rails: BACKDROP never draws over the module rows, so Rack's own rails always show there; the LAB ASSEMBLY copies Rack's rail.
 - `tools/build_and_reload.ps1`: build, close Rack cleanly, devinstall, screenshots, reopen Rack.
 - `tools/rack_shots.ps1`: module screenshots into `web-images/screenshots`. Its default Rack path is Rack2Pro; on a
   PC with Rack Free pass `-Rack 'C:\Program Files\VCV\Rack2Free\Rack.exe'`.

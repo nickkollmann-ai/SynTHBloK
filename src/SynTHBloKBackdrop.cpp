@@ -12,6 +12,8 @@
 #include <patch.hpp>
 #include <cmath>
 #include <cstring>
+#include <algorithm>
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"   // the tables leave trailing fields at 0 on purpose
 #include <map>
 #include <ctime>
 #include <algorithm>
@@ -130,6 +132,10 @@ static const SideMat kSideMat[] = {
     {"SHOU SUGI BAN", M_WOOD, {}, "wood_shou_sugi_ban"},
 };
 static const char* const kSideFinish[] = {"OILED", "SATIN", "GLOSS"};
+enum { SW_BLACK_WALNUT = 20, SW_CLARO, SW_QS_OAK, SW_CHERRY, SW_HARD_MAPLE, SW_BIRCH_PLY, SW_CURLY_MAPLE, SW_QUILTED_MAPLE, SW_BIRDSEYE,
+       SW_SPALTED, SW_BUBINGA, SW_SAPELE, SW_ZEBRAWOOD, SW_PADAUK, SW_PURPLEHEART, SW_COCOBOLO, SW_WENGE, SW_MACASSAR, SW_ZIRICOTE,
+       SW_BOCOTE, SW_KOA, SW_LEOPARD, SW_AMBOYNA, SW_SHOU_SUGI_BAN };
+enum { F_OILED, F_SATIN, F_GLOSS };
 static const int kSideMatN = (int) (sizeof(kSideMat) / sizeof(kSideMat[0]));
 static NVGcolor sideColor(int i) {
     static const int c[][3] = {{0, 0, 0}, {92, 58, 34}, {168, 124, 78}, {136, 60, 34}, {44, 30, 24}, {196, 170, 130}, {196, 162, 114}, {38, 33, 30},
@@ -205,20 +211,28 @@ static std::vector<CaseStyle>& caseLibrary() {
 }
 
 // the SynTHBloK looks for the background
-static const int kLookN = 39;
-static const int kArtN = 19;
+static const int kLookN = 64;
+static const int kArtN = 44;
 enum { LOOK_GRADIENT = 18, LOOK_CASE_GRADIENT = 19, LOOK_ART = 20 };
 // ART: detailed pictures made once (tools/make_backdrop_art.py) and shipped in res/backdrops/: one textured
 // rectangle per frame, so they cost no more than a plain colour
 static const char* const kArtFile[kArtN] = {"nebula", "aurora", "topographic", "synthwave", "flowfield", "crystal", "oscilloscope", "marble", "circuit", "spectrum",
     // the PSYCHEDELIC set (Nov 2026), drawn from Nick's own abstract artwork
-    "wildstyle", "liquid", "kaleidoscope", "biolum", "forge", "escher", "biomorph", "stickerbomb", "spheres"};
+    "wildstyle", "liquid", "kaleidoscope", "biolum", "forge", "escher", "biomorph", "stickerbomb", "spheres",
+    // round 6 (Nov 2026): 25 pieces drawn from Nick's 50 approved Midjourney picks
+    "motion", "mirror_swirl", "iris", "tunnel", "prism", "bronze_mandala", "flower_of_life", "gold_filament", "violet_neural", "cosmic_swirl",
+    "dream_clouds", "ink_bloom", "glass_world", "copper_maze", "tessellation", "violet_ridges", "snow_globes", "mandelbrot", "julia",
+    "coral_cells", "lotus", "neon_marble", "melt", "third_eye", "rainbow_surf"};
 static const char* const kLookName[kLookN] = {"Plain colour", "Amber grid", "OLED glow", "Diamond plate", "Deep space", "Amber rails (Rack's look, warmer)",
     "Carbon weave", "Circuit traces", "CRT scanlines", "Hex mesh", "Blueprint", "Pegboard", "Acoustic foam", "Brushed steel",
     "Sunset fade", "Halftone dots", "Brick wall", "Wood slats", "Gradient (the colour, to black)", "Case gradient (follows the case)",
     "Art: Nebula", "Art: Aurora", "Art: Topographic", "Art: Synthwave", "Art: Flow field", "Art: Crystal", "Art: Oscilloscope", "Art: Gold marble", "Art: Circuit board", "Art: Spectrum",
     "Psychedelic: Neon wildstyle", "Psychedelic: Liquid illusion", "Psychedelic: Sacred kaleidoscope", "Psychedelic: Bioluminescent network", "Psychedelic: Machine elf forge",
-    "Psychedelic: Escher blocks", "Psychedelic: Grey biomorph", "Psychedelic: Sticker bomb", "Psychedelic: Glass spheres"};
+    "Psychedelic: Escher blocks", "Psychedelic: Grey biomorph", "Psychedelic: Sticker bomb", "Psychedelic: Glass spheres",
+    "Dream: Motion paint", "Dream: Mirror swirl", "Dream: Iris vortex", "Dream: Illusion tunnel", "Dream: Prism shards", "Dream: Bronze mandala",
+    "Dream: Flower of life", "Dream: Gold filament", "Dream: Violet neural", "Dream: Cosmic swirl", "Dream: Dream clouds", "Dream: Ink bloom",
+    "Dream: Glass world", "Dream: Copper maze", "Dream: Tessellation", "Dream: Violet ridges", "Dream: Snow globes", "Dream: Mandelbrot",
+    "Dream: Julia bloom", "Dream: Coral cells", "Dream: Lotus kaleido", "Dream: Neon marble", "Dream: Melt", "Dream: Third eye", "Dream: Rainbow surf"};
 static const char* const kFitName[4] = {"Tiled across the rack", "Fill the screen (snaps to fit)", "Fit the screen (whole image shows)", "Centred on the screen"};
 static const int kColorN = 28;
 static const char* const kColorName[kColorN] = {"Black", "Charcoal", "Deep amber", "Ember", "Midnight teal", "Plum", "Forest", "Steel",
@@ -247,6 +261,7 @@ struct SynTHBloKBackdrop : Module {
     bool shadow = true, rails = true;
     bool showTitle = false;   // the name above the case: optional, off unless turned on (NAME page or menu)
     std::string title;   // empty: the patch's file name
+    std::string presetPath;   // the preset last loaded or saved (shown on the THEME page)
 
     // the info strip's level meter: patch your mix into L / R
     enum InputIds { IN_L, IN_R, NUM_INPUTS };
@@ -295,10 +310,12 @@ struct SynTHBloKBackdrop : Module {
         json_object_set_new(r, "rails", json_boolean(rails));
         json_object_set_new(r, "showTitle", json_boolean(showTitle));
         json_object_set_new(r, "title", json_string(title.c_str()));
+        json_object_set_new(r, "preset", json_string(presetPath.c_str()));
         return r;
     }
     void dataFromJson(json_t* r) override {
         if (json_t* v = json_object_get(r, "showBg")) showBg = json_boolean_value(v);
+        if (json_t* v = json_object_get(r, "preset")) presetPath = json_string_value(v);
         if (json_t* v = json_object_get(r, "look")) look = clamp((int) json_integer_value(v), 0, kLookN - 1);
         themeIdx = -1;
         if (json_t* v = json_object_get(r, "theme")) themeIdx = (int) json_integer_value(v);
@@ -1500,7 +1517,7 @@ struct NameOled : ui::TextField {
 
 
 // THEMES: a look, a colour, a case and a depth that go together. Pick one, then change any part (it shows CUSTOM).
-struct Theme { const char* name; int look; int color; const char* caseName; float depthMm; };
+struct Theme { const char* name; int look; int color; const char* caseName; float depthMm; int sideMat; int sideFinish; };   // sideMat/Finish: 0 = the case's own
 static const Theme kThemes[] = {
     {"SYNTHBLOK BLACK", LOOK_GRADIENT, 0, "BLACK ANODIZED", 65.f},
     {"WALNUT STUDIO", LOOK_CASE_GRADIENT, 0, "WALNUT SKIFF", 84.f},
@@ -1574,6 +1591,32 @@ static const Theme kThemes[] = {
     {"NEON PINK NIGHT", LOOK_GRADIENT, 25, "NEON ACRYLIC PINK", 50.f},
     {"ACID GREEN", LOOK_GRADIENT, 26, "UV PRINT LIME", 65.f},
     {"UV BLUE", LOOK_GRADIENT, 27, "NEON ACRYLIC CYAN", 50.f},
+    // DREAM combos (round 6): the Midjourney-inspired art with matching cases and species-wood side panels
+    {"MOTION WALNUT", LOOK_ART + 19, 0, "WALNUT CONSOLE", 120.f, SW_BLACK_WALNUT, F_OILED},
+    {"MIRROR NEON", LOOK_ART + 20, 0, "STEPPED NEON", 84.f, 0, 0},
+    {"IRIS WATCH", LOOK_ART + 21, 0, "BLACK ANODIZED", 65.f, SW_MACASSAR, F_GLOSS},
+    {"TUNNEL VISION", LOOK_ART + 22, 0, "SMOKED ACRYLIC", 50.f, 0, 0},
+    {"PRISM CASE", LOOK_ART + 23, 0, "CLEAR ACRYLIC", 50.f, SW_PURPLEHEART, F_GLOSS},
+    {"BRONZE TEMPLE", LOOK_ART + 24, 0, "EBONY GOLD CONSOLE", 120.f, SW_BUBINGA, F_SATIN},
+    {"FLOWER OF LIFE", LOOK_ART + 25, 0, "CURVED VIOLET", 100.f, 0, 0},
+    {"GOLD FIBRE", LOOK_ART + 26, 0, "BLACK PLY STUDIO", 100.f, SW_WENGE, F_OILED},
+    {"NEURAL VIOLET", LOOK_ART + 27, 0, "SMOKED VIOLET ACRYLIC", 50.f, SW_PURPLEHEART, F_SATIN},
+    {"COSMIC KOA", LOOK_ART + 28, 0, "CURVED CONSOLE", 100.f, SW_KOA, F_GLOSS},
+    {"CLOUD NINE", LOOK_ART + 29, 0, "POD PURPLE", 65.f, SW_QUILTED_MAPLE, F_GLOSS},
+    {"INK AND MAPLE", LOOK_ART + 30, 0, "BIRCH PLY STUDIO", 84.f, SW_SPALTED, F_OILED},
+    {"GLASS WORLD", LOOK_ART + 31, 0, "NEON ACRYLIC CYAN", 50.f, 0, 0},
+    {"COPPER STAIRS", LOOK_ART + 32, 0, "STEPPED WALNUT", 120.f, SW_PADAUK, F_SATIN},
+    {"TESSELLATE", LOOK_ART + 33, 0, "STEPPED OAK", 100.f, SW_QS_OAK, F_OILED},
+    {"VIOLET RIDGE", LOOK_ART + 34, 0, "BLACKLIGHT POD", 65.f, SW_ZIRICOTE, F_SATIN},
+    {"SNOW GLOBE", LOOK_ART + 35, 0, "POD BLUE", 65.f, SW_BIRDSEYE, F_GLOSS},
+    {"MANDELBROT", LOOK_ART + 36, 0, "CARBON FIBER", 65.f, SW_SHOU_SUGI_BAN, F_OILED},
+    {"JULIA", LOOK_ART + 37, 0, "NEON ACRYLIC PINK", 50.f, 0, 0},
+    {"REEF", LOOK_ART + 38, 0, "MYCELIUM LATTICE", 84.f, 0, 0},
+    {"LOTUS", LOOK_ART + 39, 0, "CHERRY STUDIO", 100.f, SW_CHERRY, F_GLOSS},
+    {"NEON MARBLE", LOOK_ART + 40, 0, "GRAFFITI ROAD CASE", 84.f, SW_ZEBRAWOOD, F_GLOSS},
+    {"MELTDOWN", LOOK_ART + 41, 0, "FORGE STEEL", 100.f, SW_COCOBOLO, F_OILED},
+    {"THIRD EYE", LOOK_ART + 42, 0, "IRIDESCENT ANODIZED", 65.f, SW_AMBOYNA, F_GLOSS},
+    {"RAINBOW SURF", LOOK_ART + 43, 0, "WEST COAST BOAT", 84.f, SW_CURLY_MAPLE, F_GLOSS},
 };
 static const int kThemeN = (int) (sizeof(kThemes) / sizeof(kThemes[0]));
 static void applyTheme(SynTHBloKBackdrop* m, int i) {
@@ -1581,9 +1624,72 @@ static void applyTheme(SynTHBloKBackdrop* m, int i) {
     const Theme& t = kThemes[i];
     m->look = t.look; m->colorIdx = t.color; m->depthMm = t.depthMm; m->showBg = true;
     m->sideShape = m->sideMat = m->sideWidth = m->openMode = 0;
+    m->sideMat = clamp(t.sideMat, 0, kSideMatN - 1); m->sideFinish = clamp(t.sideFinish, 0, 2);
     const std::vector<CaseStyle>& lib = caseLibrary();
     for (size_t k = 0; k < lib.size(); k++) if (lib[k].name == t.caseName) m->caseIdx = (int) k;
     m->themeIdx = i;
+}
+// ---- MY IMAGES and PRESETS: two plain folders in Rack's user folder (Documents\Rack2\SynTHBloK\...), so images and
+// looks can be dropped in from Explorer and stepped through on the panel. A preset is BACKDROP's settings as JSON
+// (look, colour, image, case, sides, wood, finish), without the patch title.
+static std::string myImagesDir() { std::string d = asset::user("SynTHBloK/backdrop-images"); system::createDirectories(d); return d; }
+static std::string presetsDir() { std::string d = asset::user("SynTHBloK/backdrop-presets"); system::createDirectories(d); return d; }
+static std::vector<std::string> listFiles(const std::string& dir, std::vector<std::string> exts) {
+    std::vector<std::string> out;
+    for (const std::string& p : system::getEntries(dir)) {
+        std::string e = string::lowercase(system::getExtension(p));
+        if (!e.empty() && e[0] == '.') e = e.substr(1);
+        if (std::find(exts.begin(), exts.end(), e) != exts.end()) out.push_back(p);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+// the OLED redraws often: the folders are read at most once a second
+static const std::vector<std::string>& cachedList(int which) {
+    static std::vector<std::string> L[2]; static double at[2] = {-10.0, -10.0};
+    double now = system::getTime();
+    if (now - at[which] > 1.0) {
+        at[which] = now;
+        L[which] = which == 0 ? listFiles(myImagesDir(), {"png", "jpg", "jpeg", "bmp", "gif"}) : listFiles(presetsDir(), {"json"});
+    }
+    return L[which];
+}
+static std::vector<std::string> myImages() { return cachedList(0); }
+static std::vector<std::string> myPresets() { return cachedList(1); }
+static void useImage(SynTHBloKBackdrop* m, const std::string& path) {
+    m->imagePath = path; m->showBg = true;
+    m->fit = 1; m->imgScale = 1.f; m->imgW = m->imgH = 1.f; m->imgX = m->imgY = 0.f;   // snap it in, every time
+}
+static void stepIn(const std::vector<std::string>& L, const std::string& cur, int d, std::function<void(const std::string&)> use) {
+    if (L.empty()) return;
+    int i = -1;
+    for (size_t k = 0; k < L.size(); k++) if (L[k] == cur) i = (int) k;
+    int n = (int) L.size();
+    i = i < 0 ? (d < 0 ? n - 1 : 0) : ((i + d) % n + n) % n;
+    use(L[i]);
+}
+static void loadPreset(SynTHBloKBackdrop* m, const std::string& path) {
+    json_error_t err;
+    json_t* j = json_load_file(path.c_str(), 0, &err);
+    if (!j) return;
+    std::string keepTitle = m->title; bool keepShow = m->showTitle;   // the patch's own name stays
+    m->dataFromJson(j);
+    m->title = keepTitle; m->showTitle = keepShow; m->presetPath = path;
+    json_decref(j);
+}
+static void savePresetAs(SynTHBloKBackdrop* m) {
+    osdialog_filters* f = osdialog_filters_parse("BACKDROP preset:json");
+    std::string def = m->presetPath.empty() ? "my look.json" : system::getFilename(m->presetPath);
+    char* path = osdialog_file(OSDIALOG_SAVE, presetsDir().c_str(), def.c_str(), f);
+    osdialog_filters_free(f);
+    if (!path) return;
+    std::string p = path; std::free(path);
+    if (string::lowercase(system::getExtension(p)).find("json") == std::string::npos) p += ".json";
+    json_t* j = m->dataToJson();
+    json_object_del(j, "title"); json_object_del(j, "showTitle"); json_object_del(j, "preset");
+    json_object_set_new(j, "backdropPreset", json_integer(1));
+    if (json_dump_file(j, p.c_str(), JSON_INDENT(2)) == 0) m->presetPath = p;
+    json_decref(j);
 }
 // ---- the OLED menu: the settings on the panel, so nobody has to dig in the right-click menu ----------------
 // Tabs BG / CASE / NAME along the top; each row is a small label over its value. Click the left half of a row
@@ -1592,7 +1698,10 @@ static void applyTheme(SynTHBloKBackdrop* m, int i) {
 static const char* const kLookShort[kLookN] = {"PLAIN", "AMBER GRID", "OLED GLOW", "DIAMOND PLATE", "DEEP SPACE", "AMBER RAILS",
     "CARBON WEAVE", "CIRCUIT", "SCANLINES", "HEX MESH", "BLUEPRINT", "PEGBOARD", "FOAM", "BRUSHED STEEL", "SUNSET FADE", "HALFTONE", "BRICK", "WOOD SLATS", "GRADIENT", "CASE GRADIENT",
     "NEBULA", "AURORA", "TOPOGRAPHIC", "SYNTHWAVE", "FLOW FIELD", "CRYSTAL", "OSCILLOSCOPE", "GOLD MARBLE", "CIRCUIT BOARD", "SPECTRUM",
-    "WILDSTYLE", "LIQUID", "KALEIDOSCOPE", "BIOLUMINESCENT", "MACHINE ELF", "ESCHER", "BIOMORPH", "STICKER BOMB", "GLASS SPHERES"};
+    "WILDSTYLE", "LIQUID", "KALEIDOSCOPE", "BIOLUMINESCENT", "MACHINE ELF", "ESCHER", "BIOMORPH", "STICKER BOMB", "GLASS SPHERES",
+    "MOTION PAINT", "MIRROR SWIRL", "IRIS VORTEX", "TUNNEL", "PRISM SHARDS", "BRONZE MANDALA", "FLOWER OF LIFE", "GOLD FILAMENT",
+    "VIOLET NEURAL", "COSMIC SWIRL", "DREAM CLOUDS", "INK BLOOM", "GLASS WORLD", "COPPER MAZE", "TESSELLATION", "VIOLET RIDGES",
+    "SNOW GLOBES", "MANDELBROT", "JULIA BLOOM", "CORAL CELLS", "LOTUS", "NEON MARBLE", "MELT", "THIRD EYE", "RAINBOW SURF"};
 static const char* const kFitShort[4] = {"TILED", "FILL", "FIT", "CENTRED"};
 static const float kDepthMm[9] = {0.f, 25.f, 40.f, 50.f, 65.f, 84.f, 100.f, 120.f, 150.f};
 struct BackdropOled : widget::OpaqueWidget {
@@ -1614,6 +1723,12 @@ struct BackdropOled : widget::OpaqueWidget {
         if (page == 0) {   // THEME: pick one, then combine its parts as you like
             r.push_back({"THEME", m->themeIdx >= 0 && m->themeIdx < kThemeN ? kThemes[m->themeIdx].name : "CUSTOM",
                 [=](int d) { applyTheme(m, (m->themeIdx >= 0 ? m->themeIdx : -1 + (d < 0 ? 1 : 0)) + d); }, false});
+            {   // MY PRESETS: step through the presets folder (each step loads one); SAVE writes the current look
+                std::vector<std::string> P = myPresets();
+                std::string pv = !m->presetPath.empty() && system::exists(m->presetPath) ? string::uppercase(system::getStem(m->presetPath)) : P.empty() ? "NONE SAVED" : string::f("%d SAVED", (int) P.size());
+                r.push_back({"MY PRESET", pv, [=](int d) { stepIn(myPresets(), m->presetPath, d, [=](const std::string& p) { loadPreset(m, p); }); }, false});
+                r.push_back({"SAVE PRESET", "SAVE AS...", [=](int) { savePresetAs(m); }, true});
+            }
             r.push_back({"LOOK", kLookShort[clamp(m->look, 0, kLookN - 1)], [=](int d) { m->look = wrap(m->look, d, kLookN); hand(); }, false});
             r.push_back({"COLOUR", string::uppercase(kColorName[clamp(m->colorIdx, 0, kColorN - 1)]), [=](int d) { m->colorIdx = wrap(m->colorIdx, d, kColorN); hand(); }, false});
             r.push_back({"CASE", clib[clamp(m->caseIdx, 0, cn - 1)].name, [=](int d) { m->caseIdx = wrap(m->caseIdx, d, cn); hand(); }, false});
@@ -1630,6 +1745,16 @@ struct BackdropOled : widget::OpaqueWidget {
                 osdialog_filters_free(f);
                 if (path) { m->imagePath = path; std::free(path); m->fit = 1; m->imgScale = 1.f; m->imgW = m->imgH = 1.f; m->imgX = m->imgY = 0.f; }
             }, false});
+            {   // MY IMAGES: step through the images folder; empty, a click opens the folder to drop some in
+                std::vector<std::string> L = myImages();
+                bool mine = !m->imagePath.empty() && system::getDirectory(m->imagePath) == system::getDirectory(myImagesDir() + "/x");
+                std::string iv = L.empty() ? "OPEN FOLDER" : mine ? string::uppercase(system::getStem(m->imagePath)) : string::f("%d IMAGES", (int) L.size());
+                r.push_back({"MY IMAGES", iv, [=](int d) {
+                    std::vector<std::string> L2 = myImages();
+                    if (L2.empty()) { system::openDirectory(myImagesDir()); return; }
+                    stepIn(L2, m->imagePath, d, [=](const std::string& p) { useImage(m, p); });
+                }, false});
+            }
             if (!m->imagePath.empty()) {
                 r.push_back({"IMAGE FIT", kFitShort[clamp(m->fit, 0, 3)], [=](int d) { m->fit = wrap(m->fit, d, 4); }, false});
                 r.push_back({"DARKEN", string::f("%d%%", (int) std::round(m->imgDim * 100.f)), [=](int d) { m->imgDim = clamp(m->imgDim + d * 0.05f, 0.f, 0.9f); }, false});
@@ -1963,6 +2088,29 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
             [=]() { return (size_t) m->look; }, [=](size_t i) { m->look = (int) i; }));
         menu->addChild(createIndexSubmenuItem("Colour", std::vector<std::string>(kColorName, kColorName + kColorN),
             [=]() { return (size_t) m->colorIdx; }, [=](size_t i) { m->colorIdx = (int) i; }));
+        menu->addChild(createSubmenuItem("My images", string::f("%d", (int) myImages().size()), [=](Menu* sub) {
+            std::vector<std::string> L = myImages();
+            if (L.empty()) sub->addChild(createMenuLabel("(none yet: drop images in the folder)"));
+            for (const std::string& p : L)
+                sub->addChild(createCheckMenuItem(system::getStem(p), "", [=]() { return m->imagePath == p; }, [=]() { useImage(m, p); m->themeIdx = -1; }));
+            sub->addChild(new MenuSeparator);
+            sub->addChild(createMenuItem("Open my images folder", "", [=]() { system::openDirectory(myImagesDir()); }));
+        }));
+        menu->addChild(createSubmenuItem("My presets", m->presetPath.empty() ? "" : system::getStem(m->presetPath), [=](Menu* sub) {
+            sub->addChild(createMenuItem("Save the current look as a preset...", "", [=]() { savePresetAs(m); }));
+            std::vector<std::string> P = myPresets();
+            if (!P.empty()) sub->addChild(new MenuSeparator);
+            for (const std::string& p : P)
+                sub->addChild(createCheckMenuItem(system::getStem(p), "", [=]() { return m->presetPath == p; }, [=]() { loadPreset(m, p); }));
+            sub->addChild(new MenuSeparator);
+            sub->addChild(createMenuItem("Load a preset from a file...", "", [=]() {
+                osdialog_filters* f = osdialog_filters_parse("BACKDROP preset:json");
+                char* path = osdialog_file(OSDIALOG_OPEN, presetsDir().c_str(), NULL, f);
+                osdialog_filters_free(f);
+                if (path) { loadPreset(m, path); std::free(path); }
+            }));
+            sub->addChild(createMenuItem("Open my presets folder", "", [=]() { system::openDirectory(presetsDir()); }));
+        }));
         menu->addChild(createMenuItem("Load an image...", m->imagePath.empty() ? "" : system::getFilename(m->imagePath), [=]() {
             osdialog_filters* f = osdialog_filters_parse("Images:png,jpg,jpeg,bmp,gif");
             char* path = osdialog_file(OSDIALOG_OPEN, NULL, NULL, f);

@@ -1430,6 +1430,8 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
   <input id="site-url" spellcheck="false" autocomplete="off" value="https://www.liquidnick.com/" title="any liquidnick.com page, Enter opens it" />
   <button type="button" id="site-reload" title="reload the page">RELOAD</button><button type="button" id="site-watch" class="on" title="check the page for changes every minute">WATCH</button>
   <button type="button" id="site-open" title="open it in your browser">OPEN ↗</button>
+  <button type="button" id="site-signin" title="Sign in to your liquidnick.com account in its own window (same workbench profile). Edge won't keep a sign-in inside the frame (the site's cookies are SameSite=Lax), so signed-in pages live in this window; it reloads with the site's live updates.">SIGN IN ↗</button>
+  <button type="button" id="site-acct" title="your account page (devices, security), in the signed-in window">ACCOUNT ↗</button>
   <span id="site-stat"><i></i><span id="site-st">not checked yet</span></span><button type="button" id="site-x" aria-label="Close">&times;</button></div>
   <div class="site-v on" id="site-live">
     <div class="sx site-frame"><div class="bar"><b>LIVE</b><span id="site-cur">www.liquidnick.com</span></div><iframe id="site-if" title="liquidnick.com" referrerpolicy="no-referrer"></iframe>
@@ -3271,12 +3273,18 @@ const Asm = (() => {
     if (cs.ends === 'truss') { const w = s * 0.62, cx = xin + dir * s * 0.5, hh = w * 1.15; let i = 0;
       for (let ty = top + 10; ty + hh < bot - 8; ty += hh * 0.62, i++) { ctx.moveTo(cx - w / 2, i & 1 ? ty : ty + hh); ctx.lineTo(cx, i & 1 ? ty + hh : ty); ctx.lineTo(cx + w / 2, i & 1 ? ty : ty + hh); ctx.closePath(); } }
   }
+  // RAILS: VCV Rack's own rails, never restyled (BACKDROP leaves the module rows open so Rack draws them in the real
+  // rack). Same proportions as Rack: a row is 380 px, each rail 15 px (1 HP) tall, a hole every HP; colours sampled
+  // from Rack 2's rail (a cool grey gradient, a thin lit top edge, near-black holes a little above the middle).
   function rails(g, a) {
     ctx.globalAlpha = a;
-    for (let r = 0; r < g.rows; r++) for (const yy of [g.inY + r * g.rowH, g.inY + r * g.rowH + g.rowH - 18]) {
-      const gr = ctx.createLinearGradient(0, yy, 0, yy + 18); gr.addColorStop(0, rgb(mix(cs.rail, [255, 255, 255], 0.35))); gr.addColorStop(1, rgb(mix(cs.rail, [0, 0, 0], 0.35)));
-      ctx.fillStyle = gr; ctx.fillRect(g.inX, yy, g.inW, 18);
-      ctx.fillStyle = 'rgba(0,0,0,.55)'; for (let hx = g.inX + 9; hx < g.inX + g.inW; hx += 18) { ctx.beginPath(); ctx.arc(hx, yy + 9, 2, 0, 7); ctx.fill(); }
+    const hp = g.rowH * 15 / 380, rh = hp;
+    for (let r = 0; r < g.rows; r++) for (const yy of [g.inY + r * g.rowH, g.inY + r * g.rowH + g.rowH - rh]) {
+      const gr = ctx.createLinearGradient(0, yy, 0, yy + rh);
+      gr.addColorStop(0, '#38383a'); gr.addColorStop(0.06, '#575759'); gr.addColorStop(0.55, '#3f3f41'); gr.addColorStop(0.94, '#212123'); gr.addColorStop(1, '#161616');
+      ctx.fillStyle = gr; ctx.fillRect(g.inX, yy, g.inW, rh);
+      ctx.fillStyle = '#0e0e10';
+      for (let hx = g.inX + hp / 2; hx < g.inX + g.inW; hx += hp) { ctx.beginPath(); ctx.arc(hx, yy + rh * 0.55, Math.max(1, hp * 0.14), 0, 7); ctx.fill(); }
     }
     ctx.globalAlpha = 1;
   }
@@ -4389,6 +4397,18 @@ const siteSave = () => { try { localStorage.setItem('wb-site', JSON.stringify({ 
 const siteHelper = (path, body) => fetch('http://127.0.0.1:8767' + path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   .then(async r => ({ status: r.status, j: await r.json().catch(() => ({})) }));
 const siteOn = () => document.getElementById('sitex').classList.contains('on');
+// SIGNED-IN WINDOW: the site's sign-in cookies are SameSite=Lax, so inside the workbench's frame (a 127.0.0.1 page) Edge
+// doesn't send them. Signed-in pages open in one named pop-up window instead (first-party there), which the workbench
+// keeps a handle on: it reloads with WATCH changes and when a deploy finishes.
+const sitePopOpen = () => SITE.pop && !SITE.pop.closed;
+function sitePop(u) {
+  const w = Math.min(1280, screen.availWidth - 80), h = Math.min(960, screen.availHeight - 80);
+  try { SITE.pop = window.open(u, 'liquidnick-signed-in', `popup,width=${w},height=${h},left=${screen.availWidth - w - 30},top=40`); } catch (e) {}
+  if (!SITE.pop) window.open(u, '_blank');   // pop-ups blocked: a normal window still signs in
+  sitePopMark();
+}
+function sitePopMark() { const on = sitePopOpen(); document.getElementById('site-signin').classList.toggle('on', on); document.getElementById('site-signin').textContent = on ? 'SIGNED-IN WINDOW ↗' : 'SIGN IN ↗'; }
+function sitePopReload() { if (!sitePopOpen()) return; try { SITE.pop.location = SITE.popUrl && !/login\.php/.test(SITE.popUrl) ? SITE.popUrl : 'https://app.liquidnick.com/account.php'; } catch (e) {} }
 function siteOpen(on) { document.getElementById('sitex').classList.toggle('on', on); syncTabs(); if (on) { siteGo(SITE.url, false); siteTick(); } }
 document.getElementById('site-btn').onclick = () => { closePatches(); try { thinkOpen(false); } catch (e) {} ['lab', 'cln', 'acid', 'libre'].forEach(id => document.getElementById(id).classList.remove('on')); try { psOpen(false); } catch (e) {} siteOpen(true); };
 document.getElementById('site-x').onclick = () => siteOpen(false);
@@ -4406,6 +4426,8 @@ document.getElementById('site-pages').addEventListener('click', e => { const b =
 document.getElementById('site-url').addEventListener('keydown', e => { if (e.key === 'Enter') { let v = e.target.value.trim(); if (!/^https?:/i.test(v)) v = 'https://' + v; siteGo(v, true); } });
 document.getElementById('site-reload').onclick = () => { siteGo(SITE.url, true); if (document.getElementById('site-build').classList.contains('on')) sbPreview(true); };
 document.getElementById('site-open').onclick = document.getElementById('site-blk-open').onclick = () => window.open(SITE.url, '_blank', 'noopener');
+document.getElementById('site-signin').onclick = () => { if (sitePopOpen()) { try { SITE.pop.focus(); } catch (e) {} return; } SITE.popUrl = 'https://app.liquidnick.com/login.php'; sitePop(SITE.popUrl); };
+document.getElementById('site-acct').onclick = () => { SITE.popUrl = 'https://app.liquidnick.com/account.php'; if (sitePopOpen()) { try { SITE.pop.location = SITE.popUrl; SITE.pop.focus(); } catch (e) {} } else sitePop(SITE.popUrl); };
 const siteWatchBtn = () => document.getElementById('site-watch').classList.toggle('on', SITE.watch);
 document.getElementById('site-watch').onclick = () => { SITE.watch = !SITE.watch; siteSave(); siteWatchBtn(); if (SITE.watch) siteCheck(true); };
 siteWatchBtn();
@@ -4430,6 +4452,7 @@ async function siteCheck(now) {
     st.className = 'chg'; tx.textContent = 'CHANGED ' + tm + ' · ' + j.status + ' · ' + (j.ms / 1000).toFixed(1) + ' s';
     SITE.seen.push({ t: Date.now(), text: siteHost(u) + ' changed' }); TabLight.ping('site');
     const f = document.getElementById('site-if'); if (f.dataset.u === u) f.src = u + (u.includes('?') ? '&' : '?') + 'wb=' + Date.now();
+    sitePopReload();
     siteLogDraw(true);
   } else { st.className = 'ok'; tx.textContent = 'checked ' + tm + ' · ' + j.status + ' · ' + (j.ms / 1000).toFixed(1) + ' s' + (old ? ' · no change' : ''); }
   siteSave();
@@ -4490,6 +4513,9 @@ async function sbTick() {
   document.getElementById('sb-filelist').innerHTML = (b.files || []).map(f => `<div class="sbf"><span>${escS(f.path || '')}</span>${f.add ? `<span class="a">+${f.add | 0}</span>` : ''}${f.del ? `<span class="d">-${f.del | 0}</span>` : ''}<span class="n">${escS(f.note || '')}</span></div>`).join('');
   const lg = document.getElementById('sb-log'), lk = (b.log || []).length + ':' + b.updated;
   if (lg.dataset.k !== lk) { lg.dataset.k = lk; lg.innerHTML = (b.log || []).slice(-60).map(l => `<div class="lk-${escS(l.kind || '')}"><span class="tm">${l.t ? new Date(l.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''}</span> ${escS(l.text || '')}</div>`).join(''); lg.scrollTop = lg.scrollHeight; }
+  if (SITE.lastMode === 'deploy' && mode !== 'deploy') {   // a deploy just finished: show the new site everywhere
+    siteGo(SITE.url, true); sitePopReload(); siteCheck(true); SITE.seen.push({ t: Date.now(), text: 'deploy finished: LIVE' + (sitePopOpen() ? ' and the signed-in window' : '') + ' reloaded' }); siteLogDraw(true); }
+  SITE.lastMode = mode; sitePopMark();
   const pageChanged = (SITE.build || {}).page !== b.page;
   if (SITE.rev !== null && b.rev !== SITE.rev && SITE.prev === 'local') sbPreview(true); else if (pageChanged) sbPreview(false);
   SITE.rev = b.rev === undefined ? 0 : b.rev; SITE.build = b;
