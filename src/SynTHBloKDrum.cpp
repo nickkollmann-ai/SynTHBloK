@@ -152,6 +152,8 @@ struct SynTHBloKDrum : Module, songlink::Member {   // MATRIX-SONG picks its pat
     bool showGraph = false;       // voice OLED: the hit graph and its view / zoom cells (module menu)
     std::atomic<int> kitReq{-1};
     uint8_t rdSilent = 0;   // rows RANDROYD plays on outside voices: their own level stays at 0 (triggers still fire)
+    float rdShape[8][DK_NUM] = {};   // RANDROYD's genre shaping, added to the next kit it loads (then cleared)
+    bool rdShapeOn = false;
     void applySilent() { for (int r = 0; r < 8; r++) if (rdSilent >> r & 1) params[VOICE_PARAM + r * DK_NUM + DK_LEVEL].setValue(0.f); }
 
     int step = -1;
@@ -425,8 +427,10 @@ struct SynTHBloKDrum : Module, songlink::Member {   // MATRIX-SONG picks its pat
         for (int r = 0; r < 8; r++) {
             params[MODEL_PARAM + r].setValue((float)mdl[r]);
             choke[r] = ck[r];
-            for (int p = 0; p < 8; p++) for (int b = 0; b < DK_NUM; b++) kit[p][r][b] = val[r][b];
+            for (int p = 0; p < 8; p++) for (int b = 0; b < DK_NUM; b++)
+                kit[p][r][b] = rdShapeOn ? clamp(val[r][b] + rdShape[r][b], 0.f, 1.f) : val[r][b];
         }
+        rdShapeOn = false;
         applyKit(kitPat);
         kitLoaded = k;
         applySilent();
@@ -2123,6 +2127,14 @@ struct SynTHBloKDrumWidget : ModuleWidget {
 // 5 606, 6 HOUSE, 7 DUB, 8 INDUS); the audio thread loads it, like a press on the KIT row.
 // Outside the namespace above, so other files can call it.
 void randroydDrumKit(Module* m, int k) { if (DR* d = dynamic_cast<DR*>(m)) d->kitReq.store(k); }
+// a kit with RANDROYD's genre shaping: add[row][macro] (TUNE DECAY TONE SNAP MOD DRIVE LEVEL PAN) on top of kit k
+void randroydDrumKitShaped(Module* m, int k, const float add[8][8]) {
+    DR* d = dynamic_cast<DR*>(m);
+    if (!d) return;
+    for (int r = 0; r < 8; r++) for (int b = 0; b < DK_NUM && b < 8; b++) d->rdShape[r][b] = add[r][b];
+    d->rdShapeOn = true;
+    d->kitReq.store(k);
+}
 void randroydDrumSilence(Module* m, int mask) { if (DR* d = dynamic_cast<DR*>(m)) { d->rdSilent = (uint8_t) mask; d->applySilent(); } }
 
 Model* modelSynTHBloKDrum = createModel<SynTHBloKDrum, SynTHBloKDrumWidget>("Drum");

@@ -27,6 +27,7 @@
 
 // MTX-DRUM: load a factory kit (SynTHBloKDrum.cpp)
 void randroydDrumKit(Module* m, int k);
+void randroydDrumKitShaped(Module* m, int k, const float add[8][8]);
 int randroydSongSection(Module* m);
 void randroydDrumSilence(Module* m, int mask);
 
@@ -158,6 +159,51 @@ static const std::vector<int> KITS[NG] = {{6, 1}, {6, 0}, {2, 1, 8}, {0, 1}, {1}
 static const char* KIT_NAMES[9] = {"808", "909", "TECH", "ELEC", "LOFI", "606", "HOUSE", "DUB", "INDUS"};
 // what each matrix column builds
 static const char* ROLES[8] = {"DRUMS", "BASS", "LEAD", "CHORDS", "PERC", "TEXTURE", "FX SEND", "MOD"};
+// SOUND PROFILES: what each genre's kick, bass and lead sound like. A new track rolls its exact settings inside
+// these ranges (and picks one of the two bass / lead types), so it sounds like the genre and still varies.
+// Bass types: SUB clean sine sub, PUNCH plucky saw/square, B808 long gliding 808, ACID 303 squelch,
+// WOB wobble (a clock-synced filter LFO), REESE detuned saws, ROLL short rolling 16th bass, DIST distorted square.
+// Lead types: PLUCK, STAB short driven stab, SAW, SUPER supersaw, LASER resonant psy zap, LACID acid line,
+// HOOVER wide detuned saw that swoops (hardcore / rave), SOFT round triangle keys.
+enum { B_SUB, B_PUNCH, B_808, B_ACID, B_WOB, B_REESE, B_ROLL, B_DIST };
+enum { L_PLUCK, L_STAB, L_SAW, L_SUPER, L_LASER, L_LACID, L_HOOVER, L_SOFT };
+struct GenreSound {
+    float tune[2], sweep, pdec, body[2], punch[2], tone, drive[2], rumble[2];   // the Kick module
+    float hybrid;                    // chance the drum kit's kick row plays a Kick module (the real distorted kick)
+    float kDrv, kDec, kTune, sDrv, hDec;   // MTX-DRUM kit: kick drive / decay / tune, snare + clap drive, hat decay (added)
+    int bass[2], lead[2];
+};
+static const GenreSound GSOUND[NG] = {
+    {{48, 56}, .45f, .35f, {.40f, .55f}, {.25f, .40f}, .85f, {.10f, .25f}, {.00f, .05f}, .30f,  .00f, .00f, .00f, .00f, .00f, {B_PUNCH, B_SUB}, {L_PLUCK, L_STAB}},    // House
+    {{45, 52}, .40f, .40f, {.50f, .65f}, {.15f, .30f}, .70f, {.05f, .15f}, {.00f, .05f}, .20f, -.05f, .05f, .00f, .00f, .00f, {B_SUB, B_PUNCH}, {L_SOFT, L_PLUCK}},     // Deep House
+    {{46, 54}, .50f, .30f, {.45f, .60f}, {.30f, .50f}, .80f, {.25f, .45f}, {.30f, .60f}, .50f,  .15f, .00f, .00f, .05f, .00f, {B_ROLL, B_PUNCH}, {L_STAB, L_LACID}},    // Techno
+    {{48, 55}, .50f, .30f, {.40f, .55f}, {.30f, .45f}, .90f, {.20f, .35f}, {.10f, .30f}, .40f,  .10f, .00f, .00f, .00f, .00f, {B_ACID, B_ACID}, {L_LACID, L_STAB}},    // Acid
+    {{50, 58}, .55f, .30f, {.35f, .50f}, {.35f, .50f}, .95f, {.15f, .30f}, {.05f, .20f}, .40f,  .10f, .00f, .05f, .00f, .00f, {B_ROLL, B_PUNCH}, {L_SUPER, L_PLUCK}},   // Trance
+    {{50, 60}, .60f, .25f, {.30f, .45f}, {.40f, .60f}, 1.0f, {.20f, .35f}, {.00f, .00f}, .30f,  .10f, -.10f, .05f, .10f, -.05f, {B_PUNCH, B_DIST}, {L_STAB, L_LASER}},  // Electro
+    {{45, 55}, .50f, .45f, {.50f, .70f}, {.30f, .50f}, .75f, {.10f, .25f}, {.00f, .00f}, .30f,  .05f, .05f, .00f, .05f, .00f, {B_808, B_SUB}, {L_SOFT, L_PLUCK}},      // Hip-Hop
+    {{40, 50}, .60f, .50f, {.70f, .90f}, {.30f, .50f}, .80f, {.15f, .35f}, {.00f, .00f}, .40f,  .10f, .15f, -.05f, .05f, -.05f, {B_808, B_808}, {L_PLUCK, L_SOFT}},    // Trap
+    {{48, 56}, .40f, .40f, {.40f, .55f}, {.10f, .25f}, .50f, {.05f, .15f}, {.00f, .00f}, .10f, -.05f, .00f, .00f, -.05f, .00f, {B_SUB, B_808}, {L_SOFT, L_SOFT}},     // Lo-Fi
+    {{50, 58}, .50f, .35f, {.40f, .55f}, {.35f, .50f}, .90f, {.10f, .25f}, {.00f, .00f}, .30f,  .05f, .00f, .00f, .05f, .00f, {B_PUNCH, B_ROLL}, {L_SUPER, L_SAW}},     // Synthwave
+    {{50, 60}, .60f, .25f, {.30f, .45f}, {.45f, .65f}, 1.0f, {.20f, .40f}, {.00f, .00f}, .40f,  .10f, -.10f, .05f, .15f, -.05f, {B_REESE, B_SUB}, {L_SAW, L_PLUCK}},   // Drum & Bass
+    {{42, 50}, .35f, .50f, {.55f, .75f}, {.10f, .20f}, .55f, {.05f, .15f}, {.00f, .00f}, .20f, -.05f, .10f, -.05f, .00f, .00f, {B_SUB, B_SUB}, {L_SOFT, L_STAB}},     // Dub
+    {{42, 50}, .30f, .50f, {.50f, .70f}, {.05f, .15f}, .50f, {.00f, .10f}, {.00f, .00f}, .10f, -.10f, .05f, -.05f, -.05f, .05f, {B_SUB, B_SUB}, {L_SOFT, L_SUPER}},   // Ambient
+    {{50, 58}, .45f, .35f, {.35f, .50f}, {.30f, .45f}, .85f, {.10f, .20f}, {.00f, .00f}, .20f,  .00f, -.05f, .00f, .05f, .00f, {B_PUNCH, B_PUNCH}, {L_PLUCK, L_SAW}},  // Funk
+    {{50, 60}, .40f, .35f, {.35f, .50f}, {.25f, .40f}, .80f, {.05f, .20f}, {.00f, .00f}, .20f,  .00f, .00f, .00f, .00f, .00f, {B_PUNCH, B_SUB}, {L_PLUCK, L_SOFT}},    // Afrobeat
+    {{44, 52}, .45f, .45f, {.50f, .70f}, {.20f, .35f}, .60f, {.20f, .40f}, {.00f, .00f}, .30f,  .10f, .05f, -.05f, .10f, .00f, {B_SUB, B_808}, {L_SOFT, L_SAW}},      // Trip-Hop
+    {{44, 54}, .55f, .25f, {.40f, .60f}, {.55f, .80f}, .75f, {.55f, .85f}, {.20f, .40f}, .70f,  .35f, .00f, .00f, .35f, .00f, {B_DIST, B_ROLL}, {L_STAB, L_HOOVER}},  // Industrial
+    {{46, 54}, .60f, .20f, {.45f, .60f}, {.55f, .75f}, .80f, {.50f, .75f}, {.45f, .75f}, .70f,  .30f, .00f, .00f, .20f, -.05f, {B_ROLL, B_DIST}, {L_STAB, L_HOOVER}}, // Hard Techno
+    {{44, 52}, .55f, .25f, {.45f, .65f}, {.45f, .70f}, .70f, {.45f, .70f}, {.40f, .70f}, .60f,  .25f, .05f, -.05f, .25f, .00f, {B_DIST, B_ROLL}, {L_STAB, L_LASER}},  // Industrial Techno
+    {{48, 55}, .55f, .25f, {.40f, .55f}, {.45f, .60f}, .85f, {.35f, .55f}, {.20f, .40f}, .50f,  .15f, .00f, .00f, .10f, .00f, {B_ACID, B_ACID}, {L_LACID, L_STAB}},   // Acid Techno
+    {{52, 64}, .75f, .15f, {.45f, .65f}, {.70f, .95f}, .85f, {.85f, 1.0f}, {.00f, .15f}, .95f,  .60f, .10f, .10f, .30f, -.05f, {B_DIST, B_DIST}, {L_HOOVER, L_SUPER}}, // Hardcore
+    {{44, 52}, .55f, .30f, {.40f, .55f}, {.50f, .70f}, .90f, {.30f, .50f}, {.00f, .00f}, .50f,  .15f, .00f, .00f, .25f, .00f, {B_WOB, B_WOB}, {L_SAW, L_LASER}},      // Dubstep
+    {{44, 52}, .55f, .30f, {.45f, .60f}, {.55f, .75f}, .85f, {.45f, .65f}, {.00f, .10f}, .60f,  .20f, .00f, .00f, .25f, .00f, {B_WOB, B_DIST}, {L_STAB, L_SAW}},      // Mid-Tempo
+    {{46, 54}, .50f, .30f, {.40f, .55f}, {.40f, .60f}, .90f, {.25f, .45f}, {.00f, .10f}, .40f,  .10f, .00f, .00f, .15f, .00f, {B_WOB, B_WOB}, {L_LASER, L_PLUCK}},    // Psy Bass
+    {{42, 50}, .40f, .45f, {.55f, .70f}, {.15f, .30f}, .60f, {.10f, .20f}, {.00f, .05f}, .20f,  .00f, .05f, -.05f, .00f, .00f, {B_SUB, B_WOB}, {L_LASER, L_SOFT}},    // Psydub
+    {{52, 60}, .60f, .20f, {.25f, .40f}, {.50f, .70f}, .95f, {.30f, .50f}, {.00f, .10f}, .60f,  .15f, -.15f, .05f, .05f, -.05f, {B_ROLL, B_ROLL}, {L_LASER, L_LACID}}, // Psytrance
+    {{50, 58}, .50f, .30f, {.35f, .50f}, {.40f, .55f}, .90f, {.15f, .30f}, {.00f, .00f}, .30f,  .05f, -.05f, .05f, .10f, -.05f, {B_SUB, B_REESE}, {L_SOFT, L_PLUCK}},  // Jungle
+    {{50, 60}, .60f, .25f, {.30f, .45f}, {.55f, .75f}, .95f, {.35f, .55f}, {.00f, .00f}, .50f,  .20f, -.10f, .05f, .25f, -.05f, {B_REESE, B_WOB}, {L_SAW, L_STAB}},   // Neurofunk
+    {{46, 54}, .50f, .35f, {.40f, .55f}, {.30f, .50f}, .80f, {.20f, .40f}, {.20f, .40f}, .40f,  .10f, .00f, .00f, .05f, .00f, {B_PUNCH, B_ACID}, {L_PLUCK, L_LASER}},  // Modular Techno
+};
 static const char* SIZES[4] = {"AUTO", "LIGHT", "MED", "FULL"};
 }
 
@@ -219,6 +265,7 @@ struct SynTHBloKRandroyd : Module {
     int uiBpm = 0; bool uiRun = false, uiSong = false;   // the song's tempo / transport, mirrored by the UI each frame
     int hProg[4] = {0, 0, 0, 0};
     std::string hLeadR, hBassR;   // this track's own lead / bass rhythms (8 sixteenths); empty = the genre's
+    int hBassT = -1, hLeadT = -1;  // this track's bass / lead sound type (rdz::B_*, rdz::L_*); -1 = roll one
     int trackRole[8] = {-1, -1, -1, -1, -1, -1, -1, -1};   // QUAD role: 0 bass 1 acid 2 lead 3 chords
     // each part's recipe (which modules build it): 0 the standard MTX build, 1 TECHNO RIG, 2 BROKEN BEAT,
     // 3 METAL GARDEN, 4 QUAD + MORPH FILTER, 5 QUAD + DELAY, 6 QUAD + DUAL FILTER, 7 MTX-DUO (bass part, plays the
@@ -1728,7 +1775,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             json_decref(dj);
         });
         if (!d) return false;
-        randroydDrumKit(d->module, kit);
+        drumKit(d->module, kit, g, rng, perc);
         m->trackMods[track] = {d->module->id};
         clockFrom(d, h);
         toMixer(track, port(d, true, "Left"), port(d, true, "Right"), perc ? 0.7f : 0.95f, perc ? 0.15f : 0.f, (perc ? 0.3f : 0.1f) * G.rev, h);
@@ -1747,6 +1794,23 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             }
         }
         return true;
+    }
+    // a factory kit, shaped to the genre: the kick's drive / decay / tune, the snare + clap drive, the hat
+    // decay, each with a little roll of its own (a perc kit only takes a touch of it)
+    void drumKit(engine::Module* mod, int kit, int g, std::mt19937& rng, bool perc = false) {
+        const rdz::GenreSound& S = rdz::GSOUND[clamp(g, 0, rdz::NG - 1)];
+        auto uni = [&](float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); };
+        float add[8][8] = {};
+        float k = perc ? 0.4f : 1.f;
+        enum { TUNE, DECAY, TONE, SNAP, MOD, DRIVE, LEVEL, PAN };
+        add[0][DRIVE] = k * (S.kDrv + uni(-0.05f, 0.08f));
+        add[0][DECAY] = k * (S.kDec + uni(-0.05f, 0.05f));
+        add[0][TUNE] = k * (S.kTune + uni(-0.04f, 0.04f));
+        add[0][SNAP] = k * clamp(S.kDrv * 0.5f + uni(-0.05f, 0.08f), -0.2f, 0.4f);   // a driven kick gets its click too
+        if (S.kDrv > 0.4f) add[0][LEVEL] = -0.08f;
+        for (int r = 1; r <= 2; r++) { add[r][DRIVE] = k * (S.sDrv + uni(-0.04f, 0.06f)); add[r][SNAP] = k * uni(-0.05f, 0.1f); }
+        for (int r = 3; r <= 4; r++) { add[r][DECAY] = k * (S.hDec + uni(-0.05f, 0.05f)); add[r][TONE] = uni(-0.05f, 0.05f); }
+        randroydDrumKitShaped(mod, kit, add);
     }
     // PERC plays a different kit from the main drums
     int percKit(int g, std::mt19937& rng) {
@@ -1782,6 +1846,10 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         int maxHits = rdz::has(g, rdz::F_S) ? 3 : (rdz::GENRES[g].bpmHi < 90 && !rdz::has(g, rdz::F_W | rdz::F_G)) ? 5 : 8;
         m->hLeadR = varyRhythm(rng, H.lead, rdz::LEAD_POOL, variety, false, maxHits);
         m->hBassR = varyRhythm(rng, H.bass, rdz::BASS_POOL, variety, true, std::max(3, maxHits));
+        // this track's sound types: one of the genre's two bass and lead sounds
+        const rdz::GenreSound& S = rdz::GSOUND[g];
+        m->hBassT = S.bass[rnd(2)];
+        m->hLeadT = S.lead[rnd(2)];
     }
     // a genre rhythm, or one from the pool, with a hit or two flipped
     static std::string varyRhythm(std::mt19937& rng, const char* base, const char* const* pool, float variety, bool keepDown, int maxHits) {
@@ -2030,30 +2098,121 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             setP(mod, "Filter drive", v(0.1f, 0.08f));
             return;
         }
-        setP(mod, "Filter cutoff", v((role == 0 ? 0.25f : role == 1 ? 0.22f : role == 2 ? 0.4f : 0.38f) + 0.15f * br, 0.13f, 0.08f, 0.85f));
-        setP(mod, "Resonance", role == 1 ? v(0.5f, 0.2f, 0.f, 0.8f) : (vary ? uni(0.05f, 0.4f) : uni(0.1f, 0.3f)));
-        setP(mod, "Envelope amount", v(role == 1 ? 0.55f : role == 3 ? 0.25f : 0.35f, 0.18f));
-        setP(mod, "Attack", role == 3 && slow ? v(0.25f, 0.15f) : v(0.02f, 0.02f));
-        setP(mod, "Decay", v(role == 3 ? 0.5f : role == 1 ? 0.25f : 0.35f, 0.15f, 0.08f, 0.9f));
-        setP(mod, "Sustain", v(role >= 2 ? 0.6f : 0.4f, 0.2f));
-        setP(mod, "Release", v(role == 3 ? 0.6f : 0.25f, 0.15f, 0.05f, 0.9f));
-        setP(mod, "Glide", role == 1 ? v(0.35f, 0.15f) : role == 2 ? v(0.1f, 0.1f) : 0.f);
-        // oscillator mix: ROLL deals a new blend, kept at the same loudness
-        float tri = 0.3f, saw = role == 3 ? 0.45f : 0.6f, sq = role == 1 ? 0.3f : 0.2f;
+        if (role <= 2) { voiceTone(mod, role, g, rng, vary); return; }
+        // chords: the genre's lead type sets how wide and driven they are
+        int lt = leadType(g, rng, false);
+        bool wide = lt == rdz::L_SUPER || lt == rdz::L_HOOVER;
+        setP(mod, "Filter cutoff", v(0.38f + 0.15f * br, 0.13f, 0.08f, 0.85f));
+        setP(mod, "Resonance", vary ? uni(0.05f, 0.4f) : uni(0.1f, 0.3f));
+        setP(mod, "Envelope amount", v(lt == rdz::L_STAB ? 0.45f : 0.25f, 0.15f));
+        setP(mod, "Attack", slow || lt == rdz::L_SOFT ? v(0.25f, 0.15f) : v(0.02f, 0.02f));
+        setP(mod, "Decay", v(lt == rdz::L_STAB || lt == rdz::L_PLUCK ? 0.3f : 0.5f, 0.15f, 0.08f, 0.9f));
+        setP(mod, "Sustain", v(lt == rdz::L_STAB ? 0.3f : 0.6f, 0.2f));
+        setP(mod, "Release", v(0.6f, 0.15f, 0.05f, 0.9f));
+        setP(mod, "Glide", 0.f);
+        float tri = lt == rdz::L_SOFT ? 0.6f : 0.3f, saw = wide ? 0.75f : 0.45f, sq = lt == rdz::L_STAB ? 0.4f : 0.2f;
         if (vary) {
             tri = uni(0.f, 0.7f); saw = uni(0.15f, 0.8f); sq = uni(0.f, 0.6f);
-            float sum = tri + saw + sq, want = role == 3 ? 0.95f : 1.1f;
-            tri *= want / sum; saw *= want / sum; sq *= want / sum;
+            float sum = tri + saw + sq;
+            tri *= 0.95f / sum; saw *= 0.95f / sum; sq *= 0.95f / sum;
         }
         setP(mod, "Triangle level", tri);
         setP(mod, "Saw/Blade level", saw);
         setP(mod, "Square level", sq);
         setP(mod, "VCA out level", 0.7f);
-        setP(mod, "Sub level", role == 0 ? v(0.35f, 0.15f) : 0.f);
+        setP(mod, "Sub level", 0.f);
         setP(mod, "Mix out level", 0.9f);
-        setP(mod, "Accent amount", v(role == 1 ? 0.4f : 0.2f, 0.15f));
-        setP(mod, "Unison spread", vary ? uni(0.f, role == 3 ? 0.5f : 0.35f) : (role == 3 ? 0.3f : 0.2f));
-        setP(mod, "Filter drive", v(0.2f + 0.4f * drv, 0.15f));
+        setP(mod, "Accent amount", v(0.2f, 0.15f));
+        setP(mod, "Unison spread", wide ? uni(0.6f, 0.95f) : vary ? uni(0.f, 0.5f) : 0.3f);
+        setP(mod, "Filter drive", v(0.2f + 0.5f * drv, 0.15f));
+    }
+    // this track's bass / lead sound type: one of the genre's two (ROLL may deal the other)
+    int bassType(int g, std::mt19937& rng, bool vary) {
+        const rdz::GenreSound& S = rdz::GSOUND[clamp(g, 0, rdz::NG - 1)];
+        int t = rd()->hBassT;
+        if (vary || (t != S.bass[0] && t != S.bass[1])) t = S.bass[std::uniform_int_distribution<int>(0, 1)(rng)];
+        return t;
+    }
+    int leadType(int g, std::mt19937& rng, bool vary) {
+        const rdz::GenreSound& S = rdz::GSOUND[clamp(g, 0, rdz::NG - 1)];
+        int t = rd()->hLeadT;
+        if (vary || (t != S.lead[0] && t != S.lead[1])) t = S.lead[std::uniform_int_distribution<int>(0, 1)(rng)];
+        return t;
+    }
+    // a QUAD bass / acid / lead voice from its sound type. Every value is rolled inside the type's range
+    // (ROLL widens it), so it is always that sound and never quite the same twice.
+    void voiceTone(engine::Module* mod, int role, int g, std::mt19937& rng, bool vary) {
+        auto uni = [&](float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); };
+        auto r = [&](float lo, float hi, float mn = 0.f, float mx = 1.f) {
+            float w = vary ? (hi - lo) * 0.3f + 0.02f : 0.f;
+            return clamp(uni(lo - w, hi + w), mn, mx);
+        };
+        float br = rdz::GHARM[g].bright - 0.5f;   // a bright genre opens the filter a little
+        // tri saw sq sub | cutoff res env | A D S R (0..2 for A D R) | glide accent spread drive
+        float tri, saw, sq, sub, cut, res, env, A, D, S, R, gl, acc, spr, drv;
+        bool bass = role <= 1;
+        int type = bass ? (role == 1 ? (int) rdz::B_ACID : bassType(g, rng, vary)) : leadType(g, rng, vary);
+        if (!bass && role == 2 && type == rdz::L_LACID) type = 100;   // the acid lead: the 303 line, an octave up
+        if (bass) switch (type) {
+            case rdz::B_SUB:   tri = r(.85f, 1.f); saw = r(0, .08f); sq = 0; sub = r(.4f, .6f); cut = r(.16f, .26f); res = r(.03f, .15f); env = r(.08f, .2f);
+                               A = .01f; D = r(.4f, .7f, 0, 2); S = r(.6f, .8f); R = r(.12f, .25f, 0, 2); gl = r(0, .08f); acc = r(.1f, .2f); spr = r(0, .05f); drv = r(.05f, .2f); break;
+            case rdz::B_PUNCH: tri = r(.1f, .3f); saw = r(.45f, .7f); sq = r(.2f, .4f); sub = r(.3f, .45f); cut = r(.2f, .32f); res = r(.15f, .32f); env = r(.35f, .55f);
+                               A = .005f; D = r(.18f, .35f, 0, 2); S = r(.2f, .4f); R = r(.08f, .15f, 0, 2); gl = 0; acc = r(.25f, .4f); spr = r(.05f, .15f); drv = r(.2f, .35f); break;
+            case rdz::B_808:   tri = r(.9f, 1.f); saw = 0; sq = r(0, .1f); sub = r(.5f, .7f); cut = r(.28f, .4f); res = r(0, .1f); env = r(0, .08f);
+                               A = .003f; D = r(.8f, 1.3f, 0, 2); S = r(.5f, .7f); R = r(.35f, .6f, 0, 2); gl = r(.25f, .45f); acc = r(.15f, .3f); spr = 0; drv = r(.3f, .55f); break;
+            case rdz::B_WOB:   tri = r(0, .1f); saw = r(.5f, .7f); sq = r(.4f, .6f); sub = r(.45f, .6f); cut = r(.32f, .48f); res = r(.2f, .38f); env = r(.05f, .15f);
+                               A = .005f; D = r(.5f, .8f, 0, 2); S = r(.85f, 1.f); R = r(.1f, .2f, 0, 2); gl = r(.08f, .2f); acc = r(.1f, .25f); spr = r(.15f, .32f); drv = r(.5f, .78f); break;
+            case rdz::B_REESE: tri = 0; saw = r(.8f, 1.f); sq = r(0, .2f); sub = r(.35f, .5f); cut = r(.24f, .38f); res = r(.15f, .3f); env = r(.08f, .2f);
+                               A = .01f; D = r(.5f, .8f, 0, 2); S = r(.85f, 1.f); R = r(.15f, .3f, 0, 2); gl = r(.05f, .15f); acc = r(.1f, .2f); spr = r(.6f, .9f); drv = r(.35f, .55f); break;
+            case rdz::B_ROLL:  tri = r(.05f, .15f); saw = r(.6f, .8f); sq = r(.1f, .3f); sub = r(.25f, .4f); cut = r(.18f, .3f); res = r(.2f, .36f); env = r(.45f, .62f);
+                               A = 0; D = r(.08f, .18f, 0, 2); S = r(0, .1f); R = r(.04f, .1f, 0, 2); gl = 0; acc = r(.3f, .45f); spr = r(0, .08f); drv = r(.25f, .45f); break;
+            case rdz::B_DIST:  tri = 0; saw = r(.4f, .6f); sq = r(.6f, .8f); sub = r(.25f, .4f); cut = r(.34f, .5f); res = r(.2f, .36f); env = r(.3f, .48f);
+                               A = .003f; D = r(.2f, .38f, 0, 2); S = r(.35f, .5f); R = r(.08f, .15f, 0, 2); gl = r(0, .1f); acc = r(.35f, .5f); spr = r(.1f, .25f); drv = r(.78f, 1.f); break;
+            default:           // B_ACID: a 303 line, square or saw, high resonance, envelope squelch, slides
+                               { bool sqw = uni(0, 1) < 0.4f; tri = 0; saw = sqw ? r(0, .15f) : r(.75f, .9f); sq = sqw ? r(.75f, .9f) : r(0, .15f); }
+                               sub = r(0, .12f); cut = r(.14f, .28f); res = r(.62f, .82f); env = r(.55f, .8f);
+                               A = 0; D = r(.18f, .35f, 0, 2); S = r(.08f, .25f); R = r(.08f, .15f, 0, 2); gl = r(.3f, .45f); acc = r(.5f, .72f); spr = 0; drv = r(.3f, .52f); break;
+        }
+        else switch (type) {
+            case rdz::L_STAB:   tri = 0; saw = r(.4f, .6f); sq = r(.5f, .7f); cut = r(.34f, .5f); res = r(.25f, .45f); env = r(.4f, .6f);
+                                A = 0; D = r(.12f, .25f, 0, 2); S = r(.1f, .25f); R = r(.1f, .2f, 0, 2); gl = 0; spr = r(.1f, .2f); drv = r(.35f, .6f); break;
+            case rdz::L_SAW:    tri = 0; saw = r(.8f, 1.f); sq = r(.1f, .25f); cut = r(.44f, .6f); res = r(.15f, .3f); env = r(.3f, .45f);
+                                A = .01f; D = r(.3f, .5f, 0, 2); S = r(.5f, .7f); R = r(.2f, .32f, 0, 2); gl = r(.05f, .15f); spr = r(.2f, .35f); drv = r(.2f, .35f); break;
+            case rdz::L_SUPER:  tri = r(0, .15f); saw = r(.9f, 1.f); sq = 0; cut = r(.52f, .7f); res = r(.08f, .2f); env = r(.2f, .35f);
+                                A = r(.01f, .05f, 0, 2); D = r(.4f, .6f, 0, 2); S = r(.7f, .85f); R = r(.4f, .6f, 0, 2); gl = 0; spr = r(.75f, 1.f); drv = r(.1f, .2f); break;
+            case rdz::L_LASER:  tri = 0; saw = r(.3f, .5f); sq = r(.5f, .7f); cut = r(.24f, .4f); res = r(.6f, .8f); env = r(.7f, .9f);
+                                A = 0; D = r(.08f, .2f, 0, 2); S = r(.05f, .2f); R = r(.18f, .35f, 0, 2); gl = r(.15f, .3f); spr = r(.05f, .15f); drv = r(.2f, .35f); break;
+            case rdz::L_HOOVER: tri = 0; saw = r(.9f, 1.f); sq = r(.2f, .4f); cut = r(.5f, .65f); res = r(.15f, .3f); env = r(.2f, .3f);
+                                A = r(.01f, .04f, 0, 2); D = r(.4f, .6f, 0, 2); S = r(.75f, .9f); R = r(.25f, .4f, 0, 2); gl = r(.35f, .52f); spr = r(.85f, 1.f); drv = r(.45f, .7f); break;
+            case rdz::L_SOFT:   tri = r(.6f, .8f); saw = r(.1f, .3f); sq = r(0, .15f); cut = r(.28f, .42f); res = r(.05f, .15f); env = r(.15f, .3f);
+                                A = r(.03f, .1f, 0, 2); D = r(.35f, .5f, 0, 2); S = r(.4f, .6f); R = r(.4f, .6f, 0, 2); gl = 0; spr = r(.1f, .3f); drv = r(.05f, .12f); break;
+            case 100:           tri = 0; saw = r(.75f, .9f); sq = r(0, .2f); cut = r(.24f, .38f); res = r(.6f, .8f); env = r(.55f, .8f);
+                                A = 0; D = r(.18f, .32f, 0, 2); S = r(.1f, .25f); R = r(.1f, .18f, 0, 2); gl = r(.25f, .4f); spr = 0; drv = r(.3f, .5f); break;
+            default:            // L_PLUCK
+                                tri = r(.2f, .4f); saw = r(.4f, .6f); sq = r(.2f, .4f); cut = r(.3f, .45f); res = r(.2f, .35f); env = r(.5f, .7f);
+                                A = 0; D = r(.15f, .3f, 0, 2); S = r(0, .15f); R = r(.2f, .35f, 0, 2); gl = 0; spr = r(.1f, .25f); drv = r(.1f, .25f); break;
+        }
+        if (!bass) { sub = 0; acc = r(.15f, .3f); }
+        // the same loudness whatever the blend
+        float sum = tri + saw + sq, want = 1.1f;
+        if (sum > 0.01f) { tri *= want / sum; saw *= want / sum; sq *= want / sum; }
+        setP(mod, "Triangle level", tri);
+        setP(mod, "Saw/Blade level", saw);
+        setP(mod, "Square level", sq);
+        setP(mod, "Sub level", sub);
+        setP(mod, "Filter cutoff", clamp(cut + 0.12f * br, 0.06f, 0.9f));
+        setP(mod, "Resonance", res);
+        setP(mod, "Envelope amount", env);
+        setP(mod, "Attack", A);
+        setP(mod, "Decay", D);
+        setP(mod, "Sustain", S);
+        setP(mod, "Release", R);
+        setP(mod, "Glide", gl);
+        setP(mod, "Accent amount", acc);
+        setP(mod, "Unison spread", spr);
+        setP(mod, "Filter drive", drv);
+        setP(mod, "VCA out level", 0.7f);
+        setP(mod, "Mix out level", 0.9f);
     }
 
     bool buildQuad(int track, int g, std::mt19937& rng, history::ComplexAction* h, int role, int recipe = 0) {
@@ -2082,8 +2241,12 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         app::PortWidget* srcR = port(q, true, "Stereo right");
         if (recipe >= 4 && recipe <= 6) {
             static const char* fxModel[3] = {"NoizeeFlagshipFilter", "FX", "DualFilter"};
-            app::ModuleWidget* fxm = spawn("SynTHBloK", fxModel[recipe - 4], x, y, h, [&](engine::Module* mod) { insertTone(mod, recipe, g, rng, false); });
+            app::ModuleWidget* fxm = spawn("SynTHBloK", fxModel[recipe - 4], x, y, h, [&](engine::Module* mod) { insertTone(mod, recipe, g, rng, false, role); });
             if (fxm) {
+                if (recipe == 6 && role <= 1) {   // the wobble's LFO follows the COMPOSER clock
+                    app::ModuleWidget* song = findMw(m->composerId);
+                    if (song) wire(port(song, true, "Clock"), port(fxm, false, "LFO sync"), nvgRGB(0x94, 0x37, 0xff), h);
+                }
                 const char* inL = recipe == 4 ? "Left in" : recipe == 5 ? "In L" : "Left";
                 const char* inR = recipe == 4 ? "Right in" : recipe == 5 ? "In R" : "Right";
                 wire(srcL, port(fxm, false, inL), rdz::ramp(track), h);
@@ -2103,17 +2266,56 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     }
 
     // the effects after a QUAD. vary = ROLL: a new setting around the recipe's home
-    void insertTone(engine::Module* mod, int recipe, int g, std::mt19937& rng, bool vary) {
+    void insertTone(engine::Module* mod, int recipe, int g, std::mt19937& rng, bool vary, int role = -1) {
         auto uni = [&](float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); };
         bool echoGenre = rdz::has(g, rdz::F_E);   // dub, ambient, trip-hop, psy
-        if (recipe == 4) {   // MORPH FILTER on the bass: low-pass with drive and a slow chaos drift
+        float hard = clamp(rdz::GDRUMS[clamp(g, 0, rdz::NG - 1)].drive, 0.f, 1.f);
+        if (recipe == 4 && rdz::has(g, rdz::F_W)) {   // MORPH as a GROWL: band morph, heavy drive, FM grit
+            setP(mod, "Cutoff", uni(0.45f, 0.65f));
+            setP(mod, "Resonance", uni(0.35f, 0.6f));
+            setP(mod, "Morph", uni(0.25f, 0.6f));
+            setP(mod, "Drive", uni(0.55f, 0.85f));
+            setP(mod, "FM amount", uni(0.15f, 0.4f));
+            setP(mod, "Chaos", uni(0.2f, 0.45f));
+            setP(mod, "Stereo width", uni(0.4f, 0.6f));
+            setP(mod, "Dry/wet mix", 1.f);
+        }
+        else if (recipe == 4) {   // MORPH FILTER on the bass: low-pass with drive and a slow chaos drift
             setP(mod, "Cutoff", uni(0.5f, 0.72f));
             setP(mod, "Resonance", uni(0.15f, 0.42f));
             setP(mod, "Morph", uni(0.02f, 0.18f));
-            setP(mod, "Drive", uni(0.15f, 0.5f));
+            setP(mod, "Drive", clamp(uni(0.15f, 0.5f) + 0.3f * hard, 0.f, 0.9f));
             setP(mod, "Chaos", uni(0.12f, 0.35f));
             setP(mod, "Stereo width", uni(0.5f, 0.7f));
             setP(mod, "Dry/wet mix", 1.f);
+        }
+        else if (recipe == 6 && role >= 0 && role <= 1) {   // WOBBLE: a low-pass swept by an LFO locked to the clock
+            // the LFO sync divisions (16th clocks per cycle): 4 = quarter notes, 2 = eighths, 8 = half notes,
+            // 1 = sixteenths, 0.5 = 32nd stutters. Dubstep / mid-tempo sit on 4 and 2, psy bass moves faster.
+            static const int divIdx[7] = {0, 1, 2, 3, 4, 5, 6};   // 32 16 8 4 2 1 0.5
+            int pool[5]; int n = 0;
+            pool[n++] = divIdx[3]; pool[n++] = divIdx[4]; pool[n++] = divIdx[4];
+            pool[n++] = rdz::has(g, rdz::F_X) ? divIdx[5] : divIdx[2];
+            if (vary || rdz::has(g, rdz::F_G)) pool[n++] = divIdx[5];
+            int d = pool[std::uniform_int_distribution<int>(0, n - 1)(rng)];
+            setP(mod, "Sync the LFO to the SYNC jack", 1.f);
+            setP(mod, "LFO rate", (d + 0.5f) / 7.f);
+            setP(mod, "LFO shape", uni(0, 1) < 0.7f ? 0.f : uni(0, 1) < 0.5f ? 2.f : 1.f);   // mostly triangle, some square / saw
+            setP(mod, "LFO moves", 1.f);                 // filter A
+            setP(mod, "LFO to cutoff", uni(0.45f, 0.75f));   // 1.8 to 3 octaves of "wub"
+            setP(mod, "LFO to resonance", uni(0.f, 0.3f));
+            setP(mod, "Filter A mode", 0.f);
+            setP(mod, "Filter A slope", uni(0, 1) < 0.6f ? 1.f : 2.f);
+            setP(mod, "Filter A cutoff", uni(0.32f, 0.45f));
+            setP(mod, "Filter A resonance", uni(0.45f, 0.7f));
+            setP(mod, "Filter A drive", uni(0.45f, 0.8f));
+            setP(mod, "Filter B cutoff", 0.95f);
+            setP(mod, "Filter B drive", uni(0.2f, 0.5f));
+            setP(mod, "Routing", 0.f);
+            setP(mod, "Envelope to cutoffs", 0.f);
+            setP(mod, "Phaser mix", uni(0.f, 0.2f));
+            setP(mod, "EQ low (120 Hz)", uni(0.2f, 0.45f));
+            setP(mod, "Dry/wet", 1.f);
         }
         else if (recipe == 5) {   // CHARACTER DELAY on the lead
             static const int modes[5] = {1, 2, 4, 6, 3};   // tape, analog, ping-pong, space, modern
@@ -2175,15 +2377,23 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         const rdz::GenreDrums& G = rdz::GDRUMS[g];
         bool hard = rdz::has(g, rdz::F_T);   // the techno lanes: rumble
         bool slow = rdz::GENRES[g].bpmHi < 100;
-        if (kick) {
-            setP(kick, "Tune", uni(44.f, 58.f));
-            setP(kick, "Pitch sweep depth", uni(0.35f, 0.65f));
-            setP(kick, "Pitch decay", uni(0.3f, 0.55f));
-            setP(kick, "Body decay", slow ? uni(0.55f, 0.8f) : uni(0.35f, 0.6f));
-            setP(kick, "Click / punch", uni(0.2f, 0.5f));
-            setP(kick, "Drive", clamp(0.1f + G.drive * 1.2f + uni(0.f, 0.2f), 0.f, 0.8f));
-            setP(kick, "Rumble amount", hard ? uni(0.25f, 0.6f) : uni(0.f, 0.1f));
-            setP(kick, "Level", 0.85f);
+        if (kick) {   // the genre's kick: hardcore's distorted gabber, techno's rumble, trap's long 808 boom ...
+            const rdz::GenreSound& S = rdz::GSOUND[clamp(g, 0, rdz::NG - 1)];
+            auto r2 = [&](const float* a) { return uni(a[0], a[1]); };
+            auto jit = [&](float c, float w) { return clamp(c + uni(-w, w), 0.f, 1.f); };
+            float drive = r2(S.drive);
+            setP(kick, "Tune", r2(S.tune));
+            setP(kick, "Pitch sweep depth", jit(S.sweep, 0.08f));
+            setP(kick, "Pitch decay", jit(S.pdec, 0.06f));
+            setP(kick, "Body decay", r2(S.body));
+            setP(kick, "Click / punch", r2(S.punch));
+            setP(kick, "Tone", jit(S.tone, 0.06f));
+            setP(kick, "Drive", drive);
+            float rum = r2(S.rumble);
+            setP(kick, "Rumble amount", rum);
+            setP(kick, "Rumble decay", uni(0.35f, 0.65f));
+            setP(kick, "Level", drive > 0.7f ? 0.72f : 0.85f);   // a hard-driven kick is already loud
+            (void) hard; (void) slow;
         }
         if (sh) {
             setP(sh, "Snare tune", uni(170.f, 240.f));
@@ -2193,7 +2403,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             setP(sh, "Closed hat decay", uni(0.15f, 0.4f));
             setP(sh, "Open hat decay", uni(0.3f, 0.6f));
             setP(sh, "Snare body vs noise tone", uni(0.35f, 0.65f));
-            setP(sh, "Snare drive", clamp(G.drive + uni(0.f, 0.25f), 0.f, 0.7f));
+            setP(sh, "Snare drive", clamp(G.drive + rdz::GSOUND[clamp(g, 0, rdz::NG - 1)].sDrv + uni(0.f, 0.25f), 0.f, 0.9f));
             setP(sh, "Hat tone", uni(0.4f, 0.7f));
             setP(sh, "Snare level", 0.75f);
             setP(sh, "Hat level", uni(0.5f, 0.65f));
@@ -2317,23 +2527,50 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
     }
     void duoTone(engine::Module* mod, int bassRole, int g, std::mt19937& rng, bool vary) {
         auto uni = [&](float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); };
-        float br = rdz::GHARM[g].bright, drv = rdz::GDRUMS[g].drive;
-        setP(mod, "Lead OSC 1 wave", uni(0.f, 0.6f));
-        setP(mod, "Lead OSC 2 wave", uni(0.f, 0.8f));
-        setP(mod, "Lead OSC 2 tune", vary ? uni(-0.12f, 0.12f) : 0.08f);
-        setP(mod, "Lead filter cutoff", clamp(0.45f + 0.2f * br + uni(-0.1f, 0.1f), 0.2f, 0.9f));
-        setP(mod, "Lead filter resonance", uni(0.15f, 0.4f));
-        setP(mod, "Lead filter envelope amount", uni(0.3f, 0.6f));
-        setP(mod, "Lead glide", uni(0.f, 0.2f));
-        setP(mod, "Lead drive", uni(0.1f, 0.3f) + drv * 0.3f);
+        auto r = [&](float lo, float hi) { float w = vary ? (hi - lo) * 0.3f + 0.02f : 0.f; return clamp(uni(lo - w, hi + w), 0.f, 1.f); };
+        float br = rdz::GHARM[g].bright - 0.5f;
+        // DUO waves run saw (0) -> square (0.5) -> sine (1); cutoff 0.3 is about 200 Hz, 0.5 about 700 Hz
+        int lt = leadType(g, rng, vary);
+        float w1, w2, tn = vary ? uni(-0.12f, 0.12f) : 0.08f, cut, res, env, gl, drv;
+        switch (lt) {
+            case rdz::L_SOFT:   w1 = r(.75f, 1.f); w2 = r(.6f, .9f); cut = r(.4f, .52f); res = r(.05f, .15f); env = r(.15f, .3f); gl = 0; drv = r(.02f, .1f); break;
+            case rdz::L_STAB:   w1 = r(.35f, .5f); w2 = r(0, .2f); cut = r(.5f, .62f); res = r(.25f, .45f); env = r(.45f, .65f); gl = 0; drv = r(.4f, .65f); break;
+            case rdz::L_SUPER:
+            case rdz::L_HOOVER: w1 = r(0, .1f); w2 = r(0, .1f); tn = (uni(0, 1) < 0.5f ? 1.f : -1.f) * r(.1f, .16f); cut = r(.6f, .75f); res = r(.1f, .2f); env = r(.2f, .35f);
+                                gl = lt == rdz::L_HOOVER ? r(.3f, .5f) : 0.f; drv = lt == rdz::L_HOOVER ? r(.45f, .7f) : r(.1f, .2f); break;
+            case rdz::L_LASER:
+            case rdz::L_LACID:  w1 = r(.3f, .5f); w2 = r(0, .3f); cut = r(.4f, .52f); res = r(.6f, .8f); env = r(.65f, .85f); gl = r(.15f, .35f); drv = r(.2f, .4f); break;
+            case rdz::L_SAW:    w1 = r(0, .12f); w2 = r(0, .2f); cut = r(.55f, .68f); res = r(.15f, .3f); env = r(.3f, .45f); gl = r(.05f, .15f); drv = r(.2f, .35f); break;
+            default:            w1 = r(0, .6f); w2 = r(0, .8f); cut = r(.45f, .6f); res = r(.15f, .4f); env = r(.3f, .6f); gl = 0; drv = r(.1f, .3f); break;   // pluck
+        }
+        setP(mod, "Lead OSC 1 wave", w1);
+        setP(mod, "Lead OSC 2 wave", w2);
+        setP(mod, "Lead OSC 2 tune", tn);
+        setP(mod, "Lead filter cutoff", clamp(cut + 0.15f * br, 0.2f, 0.9f));
+        setP(mod, "Lead filter resonance", res);
+        setP(mod, "Lead filter envelope amount", env);
+        setP(mod, "Lead glide", gl);
+        setP(mod, "Lead drive", drv);
         setP(mod, "Lead level", 0.65f);
-        setP(mod, "Bass OSC 1 wave", bassRole == 1 ? uni(0.f, 0.4f) : uni(0.3f, 0.7f));
-        setP(mod, "Bass sub", bassRole == 1 ? uni(0.f, 0.2f) : uni(0.4f, 0.7f));
-        setP(mod, "Bass filter cutoff", clamp((bassRole == 1 ? 0.3f : 0.32f) + 0.1f * br + uni(-0.06f, 0.08f), 0.15f, 0.7f));
-        setP(mod, "Bass filter resonance", bassRole == 1 ? uni(0.5f, 0.75f) : uni(0.15f, 0.4f));
-        setP(mod, "Bass filter envelope amount", bassRole == 1 ? uni(0.55f, 0.8f) : uni(0.3f, 0.55f));
-        setP(mod, "Bass glide", bassRole == 1 ? uni(0.2f, 0.45f) : 0.f);
-        setP(mod, "Bass drive", uni(0.15f, 0.35f) + drv * 0.4f);
+        int bt = bassRole == 1 ? (int) rdz::B_ACID : bassType(g, rng, vary);
+        float bw, sub, bc, brs, be, bg, bd;
+        switch (bt) {
+            case rdz::B_SUB:   bw = r(.85f, 1.f); sub = r(.4f, .6f); bc = r(.22f, .3f); brs = r(.03f, .15f); be = r(.08f, .2f); bg = 0; bd = r(.05f, .2f); break;
+            case rdz::B_808:   bw = r(.9f, 1.f); sub = r(.5f, .7f); bc = r(.3f, .38f); brs = r(0, .1f); be = r(0, .1f); bg = r(.25f, .45f); bd = r(.35f, .6f); break;
+            case rdz::B_REESE:
+            case rdz::B_WOB:   bw = r(0, .1f); sub = r(.4f, .55f); bc = r(.3f, .4f); brs = r(.15f, .3f); be = r(.1f, .2f); bg = r(.05f, .15f); bd = r(.45f, .7f); break;
+            case rdz::B_ROLL:  bw = r(.05f, .25f); sub = r(.25f, .4f); bc = r(.26f, .34f); brs = r(.2f, .36f); be = r(.45f, .62f); bg = 0; bd = r(.25f, .45f); break;
+            case rdz::B_DIST:  bw = r(.4f, .55f); sub = r(.25f, .4f); bc = r(.38f, .5f); brs = r(.2f, .36f); be = r(.3f, .48f); bg = r(0, .1f); bd = r(.8f, 1.f); break;
+            case rdz::B_ACID:  bw = uni(0, 1) < 0.4f ? r(.45f, .55f) : r(0, .1f); sub = r(0, .15f); bc = r(.25f, .35f); brs = r(.6f, .8f); be = r(.55f, .8f); bg = r(.25f, .45f); bd = r(.3f, .5f); break;
+            default:           bw = r(.3f, .6f); sub = r(.3f, .5f); bc = r(.3f, .38f); brs = r(.15f, .32f); be = r(.35f, .55f); bg = 0; bd = r(.2f, .35f); break;   // punch
+        }
+        setP(mod, "Bass OSC 1 wave", bw);
+        setP(mod, "Bass sub", sub);
+        setP(mod, "Bass filter cutoff", clamp(bc + 0.1f * br, 0.15f, 0.7f));
+        setP(mod, "Bass filter resonance", brs);
+        setP(mod, "Bass filter envelope amount", be);
+        setP(mod, "Bass glide", bg);
+        setP(mod, "Bass drive", bd);
         setP(mod, "Bass level", 0.8f);
     }
     bool buildDuo(int g, std::mt19937& rng, history::ComplexAction* h, int bassRole, bool followKick = false, bool bellLead = false, bool resKick = false) {
@@ -2824,11 +3061,11 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
                 if (t == 0) {
                     bool res = chance(0.5f);   // RES on the kick
                     ok = drumR ? buildRig(t, g, rng, h, drumR == 2, res)
-                               : buildDrums(t, g, bpm, rng, h, kit, false, chance(big ? 0.5f : 0.35f), res);
+                               : buildDrums(t, g, bpm, rng, h, kit, false, chance(std::max(big ? 0.5f : 0.35f, rdz::GSOUND[g].hybrid)), res);
                 }
                 else if (t == 2 && m->trackRecipe[2] == 8) ok = true;   // the lead plays inside the MTX-DUO
-                else if (t == 1 && boomOK && boomish && chance(big ? 0.5f : 0.35f)) ok = buildBoom(t, g, rng, h, chance(0.5f));
-                else if (t == 1 && layers >= 3 && chance(big ? 0.5f : 0.3f)) {
+                else if (t == 1 && boomOK && boomish && m->hBassT != rdz::B_WOB && chance(big ? 0.5f : 0.35f)) ok = buildBoom(t, g, rng, h, chance(0.5f));
+                else if (t == 1 && layers >= 3 && m->hBassT != rdz::B_WOB && chance(big ? 0.5f : 0.3f)) {
                     int role = (rdz::GHARM[g].acid && std::uniform_int_distribution<int>(0, 9)(rng) < 6) ? 1 : 0;
                     ok = buildDuo(g, rng, h, role, chance(boomish ? 0.6f : 0.35f), chance(echoish ? 0.55f : 0.35f), chance(0.4f));
                 }
@@ -2843,7 +3080,8 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
                 else {
                     int role = t == 1 ? ((rdz::GHARM[g].acid && std::uniform_int_distribution<int>(0, 9)(rng) < 6) ? 1 : 0) : (t == 2 ? 2 : 3);
                     int recipe = 0;
-                    if (t == 1 && layers >= 4 && chance(rdz::has(g, rdz::F_W) ? 0.7f : 0.35f)) recipe = 4;   // bass + morph filter (wobble lanes lean on it)
+                    if (t == 1 && m->hBassT == rdz::B_WOB) recipe = chance(0.8f) ? 6 : 4;   // the wobble bass: a synced filter LFO (or a growl)
+                    else if (t == 1 && layers >= 4 && chance(rdz::has(g, rdz::F_W) ? 0.7f : 0.35f)) recipe = 4;   // bass + morph filter (wobble lanes lean on it)
                     if (t == 2 && chance(echoish ? 0.75f : 0.45f)) recipe = 5;           // lead + delay
                     if (t == 3 && chance(0.3f)) recipe = 6;                              // chords + dual filter
                     ok = buildQuad(t, g, rng, h, role, recipe);
@@ -3324,7 +3562,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
             json_decref(dj);
             const std::vector<int>& kits = rdz::KITS[g];
             int kit = kits[std::uniform_int_distribution<int>(0, (int) kits.size() - 1)(rng)];
-            randroydDrumKit(d->module, kit);
+            drumKit(d->module, kit, g, rng);
             m->trackKit[0] = kit;
             setP(d->module, "FORGE FX", GD.glitch ? 1.f : 0.f);
             setP(d->module, "Delay", clamp(0.25f * GD.dly * fx, 0.f, 1.f));
@@ -4016,7 +4254,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         if (!mutate) {
             const std::vector<int>& kits = rdz::KITS[g];
             int kit = perc ? percKit(g, rng) : kits[std::uniform_int_distribution<int>(0, (int) kits.size() - 1)(rng)];
-            randroydDrumKit(d->module, kit);
+            drumKit(d->module, kit, g, rng, perc);
             m->trackKit[t] = kit;
             m->say(string::f("NEW %s GROOVES, KIT %s", rdz::GENRES[g].name, rdz::KIT_NAMES[kit]));
         }
@@ -4098,7 +4336,7 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         if (cur) json_decref(cur);
         if (!mutate) quadTone(q->module, m->trackRole[t], m->trackGenre[t], rng, true);
         if (!mutate && m->trackMods[t].size() > 1 && m->trackRecipe[t] >= 4)
-            if (app::ModuleWidget* fxm = findMw(m->trackMods[t][1])) insertTone(fxm->module, m->trackRecipe[t], clamp(m->trackGenre[t], 0, rdz::NG - 1), rng, true);
+            if (app::ModuleWidget* fxm = findMw(m->trackMods[t][1])) insertTone(fxm->module, m->trackRecipe[t], clamp(m->trackGenre[t], 0, rdz::NG - 1), rng, true, m->trackRole[t]);
         hc->newModuleJ = q->module->toJson();
         pushUndo(hc);
         m->rolled = true;
@@ -4550,7 +4788,7 @@ void RdOled::drawLayer(const DrawArgs& args, int layer) {
             if (m) { int n = 0; for (const SynTHBloKRandroyd::Grow& gr : m->grown) if (gr.track == i) n++; if (n) nm += string::f("  +%d GROWN", n); }
             if (m && (m->trackRecipe[i] >= 4 && m->trackRecipe[i] <= 6)) {
                 static const char* fx[3] = {"  + MORPH FILTER", "  + DELAY", "  + DUAL FILTER"};
-                nm += fx[m->trackRecipe[i] - 4];
+                nm += (m->trackRecipe[i] == 6 && i == 1) ? std::string("  + WOBBLE FILTER") : std::string(fx[m->trackRecipe[i] - 4]);
             }
             rdText(vg, mm2px(9.f), y, nm, 7.5f, rdz::ramp(i), NVG_ALIGN_LEFT);
             // the arrangement: sections A-H, lit where this part plays
