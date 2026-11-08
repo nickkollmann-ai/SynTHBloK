@@ -1003,6 +1003,38 @@ struct RdParkTag : TransparentWidget {
 };
 
 // ---------------------------------------------------------------------------
+// ROW BAR: a thin vertical bar just left of the first module of each track row on the rack, in the track's
+// colour (the Composer row, the cables and the ROW badge share it). It checks each frame that RANDROYD still
+// owns that track and this module, so a stale bar never lingers.
+// ---------------------------------------------------------------------------
+struct RdRowBar : TransparentWidget {
+    int64_t randroydId = -1, modId = -1;
+    int track = 0;
+    bool live();   // defined after the module
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1 || !live()) return;
+        float H = box.size.y, w = mm2px(1.1f), x = -mm2px(1.9f);
+        NVGcolor c = rdz::ramp(track);
+        // a soft glow, then the bar
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, x - mm2px(0.6f), mm2px(1.2f), w + mm2px(1.2f), H - mm2px(2.4f), mm2px(1.f));
+        nvgFillColor(args.vg, nvgTransRGBA(c, 45));
+        nvgFill(args.vg);
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, x, mm2px(2.f), w, H - mm2px(4.f), w * 0.5f);
+        nvgFillColor(args.vg, c);
+        nvgFill(args.vg);
+    }
+};
+bool RdRowBar::live() {
+    engine::Module* em = APP->engine->getModule(randroydId);
+    SynTHBloKRandroyd* m = dynamic_cast<SynTHBloKRandroyd*>(em);
+    if (!m || track < 0 || track > 7) return false;
+    const std::vector<int64_t>& v = m->trackMods[track];
+    return std::find(v.begin(), v.end(), modId) != v.end();
+}
+
+// ---------------------------------------------------------------------------
 // CPU meter + headroom line
 // ---------------------------------------------------------------------------
 struct RdCpu : TransparentWidget {
@@ -1460,7 +1492,30 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         if (routed) m->say(string::f("ROUTED %d SOUND%s TO THE MIXER, LOCKED TO TRACK %d", routed, routed > 1 ? "S" : "", track + 1));
     }
 
+    // the ROW BARS: one on the leftmost module of each track (moved when the row changes)
+    void refreshRowBars() {
+        SynTHBloKRandroyd* m = rd();
+        if (!m) return;
+        for (int t = 0; t < 8; t++) {
+            app::ModuleWidget* first = NULL;
+            for (int64_t id : m->trackMods[t])
+                if (app::ModuleWidget* mw = findMw(id)) if (!first || mw->box.pos.x < first->box.pos.x) first = mw;
+            for (int64_t id : m->trackMods[t]) {
+                app::ModuleWidget* mw = findMw(id);
+                if (!mw) continue;
+                RdRowBar* bar = NULL;
+                for (widget::Widget* c : mw->children) if (RdRowBar* b = dynamic_cast<RdRowBar*>(c)) bar = b;
+                if (mw == first) {
+                    if (!bar) { bar = new RdRowBar; mw->addChild(bar); }
+                    bar->randroydId = m->id; bar->modId = id; bar->track = t;
+                    bar->box = math::Rect(Vec(0, 0), Vec(1.f, mw->box.size.y));
+                }
+                else if (bar) { mw->removeChild(bar); delete bar; }
+            }
+        }
+    }
     void refreshInfo() {
+        refreshRowBars();
         SynTHBloKRandroyd* m = rd();
         if (!m) return;
         app::RackWidget* rack = APP->scene->rack;
