@@ -165,7 +165,7 @@ struct SynTHBloKRandroyd : Module {
     enum ParamIds {
         NEWTRACK_PARAM, NEWRACK_PARAM, SHIFT_PARAM, GENRE_PARAM,
         ROLL_PARAM, MUTATEBTN_PARAM, STORE_PARAM, PARK_PARAM, UNDO_PARAM,
-        TAB_PARAM, SIZE_PARAM, MUTATE_PARAM, DENSITY_PARAM, FX_PARAM, BPM_PARAM, RUN_PARAM, STOP_PARAM, RANDALL_PARAM, NUM_PARAMS
+        TAB_PARAM, SIZE_PARAM, MUTATE_PARAM, DENSITY_PARAM, FX_PARAM, BPM_PARAM, RUN_PARAM, STOP_PARAM, NUM_PARAMS
     };
     enum InputIds { CLOCK_INPUT, SCENE_INPUT, ROLL_INPUT, MUTATE_INPUT, NUM_INPUTS };
     enum OutputIds { TRIG_OUTPUT, SCENE_OUTPUT, CPU_OUTPUT, NUM_OUTPUTS };
@@ -252,7 +252,6 @@ struct SynTHBloKRandroyd : Module {
         paramQuantities[BPM_PARAM]->randomizeEnabled = false;
         configButton(RUN_PARAM, "Run: start the song from the top");
         configButton(STOP_PARAM, "Stop the song");
-        configButton(RANDALL_PARAM, "Randomize the parts RANDROYD built (not RANDROYD, COMPOSER, the mixer or the master; one undo)");
         configInput(CLOCK_INPUT, "Clock (scene changes land on the bar)");
         configInput(SCENE_INPUT, "Next scene trigger");
         configInput(ROLL_INPUT, "Roll trigger");
@@ -1050,8 +1049,6 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         RdButton* stop = button(module, SynTHBloKRandroyd::STOP_PARAM, "STOP", RDL::TR_X[1], RDL::TR_Y, RDL::TR_W, RDL::TR_H, RdButton::DARK, 7.5f);
         stop->onPress = [=]() { transport(false); };
         stop->litFn = [=]() { return module->uiSong && !module->uiRun; };
-        RdButton* rz = button(module, SynTHBloKRandroyd::RANDALL_PARAM, "RANDOMIZE", RDL::RZ_X, RDL::RZ_Y, RDL::RZ_W, RDL::RZ_H, RdButton::DARK, 7.f);
-        rz->onPress = [=]() { randomizeParts(); };
         for (int i = 0; i < 4; i++) {
             addInput(createInputCentered<PJ301MPort>(mm2px(Vec(RDL::IN_X[i], RDL::IN_Y)), module, i));
             addChild(JackLed::create(Vec(RDL::IN_X[i] + 3.6f, RDL::IN_Y - 3.6f), module, i, false));
@@ -3602,39 +3599,6 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         if (app::ModuleWidget* song = findMw(rd()->composerId))
             for (engine::ParamQuantity* pq : song->module->paramQuantities)
                 if (pq && pq->name.compare(0, 5, "Tempo") == 0) pq->setValue((float) bpm);
-    }
-    // RANDOMIZE: Rack's own randomize on every part RANDROYD built (each module's randomize-enabled controls,
-    // and whatever its own randomize does), all in one undo step. RANDROYD itself, COMPOSER (the arrangement),
-    // the mixer and BloKMaster (the levels) and the Audio module are left alone.
-    void randomizeParts() {
-        SynTHBloKRandroyd* m = rd();
-        std::vector<int64_t> ids;
-        for (int t = 0; t < 8; t++) for (int64_t id : m->trackMods[t]) ids.push_back(id);
-        for (int64_t id : m->masterMods) ids.push_back(id);
-        std::set<int64_t> skip = {m->composerId, m->mixerId, m->masterId, m->audioId};
-        history::ComplexAction* h = new history::ComplexAction;
-        h->name = "RANDROYD randomize parts";
-        std::set<int64_t> done;
-        int n = 0;
-        for (int64_t id : ids) {
-            if (id < 0 || skip.count(id) || !done.insert(id).second) continue;
-            app::ModuleWidget* mw = findMw(id);
-            if (!mw || mw == this || !mw->module || !mw->model) continue;
-            if (mw->model == modelSynTHBloKRandroyd) continue;
-            if (mw->model->plugin && mw->model->plugin->slug == "Core") continue;
-            if (mw->model->slug == "MatrixSong" || mw->model->slug == "Mix8" || mw->model->slug == "BlokMaster") continue;
-            history::ModuleChange* hc = new history::ModuleChange;
-            hc->name = "randomize";
-            hc->moduleId = id;
-            hc->oldModuleJ = mw->module->toJson();
-            APP->engine->randomizeModule(mw->module);
-            hc->newModuleJ = mw->module->toJson();
-            h->push(hc);
-            n++;
-        }
-        if (h->isEmpty()) { delete h; m->say("NOTHING TO RANDOMIZE: PRESS NEW TRACK"); return; }
-        APP->history->push(h);
-        m->say(string::f("RANDOMIZED %d PARTS  ·  UNDO TAKES IT BACK", n));
     }
     // RUN / STOP: COMPOSER's RUN switch (RUN from stopped starts the song from the top)
     void transport(bool run) {

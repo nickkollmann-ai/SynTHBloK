@@ -12,7 +12,6 @@ static const float KNOB_Y = 101.60f;
 static const float KNOB_X[3] = {93.00f, 105.00f, 117.00f};
 static const float TR_Y = 112.60f, TR_H = 5.80f, TR_W = 16.20f;
 static const float TR_X[2] = {87.50f, 104.60f};
-static const float RZ_X = 87.50f, RZ_Y = 119.30f, RZ_W = 33.30f, RZ_H = 5.00f;
 static const float IN_Y = 104.60f;
 static const float IN_X[4] = {127.00f, 137.00f, 147.00f, 157.00f};
 static const float OUT_Y = 120.60f;
