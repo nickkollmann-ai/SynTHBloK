@@ -471,6 +471,23 @@ header button:hover,.modes button:hover,footer .nav:hover{box-shadow:0 0 10px #0
 #think-body .card h4{position:relative}
 #think-body .card h4::after{content:"";display:inline-block;width:5px;height:5px;margin-left:8px;border-radius:50%;background:var(--cy);opacity:.5;vertical-align:middle;animation:tpulse 2.4s ease-in-out infinite}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+/* CLAUDE SIGNAL: a pulsing, see-through beacon from THINKING, floating over every page of the workbench.
+   cyan = Claude is working · magenta = Claude needs you (a question) · amber/red = a warning (or the PC runs hot).
+   Click it for CLAUDE · THINKING; x hides it until the signal changes. */
+#csig{position:fixed;right:18px;bottom:18px;z-index:60;display:none;align-items:center;gap:10px;max-width:min(460px,70vw);padding:9px 12px 9px 14px;
+  border-radius:24px;border:1px solid rgba(var(--sc),.55);background:rgba(var(--sc),.10);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  color:rgb(var(--sc));font:11px/1.35 ui-monospace,Consolas,monospace;letter-spacing:.06em;cursor:pointer;box-shadow:0 0 18px rgba(var(--sc),.25);
+  animation:csig var(--sp,2.4s) ease-in-out infinite;--sc:0,229,255}
+#csig.on{display:flex}
+#csig.ask{--sc:255,0,170;--sp:1.3s}#csig.warn{--sc:255,150,40;--sp:.9s}#csig.hot{--sc:255,59,92;--sp:.8s}
+#csig::before{content:"";position:absolute;inset:-1px;border-radius:inherit;border:2px solid rgba(var(--sc),.5);animation:csring var(--sp,2.4s) ease-out infinite;pointer-events:none}
+#csig i{flex:none;width:10px;height:10px;border-radius:50%;background:rgb(var(--sc));box-shadow:0 0 10px rgb(var(--sc)),0 0 22px rgba(var(--sc),.6)}
+#csig b{font-weight:700;letter-spacing:.16em;white-space:nowrap}
+#csig span{color:#e8f4f8cc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+#csig u{flex:none;text-decoration:none;color:rgba(var(--sc),.8);padding:0 2px 0 6px;font-size:14px;line-height:1}
+#csig u:hover{color:#fff}
+@keyframes csig{0%,100%{opacity:.62;box-shadow:0 0 12px rgba(var(--sc),.18)}50%{opacity:.95;box-shadow:0 0 28px rgba(var(--sc),.45)}}
+@keyframes csring{0%{transform:scale(1);opacity:.7}100%{transform:scale(1.18,1.6);opacity:0}}
 </style>
 </head>
 <body>
@@ -522,6 +539,7 @@ header button:hover,.modes button:hover,footer .nav:hover{box-shadow:0 0 10px #0
     <div class="card" id="t-plan"><h4>PLAN</h4><div class="flow" id="t-flow"></div></div>
     <div class="card" id="t-log"><h4>DECISIONS · NEWEST FIRST</h4><div id="t-entries"></div></div>
   </div></div>
+<div id="csig" role="status" aria-live="polite" title="Click for CLAUDE · THINKING"><i></i><b id="csig-k">CLAUDE</b><span id="csig-t"></span><u id="csig-x" title="Hide until it changes">&times;</u></div>
 <div id="zoom"><img alt=""><span id="zoom-cap">click the image for actual size · click outside or press Esc to close</span></div>
 <script>
 const ROOTS = ['/res/', '/web-images/'], IMG = /\.(svg|png|webp|jpe?g)$/i, POLL = 1500;
@@ -1884,6 +1902,7 @@ async function scanThink() {
   const fresh = Date.now() - up < 10 * 60 * 1000;
   btn.classList.toggle('idle', !fresh);
   thinkEl('think-now').textContent = (j.now && j.now.title) || '-';
+  csig.think = j; drawSignal();
   try { Mind.compile(j.mode === 'compile' && Date.now() - up < 15 * 60 * 1000, 'think'); } catch (e) {}
   if (up === thinkSeen) return;
   try { j.mode === 'idle' ? Mind.rest() : Mind.pulse(.8); } catch (e) {}
@@ -1926,6 +1945,9 @@ async function scanHW() {
   if (j.t === hwSeen) { if (!live) thinkEl('pc-txt').innerHTML = '<span class="warm">PC telemetry paused</span>'; return; }
   hwSeen = j.t;
   try { Mind.setHW(j); } catch (e) {}
+  { const z = (j.zones || []).slice().sort((a, b) => b.c - a.c)[0], g = j.gpu;
+    const parts = []; if (z && z.c >= 95) parts.push(`${z.name} ${z.c.toFixed(0)}°C`); if (g && g.temp >= 85) parts.push(`GPU ${g.temp}°C`);
+    csig.hot = live && parts.length ? parts.join(' · ') : null; drawSignal(); }
   const c = j.cpu || {}, g = j.gpu, z = (j.zones || []).slice().sort((a, b) => b.c - a.c)[0];
   const cls = (v, warm, hot) => v >= hot ? 'hot' : v >= warm ? 'warm' : '';
   pcLoad.push(c.load || 0); if (pcLoad.length > 16) pcLoad.shift();
@@ -1943,6 +1965,31 @@ async function scanHW() {
   document.documentElement.style.setProperty('--flow', (7 - 5.5 * Math.min(1, (c.load || 0) / 100)).toFixed(2) + 's');
 }
 thinkEl('pc-pill').onclick = () => thinkOpen(true);
+// ---- CLAUDE SIGNAL: what THINKING wants you to see, as a beacon over the whole workbench ----
+const csig = { think: null, hot: null, hidden: '' };
+function drawSignal() {
+  const el = thinkEl('csig'); if (!el) return;
+  let kind = '', k = '', t = '';
+  const j = csig.think;
+  if (j) {
+    const fresh = Date.now() - (j.updated || 0) < 3 * 60 * 1000;
+    const al = j.alert && j.alert.text ? j.alert : null;
+    if (al && al.level === 'warn') { kind = 'warn'; k = 'CLAUDE · WARNING'; t = al.text; }
+    else if ((j.questions || []).length || (al && al.level === 'ask')) { kind = 'ask'; k = 'CLAUDE NEEDS YOU'; t = al && al.level === 'ask' ? al.text : j.questions[0]; }
+    else if (al) { kind = ''; k = 'CLAUDE'; t = al.text; }
+    else if (fresh && j.mode !== 'idle') { kind = ''; k = 'CLAUDE · WORKING'; t = (j.now && j.now.title) || j.task || ''; }
+  }
+  if (!kind && csig.hot) { kind = 'hot'; k = 'PC RUNNING HOT'; t = csig.hot; }   // the PC's heat, when THINKING has nothing louder
+  const sig = kind + '|' + t;
+  const show = !!k && sig !== csig.hidden;
+  el.className = show ? 'on ' + kind : '';
+  if (show) { thinkEl('csig-k').textContent = k; thinkEl('csig-t').textContent = t; el.dataset.sig = sig; }
+}
+thinkEl('csig').onclick = e => {
+  if (e.target.id === 'csig-x') { csig.hidden = thinkEl('csig').dataset.sig || ''; drawSignal(); return; }
+  thinkOpen(true);
+};
+setInterval(drawSignal, 5000);   // 'working' fades on its own once THINKING goes quiet
 const thinkOpen = on => { thinkEl('think').classList.toggle('on', on); on ? (Mind.start(), Mind.event('think', 'READOUT online · listening to every process')) : Mind.stop(); };
 thinkEl('think-btn').onclick = () => thinkOpen(true);
 thinkEl('think-x').onclick = () => thinkOpen(false);
