@@ -46,8 +46,9 @@ p = ['<?xml version="1.0" encoding="UTF-8"?>',
      '<rect x="0" y="0" width="%g" height="%g" fill="url(#fxg)"/>' % (W, H),
      '<path fill="#080808" d="M0,0 H%g V7 H0 Z"/>' % W,
      '<path d="M0,7 H%g" stroke="#ff7a00" stroke-width="0.3" stroke-opacity="0.75" fill="none"/>' % W,
-     text_path('SynTHBloK-B', 2.4, 3.5, 2.25, REG, anchor='start', fill='#ffffff'),
-     text_path('BACKDROP', 2.4, 6.3, 1.92, BOLD, anchor='start', fill='#ff7a00')]
+     # right-aligned, so the top-left screw (x 2.5-7.6 mm) never sits on the name
+     text_path('SynTHBloK-B', W - 2.0, 3.5, 2.25, REG, anchor='end', fill='#ffffff'),
+     text_path('BACKDROP', W - 2.0, 6.3, 1.92, BOLD, anchor='end', fill='#ff7a00')]
 # the card and its dark well (plain: no big lettering)
 p.append(frame(2.5, 9.0, W - 5.0, 116.5))
 p.append(well(5.0, 12.0, W - 10.0, 86.0))

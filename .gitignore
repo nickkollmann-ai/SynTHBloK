@@ -29,3 +29,5 @@ tools/pc_stats.json
 site/
 tools/.shell_token
 tools/.wb-app/
+# notes from Claude for the workbench FOR YOU box (local only)
+tools/claude_inbox.json

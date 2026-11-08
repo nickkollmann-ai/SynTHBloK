@@ -468,6 +468,36 @@ footer .nav:hover{border-color:var(--cy)}
 .ob-tabs button.on{color:#011;background:var(--cy);border-color:var(--cy);box-shadow:0 0 10px #00e5ff66}
 #t-qled{display:none;position:absolute;top:-3px;right:-3px;width:7px;height:7px;border-radius:50%;background:var(--mg);box-shadow:0 0 8px var(--mg);animation:tpulse 1.2s infinite}
 #t-qled.on{display:block}
+/* FOR YOU: a note from Claude when something needs you (tools/claude_inbox.json), over the readout, top right */
+#t-inbox{display:none;position:absolute;top:12px;right:14px;z-index:3;width:min(440px,44%);max-height:calc(100% - 24px);overflow:auto;padding:10px 12px;
+  background:radial-gradient(120% 90% at 50% 0%,#1c0416 0%,#07010a 75%);border:1px solid var(--mg);border-radius:3px;box-shadow:0 0 22px #ff3fa455,inset 0 0 24px #ff3fa414;font-size:11.5px;line-height:1.45}
+#t-inbox.on{display:block;animation:feedin .3s ease}
+#t-inbox .ih{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+#t-inbox .ih b{color:var(--mg);letter-spacing:.18em;font-size:10px;font-weight:600}
+#t-inbox .ih b::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--mg);margin-right:7px;box-shadow:0 0 8px var(--mg);animation:tpulse 1.2s infinite}
+#t-inbox .ih span{color:var(--mut);font-size:10px}
+#t-inbox h5{margin:0 0 4px;font-size:13px;color:#fff;font-weight:500}
+#t-inbox .it{color:#f3d6e9;white-space:pre-wrap}
+#t-inbox .il{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+#t-inbox .il a{color:#011;background:var(--mg);border-radius:2px;padding:2px 8px;font-size:10px;letter-spacing:.08em;text-decoration:none;cursor:pointer}
+#t-inbox .il a:hover{box-shadow:0 0 10px var(--mg)}
+#t-inbox .il a.f{background:transparent;color:var(--mg);border:1px solid var(--mg)}
+#t-inbox .ok{margin-top:8px;background:none;border:1px solid #ff3fa466;color:var(--mut);font:inherit;font-size:9.5px;letter-spacing:.16em;padding:1px 8px;cursor:pointer;border-radius:2px}
+#t-inbox .st{color:var(--mut);font-size:10px;margin-top:4px}
+/* TAB LIGHTS: a dot on a tab when something happened there since you last looked (news); a pulsing ring while
+   something is going on there right now (busy); a quick glow the moment it happens (flash) */
+#wbtabs .tab{position:relative}
+#wbtabs .tab::after{content:'';position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;opacity:0;transition:opacity .3s;pointer-events:none}
+#tab-wb::after{background:var(--cy);box-shadow:0 0 7px var(--cy)}
+#patch-btn::after,#lib-btn::after{background:var(--or,#ff7a00);box-shadow:0 0 7px var(--or,#ff7a00)}
+#think-btn::after{background:var(--ok);box-shadow:0 0 7px var(--ok)}
+#wbtabs .tab.news::after{opacity:1}
+#wbtabs .tab.busy::after{opacity:1;animation:tbusy 1s ease-in-out infinite}
+@keyframes tbusy{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.8);opacity:.35}}
+#wbtabs .tab.flash{animation:tflash .9s ease}
+@keyframes tflash{0%{box-shadow:0 0 0 #0000}25%{box-shadow:0 0 14px #ffffff55,inset 0 0 10px #ffffff22}100%{box-shadow:0 0 0 #0000}}
+#wbtabs #think-btn.mail{border-color:var(--mg);box-shadow:0 0 10px #ff3fa466}
+#wbtabs #think-btn.mail i{background:var(--mg);box-shadow:0 0 8px var(--mg)}
 .ob-pane{display:none}.ob-pane.on{display:block}
 .ob-head{display:flex;gap:8px;align-items:center;margin:0 0 5px;font-size:9px;letter-spacing:.16em;color:var(--mut)}
 .ob-head b{color:var(--cy);font-weight:600}.ob-head span{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
@@ -610,15 +640,16 @@ header button:hover,.modes button:hover,footer .nav:hover{box-shadow:0 0 10px #0
   <div class="note">Rack closes the patch that is open now and opens this one. Rack saves what was open first, and a copy goes to <b>Rack2/autosave-before-open</b>.</div>
   <div class="st" id="ro-st"></div></div>
   <div class="bot"><button type="button" class="cancel">CANCEL</button><button type="button" class="go">OPEN IN RACK</button></div></div></div>
-<div id="think" role="dialog" aria-modal="true" aria-label="Claude thinking"><div class="head"><span><b>CLAUDE · THINKING</b> &nbsp;<span id="t-at">waiting for tools/claude_thinking.json</span></span><button type="button" id="think-x" aria-label="Close">&times;</button></div>
+<div id="think" role="dialog" aria-modal="true" aria-label="Claude thinking"><div class="head"><span><b>CLAUDE · THINKING</b> &nbsp;<span id="t-at"></span></span><button type="button" id="think-x" aria-label="Close">&times;</button></div>
   <div id="think-body">
     <div id="t-mind"><canvas id="mind-2d"></canvas>
+      <div id="t-inbox" role="status" aria-live="polite"></div>
       <div id="t-now"><h4>RIGHT NOW</h4><div class="title" id="t-title">-</div><div class="detail" id="t-detail"></div><div class="why" id="t-why"></div></div></div>
     <div class="card oled" id="t-brief"><div class="ob-tabs"><button type="button" data-tab="goal" class="on">GOAL<i id="t-qled" title="open questions for you"></i></button><button type="button" data-tab="plan">PLAN</button><button type="button" data-tab="log">DECISIONS</button></div>
       <div class="ob-pane on" data-pane="goal"><div id="t-goal">-</div><h4 style="margin-top:14px">OPEN QUESTIONS FOR YOU</h4><div id="t-q"><div style="border:0;color:var(--mut)">none</div></div></div>
       <div class="ob-pane" data-pane="plan"><div class="flow" id="t-flow"></div></div>
       <div class="ob-pane" data-pane="log"><div id="t-entries"></div></div></div>
-    <div class="card oled" id="t-sys"><div class="ob-head"><b>SYSTEM</b><span id="sys-at">waiting for tools/pc_stats.json</span></div><div id="sys-body"></div></div>
+    <div class="card oled" id="t-sys"><div class="ob-head"><b>SYSTEM</b><span id="sys-at"></span></div><div id="sys-body"></div></div>
     <div class="card oled" id="t-term"><div class="ob-head"><b>MSYS2</b><span id="term-st">MINGW64</span><button type="button" id="term-clear" title="Clear the screen">CLEAR</button></div>
       <pre id="term-out"></pre><div id="term-in"><span id="term-ps"></span><input id="term-cmd" autocomplete="off" spellcheck="false" placeholder="a command: make, git status, ls ..." /></div></div>
   </div></div>
@@ -857,6 +888,7 @@ async function scanArt(first) {
   }));
   for (const p of [...files.keys()]) if (!paths.includes(p)) { files.delete(p); feed(`${short(p)} removed`); }
   if (first) return;
+  if (fresh.size) try { TabLight.ping('wb'); } catch (e) {}
   fresh.forEach(p => { if (isAsm(p)) asmChange(p); });
   const keys = [...fresh].sort((a, b) => files.get(b) - files.get(a)).map(keyFor);
   if (!keys.length) return;
@@ -878,6 +910,7 @@ async function scanLog() {
   if (s === logStamp) return;
   const wasRunning = logStamp !== '';
   logStamp = s;
+  if (wasRunning) try { TabLight.ping('wb'); } catch (e) {}
   const text = await r.text(), lines = text.split('\n').slice(-400);
   try { Mind.build(lines); } catch (e) {}
   const esc = l => l.replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
@@ -927,7 +960,7 @@ async function scanCode(first) {
     codeStamps.set(p, t);
     if (!first && old !== t) { feed(`<b>${p.slice(1)}</b> ${old ? 'changed' : 'added'}`); asmChange(p); changed = true; }
   }));
-  if (changed) drawStrip();   // a source save moves its module's UPDATED date
+  if (changed) { drawStrip(); try { TabLight.ping('wb'); } catch (e) {} }   // a source save moves its module's UPDATED date
 }
 async function asmChange(p) {
   const now = await getText(p);
@@ -1139,6 +1172,7 @@ async function scanPatch() {
   if (changed && !document.getElementById('patch').classList.contains('on')) {
     const b = document.getElementById('patch-btn'); b.classList.remove('hot'); void b.offsetWidth; b.classList.add('hot');
   }
+  if (changed) try { TabLight.ping('map'); } catch (e) {}
   if (changed) try { Mind.note('rack', `rack patch: ${fresh.length} new cable${fresh.length === 1 ? '' : 's'} · ${d.cables.length} total`); } catch (e) {}
   drawPick();
   if (pShown.live) drawPatch(new Set(fresh), false);
@@ -1147,6 +1181,7 @@ async function scanLib() {
   const txt = await getText('/tools/patches_feed.json');
   if (txt === null || txt === libSeen) return;
   let d; try { d = JSON.parse(txt); } catch (e) { return; }
+  if (libSeen) try { TabLight.ping('lib'); } catch (e) {}
   libSeen = txt; libData = d.patches || [];
   document.getElementById('lib-n').textContent = libData.length;
   // a GEN patch has landed in the feed: show it
@@ -1497,6 +1532,19 @@ function closePatches() {
 }
 const popupMode = new URLSearchParams(location.search).get('patches');
 // ---- THE TABS: which page is up (the patches pop-up, THINKING, or the workbench itself) ----
+const TabLight = (() => {
+  const ids = { wb: 'tab-wb', map: 'patch-btn', lib: 'lib-btn', think: 'think-btn' };
+  const el = k => document.getElementById(ids[k]);
+  return {
+    ping(k) {   // something happened on that page
+      const b = el(k); if (!b) return;
+      if (!b.classList.contains('on')) b.classList.add('news');
+      b.classList.remove('flash'); void b.offsetWidth; b.classList.add('flash');
+    },
+    busy(k, on) { const b = el(k); if (b) b.classList.toggle('busy', !!on); },   // something is going on there now
+    seen() { for (const k in ids) { const b = el(k); if (b && b.classList.contains('on')) b.classList.remove('news'); } },
+  };
+})();
 function syncTabs() {
   const pOn = document.getElementById('patch').classList.contains('on'), tOn = document.getElementById('think').classList.contains('on');
   const live = pOn && typeof pShown !== 'undefined' && pShown && pShown.live;
@@ -1504,6 +1552,7 @@ function syncTabs() {
   document.getElementById('patch-btn').classList.toggle('on', pOn && !tOn && !!live);
   document.getElementById('lib-btn').classList.toggle('on', pOn && !tOn && !live);
   document.getElementById('think-btn').classList.toggle('on', tOn);
+  TabLight.seen();
   document.getElementById('wb-views').style.visibility = !pOn && !tOn ? 'visible' : 'hidden';
   const h = document.getElementById('wbtabs').getBoundingClientRect().bottom;
   document.documentElement.style.setProperty('--tabs-h', h + 'px');
@@ -1651,7 +1700,7 @@ const Mind = (() => {
   function drawHW(x, y, w, h, t, dt) {
     const stale = !hw || Date.now() - hw.t > 15000;
     panel(x, y, w, h, `HARDWARE · ${hw ? hw.host : 'THIS PC'}${hw && hw.model ? ' · ' + hw.model : ''}`, stale ? C.dim : C.gr);
-    if (!hw) { font(9); ctx.fillStyle = '#3d6c78'; ctx.fillText('awaiting telemetry · tools/pc_stats.ps1', x + 14, y + 36); return; }
+    if (!hw) return;
     const c = hw.cpu || {}, g = hw.gpu, r = hw.ram || {}, d = hw.disk || {}, n = hw.net || {};
     const zone = (hw.zones || []).slice().sort((a, b) => b.c - a.c)[0];
     const iy = y + 30, ih = h - 36, gap = 14;
@@ -1874,7 +1923,6 @@ const Mind = (() => {
       ctx.globalAlpha = 1;
       y += lh;
     });
-    if (!stream.length) { font(9); ctx.fillStyle = '#3d6c78'; ctx.fillText('awaiting signal…', sx + 14, top + 40); }
     ctx.restore();
 
     // ---- oscilloscope ----
@@ -2036,7 +2084,7 @@ async function scanThink() {
   try { Mind.compile(j.mode === 'compile' && Date.now() - up < 15 * 60 * 1000, 'think'); } catch (e) {}
   if (up === thinkSeen) return;
   try { j.mode === 'idle' ? Mind.rest() : Mind.pulse(.8); } catch (e) {}
-  if (thinkSeen) { btn.classList.remove('hot'); void btn.offsetWidth; btn.classList.add('hot'); }
+  if (thinkSeen) { btn.classList.remove('hot'); void btn.offsetWidth; btn.classList.add('hot'); try { TabLight.ping('think'); } catch (e) {} }
   thinkSeen = up;
   document.querySelectorAll('#think-body .card').forEach(c => { c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash'); });
   thinkEl('t-at').textContent = 'updated ' + thinkTime(up) + (j.task ? ' · ' + j.task : '');
@@ -2209,6 +2257,7 @@ async function scanJobs() {
   for (const n of names) (jobs[n.id] = jobs[n.id] || {})[n.ext] = true;
   const latest = {};   // kind -> newest job id
   for (const id of Object.keys(jobs).sort()) { const kind = id.slice(5); latest[kind] = id; }
+  try { TabLight.busy('think', Object.keys(jobs).some(id => jobs[id].job && !jobs[id].done)); } catch (e) {}   // a job running now
   const total = k => Object.keys(jobs).filter(id => id.slice(5) === k).length;
   const show = async (proc, kinds, label) => {
     const ids = kinds.map(k => latest[k]).filter(Boolean).sort();
@@ -2241,6 +2290,34 @@ async function scanJobs() {
   }
 }
 scanJobs(); setInterval(scanJobs, 3000);
+// FOR YOU: Claude's note (tools/claude_inbox.json: {t, title, text, links: [{label, href} | {label, open: {lib, file}}]}).
+// It shows on THINKING until you press GOT IT; the THINKING tab glows magenta while one is unread.
+let inboxSeen = '';
+async function scanInbox() {
+  const txt = await getText('/tools/claude_inbox.json');
+  if (txt === null || txt === inboxSeen) return;
+  inboxSeen = txt;
+  let d; try { d = JSON.parse(txt); } catch (e) { return; }
+  const box = document.getElementById('t-inbox'), btn = document.getElementById('think-btn');
+  let read = ''; try { read = localStorage.getItem('wb-inbox-read') || ''; } catch (e) {}
+  if (!d || !d.t || String(d.t) === read) { box.classList.remove('on'); btn.classList.remove('mail'); return; }
+  const links = (d.links || []).map((l, i) => `<a data-i="${i}" class="${l.open ? '' : 'f'}" title="${escS(l.open ? 'open in Rack (behind your windows)' : (l.href || ''))}">${esc(l.label || l.href || 'open')}</a>`).join('');
+  box.innerHTML = `<div class="ih"><b>FOR YOU</b><span>${time(d.t)}</span></div><h5>${esc(d.title || '')}</h5><div class="it">${esc(d.text || '')}</div>` +
+    (links ? `<div class="il">${links}</div>` : '') + `<div class="st"></div><button type="button" class="ok">GOT IT</button>`;
+  box.querySelectorAll('.il a').forEach(a => a.onclick = async () => {
+    const l = d.links[+a.dataset.i], st = box.querySelector('.st');
+    if (l.open) {
+      st.textContent = 'Opening in Rack, behind your windows...';
+      try { const r = await fetch(RACK_OPEN + '/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(l.open) });
+            const j = await r.json(); st.textContent = j.ok ? 'Opening in Rack (behind your windows).' : 'Could not open: ' + (j.error || 'failed'); }
+      catch (e) { st.textContent = 'Could not reach the Rack opener (tools/rack_open_server.py, port 8767).'; }
+    } else window.open(l.href, '_blank');
+  });
+  box.querySelector('.ok').onclick = () => { try { localStorage.setItem('wb-inbox-read', String(d.t)); } catch (e) {} box.classList.remove('on'); btn.classList.remove('mail'); };
+  box.classList.add('on'); btn.classList.add('mail');
+  try { TabLight.ping('think'); } catch (e) {}
+}
+scanInbox(); setInterval(scanInbox, 4000);
 // ---- CLAUDE SIGNAL: what THINKING wants you to see, as a beacon over the whole workbench ----
 const csig = { think: null, hot: null, hidden: '' };
 function drawSignal() {
