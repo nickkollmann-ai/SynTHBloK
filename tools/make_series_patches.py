@@ -35,16 +35,24 @@ ENV = dict(os.environ, PATH=';'.join([r'C:\msys64\mingw64\bin', r'C:\Program Fil
                                        r'C:\msys64\home\nickk\Rack-SDK', os.environ.get('PATH', '')]))
 parts = json.load(open(PARTS, encoding='utf-8')) if os.path.exists(PARTS) else {}
 
+# parts portnames can't read, written out from their source (src/SynTHBloKFilter.cpp for the Resonator)
+_RES_IN = ['Cutoff knob CV', 'Resonance knob CV', 'Exciter knob CV', 'Mix knob CV', 'In L', 'In R', 'Tuning CV',
+           'Resonance CV', 'V/Oct', 'Exciter CV', 'Damping CV', 'Strike CV']
+_RES_OUT = ['Out L', 'Out R', 'Excitation env', 'Body tap']
+KNOWN_PARTS = {'SynTHBloK-Resonator/Resonator': {'in': _RES_IN, 'out': _RES_OUT, 'hp': 13, 'version': '2.1.0',
+                                                 'inOk': [True] * 12, 'outOk': [True] * 4}}
+_rechecked = set()
 def part(plugin, model):
     """names, on-panel jacks, width and plugin version of one model (portnames --pos, cached)"""
     k = plugin + '/' + model
-    if k not in parts:
+    if k not in parts or (parts[k] is None and k not in _rechecked):   # a part missing last time may be installed now
+        _rechecked.add(k)
         r = subprocess.run([EXE, plugin, '--pos', model], capture_output=True, text=True, encoding='utf-8',
                            errors='replace', env=ENV, timeout=90)
         line = next((l for l in reversed(r.stdout.splitlines()) if l.startswith('{')), '{}')
         e = json.loads(line).get(model)
         if not e or not e.get('wmm'):
-            parts[k] = None
+            parts[k] = KNOWN_PARTS.get(k)   # portnames can't open every panel (it crashes on the Resonator's)
         else:
             ver = json.load(open(os.path.join(PLUGINS, plugin, 'plugin.json'), encoding='utf-8'))['version']
             parts[k] = {'in': e['in'], 'out': e['out'], 'hp': round(e['wmm'] / 5.08), 'version': ver,
@@ -437,7 +445,8 @@ def modulate(P, song, targets, cvs):
             src = (song, 4)
         P.w(src, (m, i), '#9437ff')
 
-def build(n, seed=None, style=None, prefix='SB_%03d'):
+def build_classic(n, seed=None, style=None, prefix='SB_%03d'):
+    """the first PATCH GEN engine (random parts from every installed plugin); build() below is RANDROYD's"""
     rng = random.Random(seed if seed is not None else 'SB%02d' % n)
     P = Patch(rng)
     drum_kind = P.drum_kind = rng.choice(['drum', 'drum', 'euclid', 'mtx8', 'forge'])
@@ -512,6 +521,217 @@ def build(n, seed=None, style=None, prefix='SB_%03d'):
         if nm not in seen and nm not in ('LFO', 'RND'): seen.add(nm); label.append(nm)
     style = g['name'].replace(' & ', 'n').replace(' ', '').replace('-', '')
     return '%s_%s_%s' % (prefix % n if '%' in prefix else prefix, style, '_'.join(label[:4])), P.json(audio)
+
+# --- RANDROYD's song engine (src/SynTHBloKRandroyd.cpp), ported for PATCH GEN ---------------------------------
+# The same light roster RANDROYD builds (few heavy MTX modules), its routing, its CPU sizes and its arrangement:
+#   drums   MTX-DRUM (or EUCLID playing KICK + SNARE/HAT: the light drums, always on)
+#   bass    MTX-DUO bass > MORPH FILTER (keytracked)          lead  the DUO's lead > DUAL FILTER (gated) > CHARACTER DELAY
+#   chords  MTX QUAD > POLY > STEREO PHASER (ducked by the kick) > RESONATOR or DUAL FILTER
+#   perc    EUCLID > KICK tuned up > RESONATOR (FULL)          pad   the QUAD's chords on a slow POLY > GRAIN-FORGE (FULL)
+#   MIX-8, MTX-ECHO on the send, BloKMaster on the master.
+# CPU sizes: LIGHT = drums + bass, MED = + lead + chords, FULL = + perc + pad.
+# Arrangement: COMPOSER conducts the drums, the DUO and the QUAD; a part that sits a section out plays a blank
+# pattern there (never a mute), so notes and tails ring out. Patterns 1-4 follow the chords, 8 is blank, and on
+# the DUO 5-7 hold a chord with one half blank (only the lead or only the bass sits out).
+RD_D, RD_B, RD_L, RD_C, RD_P, RD_X, RD_ALL = 1, 2, 4, 8, 16, 32, 63
+RD_ARR = [
+    [RD_D | RD_X, RD_D | RD_B | RD_X, RD_D | RD_B | RD_P | RD_X, RD_D | RD_B | RD_P | RD_C | RD_X, RD_ALL, RD_ALL, RD_ALL, RD_L | RD_C | RD_X],
+    [RD_D | RD_P, RD_D | RD_P | RD_B, RD_D | RD_P | RD_B | RD_C, RD_D | RD_P | RD_B | RD_C | RD_L, RD_ALL, RD_ALL, RD_ALL & ~RD_L, RD_C | RD_X | RD_B],
+    [RD_ALL & ~RD_L, RD_ALL, RD_ALL, RD_L | RD_X, RD_L | RD_X | RD_C, RD_D | RD_L | RD_X | RD_C, RD_ALL, RD_ALL],
+    [RD_X, RD_X | RD_C, RD_X | RD_C | RD_P, RD_X | RD_C | RD_P | RD_B, RD_X | RD_C | RD_P | RD_B | RD_D, RD_ALL, RD_ALL, RD_ALL & ~RD_D],
+]
+RD_ARR_NAMES = ['BuildDrop', 'GrooveFirst', 'Breakdown', 'SlowBurn']
+RD_SIZES = {'LIGHT': RD_D | RD_B, 'MED': RD_D | RD_B | RD_L | RD_C, 'FULL': RD_ALL}
+# how often each size is dealt when none is asked for: most patches stay light enough for a busy PC
+RD_SIZE_ODDS = [('LIGHT', 3), ('MED', 5), ('FULL', 2)]
+
+def rd_arrangement(rng, present, always_on):
+    """one of RANDROYD's four arrangements: per section A-H, a bit per part that plays"""
+    k = rng.randrange(4)
+    n_present = bin(present).count('1')
+    out = []
+    for i in range(8):
+        v = RD_ARR[k][i]
+        if v == RD_ALL and rng.random() < 0.15: v &= ~(RD_L if rng.random() < 0.5 else RD_P)   # a drop breathes now and then
+        v |= always_on   # light parts have no blank pattern: they play every section
+        for add in (0, 1, 3, 2, 4, 5):   # never a thin section: at least three parts (drums, bass, chords join first)
+            if bin(v & present).count('1') >= min(3, n_present): break
+            if present >> add & 1: v |= 1 << add
+        out.append(v & present)
+    return k, out
+
+def rd_blank_half(hx, lead):
+    """an MTX-DUO pattern (16 hex lead, 16 hex bass) with one half silent"""
+    return ('0' * 16 + hx[16:]) if lead else (hx[:16] + '0' * 16)
+
+def rd_port(P, m, side, *words):
+    i = P.find(m, side, *words)
+    return (m, i) if i is not None else None
+
+def rd_wire(P, a, b, color=None):
+    if a and b: P.w(a, b, color)
+
+def build(n, seed=None, style=None, prefix='SB_%03d', size=None):
+    rng = random.Random(seed if seed is not None else 'RD%02d' % n)
+    P = Patch(rng)
+    if size not in RD_SIZES:
+        size = rng.choices([s for s, _ in RD_SIZE_ODDS], [w for _, w in RD_SIZE_ODDS])[0]
+    present = RD_SIZES[size]
+    light_drums = size == 'LIGHT' or rng.random() < 0.2   # a small track takes the light drums (no MTX sequencer)
+    P.drum_kind = 'euclid' if light_drums else 'drum'
+    g = P.g = PG.pick(rng, n, False, style)
+    rev = g['rev']
+    song = P.add('SynTHBloK', 'MatrixSong', {0: 0, 5: g['bpm'], 8: 3, 9: 1, 10: 0})
+    P.names.append(size)
+
+    # 1 DRUMS
+    drums, trigs = drum_part(P, song, P.drum_kind)
+    drum = next((m for m in P.modules if m['model'] == 'Drum'), None)
+    kick = next((m for m in P.modules if m['model'] == 'Kick'), None)
+    kick_audio = rd_port(P, drum, 'out', 'row 1 audio') if drum else ((kick, 0) if kick else None)
+
+    # 2 + 3 MTX-DUO: bass > MORPH (keytracked); lead > DUAL (gated envelope) > CHARACTER DELAY
+    main_voice(P, song, 'duo')
+    duo = P.modules[-1]
+    morph = P.add('SynTHBloK', 'NoizeeFlagshipFilter', fx_knobs(rng, 'NoizeeFlagshipFilter', g))
+    rd_wire(P, rd_port(P, duo, 'out', 'bass audio'), rd_port(P, morph, 'in', 'left in'), '#ffb437')
+    rd_wire(P, rd_port(P, duo, 'out', 'bass pitch'), rd_port(P, morph, 'in', 'keytrack'), '#ffb437')
+    bass = [rd_port(P, morph, 'out', 'left out'), rd_port(P, morph, 'out', 'right out')]
+    P.names.append('Duo')
+    lead = None
+    if present & RD_L:
+        dual = P.add('SynTHBloK', 'DualFilter', fx_knobs(rng, 'DualFilter', g))
+        dly = P.add('SynTHBloK', 'FX', fx_knobs(rng, 'FX', g))
+        rd_wire(P, rd_port(P, duo, 'out', 'lead audio'), rd_port(P, dual, 'in', 'left'), '#ff9300')
+        rd_wire(P, rd_port(P, duo, 'out', 'lead gate'), rd_port(P, dual, 'in', 'envelope gate'), '#ff9300')
+        rd_wire(P, rd_port(P, dual, 'out', 'left'), rd_port(P, dly, 'in', 'in l'), '#ff9300')
+        rd_wire(P, rd_port(P, dual, 'out', 'right'), rd_port(P, dly, 'in', 'in r'), '#ff9300')
+        clock(P, song, dual); clock(P, song, dly)
+        lead = [rd_port(P, dly, 'out', 'out l'), rd_port(P, dly, 'out', 'out r')]
+
+    # 4 CHORDS: MTX QUAD > POLY > STEREO PHASER (side = the kick) > RESONATOR or DUAL
+    quad = chords = pitch = gate = None
+    if present & RD_C:
+        roles = g['quad']; g['quad'] = ['chords']
+        _, pitch, gate, _ = main_voice(P, song, 'quad')
+        g['quad'] = roles
+        quad = P.modules[-1]
+        poly = layer(P, 'poly', pitch, gate)
+        phs = P.add('SynTHBloK', 'Stereo', fx_knobs(rng, 'Stereo', g))
+        rd_wire(P, poly[0], rd_port(P, phs, 'in', 'main'), '#ffe14a')
+        rd_wire(P, kick_audio, rd_port(P, phs, 'in', 'side'), '#ff2b2b')
+        cres = rng.random() < 0.5
+        cfx = P.add('SynTHBloK', 'Resonator', {0: rng.uniform(0.35, 0.6), 1: rng.uniform(0.3, 0.5), 2: 0.3, 3: 0.5,
+                                                4: rng.choice([0.0, 0.33, 0.66]), 5: 0.3 + 0.15 * g['bright']}) if cres else None
+        if cfx is None: cfx = P.add('SynTHBloK', 'DualFilter', fx_knobs(rng, 'DualFilter', g))
+        rd_wire(P, rd_port(P, phs, 'out', 'left'), rd_port(P, cfx, 'in', 'in l', 'left'), '#ffe14a')
+        rd_wire(P, rd_port(P, phs, 'out', 'right'), rd_port(P, cfx, 'in', 'in r', 'right'), '#ffe14a')
+        if cfx['model'] == 'DualFilter': clock(P, song, cfx)
+        chords = [rd_port(P, cfx, 'out', 'out l', 'left'), rd_port(P, cfx, 'out', 'out r', 'right')]
+        P.names += ['MtxQuad', 'Poly', 'Resonator' if cfx['model'] == 'Resonator' else 'DualFilter']
+
+    # 5 PERC: EUCLID > KICK tuned up (a tom / clave) > RESONATOR
+    perc = None
+    if present & RD_P:
+        e = P.add('SynTHBloK', 'Euclid', {0: 16, 1: rng.choice([3, 5, 7]), 2: rng.randrange(1, 4),
+                                          3: 16, 4: 0, 5: 0, 6: 16, 7: 0, 8: 0, 9: 16, 10: 0, 11: 0})
+        clock(P, song, e)
+        pk = P.add('SynTHBloK', 'Kick', {0: PG.hz(g, 90, 160), 1: 0.2, 3: 0.2, 6: 0.1, 9: 0.7})
+        pr = P.add('SynTHBloK', 'Resonator', {0: rng.uniform(0.45, 0.75), 1: rng.uniform(0.5, 0.7), 2: 0.45, 3: 0.4,
+                                               4: rng.choice([0.33, 0.66, 1.0]), 5: 0.55})
+        rd_wire(P, (e, 0), (pk, 0) if pk else None, '#ff2b2b')
+        if pr: rd_wire(P, (pk, 0) if pk else None, rd_port(P, pr, 'in', 'in l'), '#ff2b2b')
+        perc = [rd_port(P, pr, 'out', 'out l'), rd_port(P, pr, 'out', 'out r')] if pr else ([(pk, 0)] if pk else None)
+        P.names.append('Perc')
+
+    # 6 PAD: the QUAD's chords on a slow POLY > GRAIN-FORGE
+    pad = None
+    if present & RD_X and pitch and gate:
+        pp = P.add('SynTHBloK', 'Poly', {0: 0.66, 1: 0, 2: 0.45, 3: 0.6, 4: 0.8, 5: 0.75, 6: (g['bright'] - 0.6) * 0.8, 7: 0.35, 8: 0.6})
+        gf = P.add('SynTHBloK', 'GrainForge', PG.grainforge(rng, g))
+        rd_wire(P, pitch, (pp, 0) if pp else None, '#9437ff'); rd_wire(P, gate, (pp, 1) if pp else None, '#9437ff')
+        if gf:
+            rd_wire(P, (pp, 0) if pp else None, rd_port(P, gf, 'in', 'left'), '#9437ff')
+            clock(P, song, gf)
+            pad = [rd_port(P, gf, 'out', 'left'), rd_port(P, gf, 'out', 'right')]
+        elif pp: pad = [(pp, 0), (pp, 1)]
+        P.names.append('Pad')
+
+    # the arrangement: COMPOSER rows = the drums (MTX-DRUM), the DUO, the QUAD; blank patterns, never mutes
+    always = (RD_D if drum is None else 0) | (RD_P if perc else 0)
+    has = RD_D | RD_B | (RD_L if lead else 0) | (RD_C if chords else 0) | (RD_P if perc else 0) | (RD_X if pad else 0)
+    kind, arr = rd_arrangement(rng, has, always)
+    rows, cells = [-1] * 8, [[None] * 8 for _ in range(8)]
+    duo_d = duo.get('data') or {}
+    chords_hex, acc_hex = list(duo_d.get('chords', [])), list(duo_d.get('accents', []))
+    slot, nxt = {}, 4
+    for s in range(8):
+        ci, v = s % 4, arr[s]
+        if drum: cells[s][0] = ci if v & RD_D else 7
+        b, l = bool(v & RD_B), bool(v & RD_L) and lead is not None
+        if lead is None: dp = ci if b else 7   # LIGHT: the lead isn't patched, the bass follows B
+        elif b and l: dp = ci
+        elif not b and not l: dp = 7
+        else:
+            key = (ci, l)
+            if key not in slot and nxt <= 6 and len(chords_hex) == 8:
+                slot[key] = nxt
+                chords_hex[nxt] = rd_blank_half(chords_hex[ci], lead=not l)
+                if len(acc_hex) == 8: acc_hex[nxt] = ('00' + acc_hex[ci][2:]) if not l else (acc_hex[ci][:2] + '00')
+                nxt += 1
+            dp = slot.get(key, ci)
+        cells[s][1] = dp
+        if quad: cells[s][2] = ci if v & (RD_C | RD_X) else 7
+    if len(chords_hex) == 8: duo_d['chords'] = chords_hex
+    if len(acc_hex) == 8: duo_d['accents'] = acc_hex
+    duo['data'] = duo_d
+    rows[0] = drum['id'] if drum else -1
+    rows[1] = duo['id']
+    rows[2] = quad['id'] if quad else -1
+    sd = song.setdefault('data', {})
+    sd['rows'] = rows
+    sd['cells'] = [[[cells[s][r] if cells[s][r] is not None else s % 4, False, 0, 1.0] for r in range(8)] for s in range(8)]
+    sd['mutes'] = [False] * 8
+    sd['autoFill'] = False
+    sd['dropped'] = []
+    sd['section'] = 0
+    P.names.append(RD_ARR_NAMES[kind])
+
+    # MIX-8: levels, pans and sends as RANDROYD sets them; MTX-ECHO on the send; BloKMaster on the master
+    mixer = P.add('SynTHBloK', 'Mix8', newrow=True)
+    mixer['params'] = []
+    setp(mixer, {MIX_MASTER['Mix8']: 0.9})
+    names = mixer['_info']['in']
+    chans = [(i, i + 1) for i, nm in enumerate(names) if nm.startswith('CH ') and nm.endswith(' L')]
+    def mix(src, lv, pan, snd):
+        src = [x for x in (src or []) if x]
+        if src: to_mixer(P, mixer, chans, src, lv, pan, snd)
+    for k, d in enumerate(drums): mix(d, 0.95 if k == 0 else 0.75, 0.0, 0.08 * rev)
+    mix(bass, 0.85, 0.0, 0.05)
+    mix(lead, 0.7, -0.2, 0.1 + 0.3 * rev)
+    mix(chords, 0.6, 0.25, 0.15 + 0.45 * rev)
+    mix(perc, 0.55, rng.choice([-0.3, 0.3]), 0.2 + 0.3 * rev)
+    mix(pad, 0.5, 0.0, 0.3 + 0.5 * rev)
+    ret_l = P.find(mixer, 'in', 'fx return left')
+    if ret_l is not None:
+        s = P.add('SynTHBloK', 'Echo', send_knobs(rng, 'Echo', g))
+        if s:
+            P.w((mixer, 2), (s, 0)); P.w((mixer, 3), (s, 1)); clock(P, song, s)
+            P.w((s, 0), (mixer, ret_l), '#00b56e'); P.w((s, 1), (mixer, ret_l + 1), '#3695ef')
+    last = [(mixer, 0), (mixer, 1)]
+    bm = P.add('SynTHBloK', 'BlokMaster', {1: 0.0, 8: 0.5, 16: -1.0, 20: 2.0 + 4.0 * g['drive'], 21: 0.5})
+    if bm: P.w(last[0], (bm, 0)); P.w(last[1], (bm, 1)); last = [(bm, 0), (bm, 1)]
+    audio = {'id': rng.randrange(1 << 50, 1 << 52), 'plugin': 'Core', 'model': 'AudioInterface2', 'version': '2.6.6',
+             'params': [{'value': 1.0, 'id': 0}], 'pos': [P.x, P.row],
+             '_info': {'in': ['To device 1', 'To device 2'], 'out': ['From device 1', 'From device 2'], 'hp': 5,
+                       'inOk': [True, True], 'outOk': [True, True]}}
+    P.modules.append(audio)
+    P.w(last[0], (audio, 0), '#00b56e'); P.w(last[1], (audio, 1), '#3695ef')
+    seen, label = set(), []
+    for nm in P.names:
+        if nm not in seen and nm not in ('LFO', 'RND'): seen.add(nm); label.append(nm)
+    style_name = g['name'].replace(' & ', 'n').replace(' ', '').replace('-', '')
+    return '%s_%s_%s' % (prefix % n if '%' in prefix else prefix, style_name, '_'.join(label[:5])), P.json(audio)
 
 def gen_one(style=None):
     """the workbench's GEN button: one new patch from a fresh seed (in this style, or any), saved only into Rack's

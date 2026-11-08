@@ -117,7 +117,7 @@ main{display:grid;grid-template-columns:minmax(260px,.7fr) minmax(0,1fr) minmax(
 #patch .head{position:sticky;top:0}
 #patch-close{background:transparent;border:1px solid var(--line);color:var(--cy);font:inherit;font-size:10px;letter-spacing:.12em;padding:1px 8px;cursor:pointer}
 #patch-body{display:grid;grid-template-columns:230px minmax(0,1fr) 380px;min-height:0}
-@media(max-width:1100px){#patch-body{grid-template-columns:200px minmax(0,1fr);grid-template-rows:minmax(0,1.3fr) minmax(0,1fr)}#patch-list{grid-column:1/-1}}
+@media(max-width:1100px){#patch-body{grid-template-columns:200px minmax(0,1fr);grid-template-rows:minmax(0,1.3fr) minmax(0,1fr)}#patch-side{grid-column:1/-1}}
 #patch-pick{overflow:hidden auto;scrollbar-width:thin;border-right:1px solid var(--line);background:#070b10;font-size:11px}
 #patch-pick h4{margin:0;padding:8px 12px 3px;font-weight:500;font-size:10px;letter-spacing:.14em;color:var(--mut)}
 #patch-pick div{padding:5px 12px;cursor:pointer;color:#9fb6c0;border-left:2px solid transparent;line-height:15px}
@@ -222,6 +222,44 @@ body.popup #patch .scr:nth-child(3){left:3px;bottom:3px}body.popup #patch .scr:n
 #patch-gen #gen-btn{font-size:11px;padding:5px 16px;background:#070b10cc;box-shadow:0 0 12px #ff00aa44}
 #patch-gen #gen-style{font-size:11px;padding:3px 6px;max-width:none}
 #patch-zoom button{background:#070b10cc;border:1px solid var(--line);color:var(--cy);font:inherit;font-size:12px;width:26px;height:24px;cursor:pointer}
+/* SAVE BANK: RANDROYD's TRACKS OLED on the PATCHES page. 8 banks x 16 fixed spots, each EMPTY or a patch + date.
+   SAVE flashes the list (click a spot to keep the patch on the map there); CLEAR flashes the saved spots red (click
+   one, then again, to delete it). A saved spot opens its patch on the map. Kept in this browser (localStorage). */
+#patch-side{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--line);background:#070b10}
+#patch-side #patch-list{flex:1;min-height:0;border-left:0}
+#sbank{--am:255,190,90;margin:8px;padding:6px 7px 7px;background:#0e0903;border:1px solid rgba(255,180,90,.32);border-radius:3px;
+  font:11px/1 ui-monospace,"Cascadia Mono",Consolas,monospace;color:rgb(var(--am));box-shadow:inset 0 0 18px #000,0 0 10px rgba(255,140,30,.06);
+  text-shadow:0 0 4px rgba(255,160,60,.45);user-select:none;position:relative;overflow:hidden}
+#sbank::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.18) 2px 3px)}
+#sbank .sb-top{display:flex;justify-content:space-between;align-items:baseline;padding:0 1px 5px;letter-spacing:.14em}
+#sbank .sb-top b{font-weight:700}#sbank .sb-top span{color:rgba(var(--am),.55);font-size:10px}
+#sbank .sb-banks{display:grid;grid-template-columns:repeat(8,1fr);gap:3px;margin-bottom:5px}
+#sbank button{font:inherit;font-size:10px;letter-spacing:.08em;cursor:pointer;border-radius:2px;padding:2px 0;
+  background:#281908;color:rgba(var(--am),.8);border:1px solid rgba(255,180,90,.3);text-shadow:inherit}
+#sbank button:hover{border-color:rgba(255,180,90,.7)}
+#sbank button.on{background:rgba(255,112,15,.92);color:#140a02;text-shadow:none;border-color:#ff9a3a}
+#sbank button.dot{position:relative}#sbank button.dot::after{content:"";position:absolute;top:2px;right:3px;width:3px;height:3px;border-radius:50%;background:rgb(var(--am))}
+#sbank button.on.dot::after{background:#140a02}
+#sbank .sb-list{border-top:1px solid rgba(255,180,90,.2);border-bottom:1px solid rgba(255,180,90,.2);padding:2px 0}
+#sbank .sb-spot{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:6px;padding:2px 3px;line-height:13px;cursor:pointer;border-radius:2px}
+#sbank .sb-spot i{font-style:normal;color:rgba(var(--am),.5)}
+#sbank .sb-spot span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#sbank .sb-spot em{font-style:normal;color:rgba(var(--am),.55);font-size:10px}
+#sbank .sb-spot.empty span{color:rgba(var(--am),.3);letter-spacing:.1em}
+#sbank .sb-spot.empty{cursor:default}
+#sbank .sb-spot:not(.empty):hover{background:rgba(255,160,60,.1)}
+#sbank .sb-spot.cur{background:rgba(255,112,15,.18)}
+#sbank .sb-spot.gone span{text-decoration:line-through;color:rgba(var(--am),.45)}
+#sbank.saving .sb-spot{cursor:pointer;animation:sbflash .7s steps(2,jump-none) infinite}
+#sbank.saving .sb-spot:hover{animation:none;background:rgba(255,112,15,.9);color:#140a02;text-shadow:none}
+#sbank.saving .sb-spot:hover i,#sbank.saving .sb-spot:hover em,#sbank.saving .sb-spot:hover span{color:#140a02}
+#sbank.clearing .sb-spot:not(.empty){cursor:pointer;color:#ff5a3c;animation:sbflash .7s steps(2,jump-none) infinite}
+#sbank.clearing .sb-spot.arm{animation:sbflash .18s steps(2,jump-none) infinite;background:rgba(255,60,40,.25)}
+@keyframes sbflash{0%{opacity:1}100%{opacity:.25}}
+#sbank .sb-soft{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+#sbank .sb-soft button{padding:3px 0;letter-spacing:.16em}
+#sbank #sb-clear.on{background:#d8331f;border-color:#ff6a50;color:#fff}
+#sbank .sb-msg{height:12px;margin-top:5px;font-size:10px;color:rgba(var(--am),.6);letter-spacing:.06em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #patch-list{overflow:hidden auto;scrollbar-width:thin;border-left:1px solid var(--line);background:#070b10;font-size:11px;line-height:16px}
 @media(max-width:900px){#patch-list{border-left:0;border-top:1px solid var(--line)}}
 #patch-list h4{margin:0;padding:6px 12px 2px;font-weight:500;font-size:10px;letter-spacing:.14em;color:var(--mut)}
@@ -353,7 +391,7 @@ footer .nav:hover{border-color:var(--cy)}
 <footer><button type="button" class="nav" id="s-prev" title="Previous (←)">&lsaquo;</button><div id="strip"></div><button type="button" class="nav" id="s-next" title="Next (→)">&rsaquo;</button><span id="s-count"></span></footer>
 <div id="patch-bg"></div>
 <div id="patch" role="dialog" aria-modal="true" aria-label="SynTHBloK patches"><i class="scr"></i><i class="scr"></i><i class="scr"></i><i class="scr"></i><div class="head"><span><span class="pbrand"><s>SynTHBloK</s><i>PATCHES</i></span><span class="pt">PATCHES</span> <b id="patch-at">waiting for tools/patch_feed.json</b></span><span class="acts"><button type="button" id="rack-open" hidden title="Open this patch in VCV Rack">OPEN IN RACK</button><button type="button" id="patch-close" aria-label="Close">&times;</button></span></div>
-  <div id="patch-body"><div id="patch-pick"></div><div id="patch-map"><div id="patch-zoom"><button type="button" data-z="1.25" title="Zoom in">+</button><button type="button" data-z="0.8" title="Zoom out">&minus;</button><button type="button" data-z="0" title="Fit">&#9634;</button></div><div id="patch-gen"><select id="gen-style" title="Style of the next generated patch"><option value="">ANY STYLE</option><option>House</option><option>Deep House</option><option>Techno</option><option>Acid</option><option>Trance</option><option>Electro</option><option>Hip-Hop</option><option>Trap</option><option>Lo-Fi</option><option>Synthwave</option><option>Drum &amp; Bass</option><option>Dub</option><option>Ambient</option><option>Funk</option><option>Afrobeat</option><option>Trip-Hop</option></select><button type="button" id="gen-btn" title="Generate a new patch and show it here (Rack is left alone)">GENERATE</button></div></div><div id="patch-list"></div></div></div>
+  <div id="patch-body"><div id="patch-pick"></div><div id="patch-map"><div id="patch-zoom"><button type="button" data-z="1.25" title="Zoom in">+</button><button type="button" data-z="0.8" title="Zoom out">&minus;</button><button type="button" data-z="0" title="Fit">&#9634;</button></div><div id="patch-gen"><select id="gen-style" title="Style of the next generated patch"><option value="">ANY STYLE</option><option>House</option><option>Deep House</option><option>Techno</option><option>Acid</option><option>Trance</option><option>Electro</option><option>Hip-Hop</option><option>Trap</option><option>Lo-Fi</option><option>Synthwave</option><option>Drum &amp; Bass</option><option>Dub</option><option>Ambient</option><option>Funk</option><option>Afrobeat</option><option>Trip-Hop</option></select><button type="button" id="gen-btn" title="Generate a new patch and show it here (Rack is left alone)">GENERATE</button></div></div><div id="patch-side"><div id="sbank" aria-label="Save bank"><div class="sb-top"><b>TRACKS</b><span id="sb-at">BANK 1 · 0/16</span></div><div class="sb-banks" id="sb-banks"></div><div class="sb-list" id="sb-list"></div><div class="sb-soft"><button type="button" id="sb-save" title="Save the patch on the map: click, then pick a spot">SAVE</button><button type="button" id="sb-clear" title="Delete a saved spot: click, pick a spot, click it again">CLEAR</button></div><div class="sb-msg" id="sb-msg">pick a bank · SAVE keeps the patch on the map</div></div><div id="patch-list"></div></div></div></div>
 <div id="ro"><div class="box"><div class="top"><span>OPEN IN <b>VCV RACK</b></span><button type="button" class="x" title="Close">&times;</button></div>
   <div class="mid"><h3 id="ro-name"></h3><div class="sub" id="ro-sub"></div><div class="pv" id="ro-pv"></div><div class="mods" id="ro-mods"></div>
   <div class="note">Rack closes the patch that is open now and opens this one. Rack saves what was open first, and a copy goes to <b>Rack2/autosave-before-open</b>.</div>
@@ -896,7 +934,7 @@ async function scanLib() {
   // a GEN patch has landed in the feed: show it
   const got = genWant && libData.find(p => p.file === genWant);
   if (got) { genWant = null; genDone(); pShown = { lib: got.lib, file: got.file }; patchSel = null; drawPick(); drawPatch(new Set(), true); syncOpenBtn(); return; }
-  drawPick();
+  drawPick(); try { sbDraw(); } catch (e) {}
   if (!pShown.live) drawPatch(new Set(), false);
 }
 function current() { return pShown.live ? patchData : libData.find(p => p.file === pShown.file && p.lib === pShown.lib); }
@@ -920,6 +958,78 @@ document.getElementById('patch-pick').onclick = e => {
   pShown = k === 'live' ? { live: true } : { lib: k.slice(0, i), file: k.slice(i + 1) };
   patchSel = null; drawPick(); drawPatch(new Set(), true); syncOpenBtn();
 };
+// SAVE BANK (RANDROYD's TRACKS OLED): 8 banks of 16 fixed spots; nothing is written until SAVE, then a spot is picked
+const SB_KEY = 'synthblok.savebank.v1', SB_BANKS = 8, SB_SPOTS = 16;
+const sb = { bank: 0, mode: '', arm: -1, cur: null, spots: [] };
+try { const j = JSON.parse(localStorage.getItem(SB_KEY) || 'null'); if (j && Array.isArray(j.spots)) { sb.spots = j.spots; sb.bank = j.bank | 0; } } catch (e) {}
+while (sb.spots.length < SB_BANKS * SB_SPOTS) sb.spots.push(null);
+const sbStore = () => { try { localStorage.setItem(SB_KEY, JSON.stringify({ bank: sb.bank, spots: sb.spots })); } catch (e) {} };
+const sbToday = () => { const d = new Date(), z = n => String(n).padStart(2, '0'); return `${z(d.getMonth() + 1)}/${z(d.getDate())}/${String(d.getFullYear()).slice(2)}`; };
+const sbMsg = t => { document.getElementById('sb-msg').textContent = t; };
+const sbHas = s => s && (s.live || libData.some(p => p.file === s.file && p.lib === s.lib));
+function sbDraw() {
+  const base = sb.bank * SB_SPOTS, used = sb.spots.slice(base, base + SB_SPOTS).filter(Boolean).length;
+  document.getElementById('sb-at').textContent = `BANK ${sb.bank + 1} · ${used}/${SB_SPOTS}`;
+  document.getElementById('sb-banks').innerHTML = Array.from({ length: SB_BANKS }, (_, b) => {
+    const any = sb.spots.slice(b * SB_SPOTS, b * SB_SPOTS + SB_SPOTS).some(Boolean);
+    return `<button type="button" data-b="${b}" class="${b === sb.bank ? 'on' : ''}${any ? ' dot' : ''}">${b + 1}</button>`;
+  }).join('');
+  document.getElementById('sb-list').innerHTML = Array.from({ length: SB_SPOTS }, (_, i) => {
+    const s = sb.spots[base + i], cls = ['sb-spot'];
+    if (!s) cls.push('empty'); else if (!sbHas(s)) cls.push('gone');
+    if (sb.cur === base + i) cls.push('cur');
+    if (sb.arm === base + i) cls.push('arm');
+    return `<div class="${cls.join(' ')}" data-s="${i}" title="${s ? esc(s.name + (s.live ? '' : ' · ' + s.file)) : 'empty'}"><i>${String(i + 1).padStart(2, '0')}</i>` +
+      `<span>${s ? esc(pShort(s.name)) : 'EMPTY'}</span><em>${s ? esc(s.date) : ''}</em></div>`;
+  }).join('');
+  const box = document.getElementById('sbank');
+  box.classList.toggle('saving', sb.mode === 'save'); box.classList.toggle('clearing', sb.mode === 'clear');
+  document.getElementById('sb-save').classList.toggle('on', sb.mode === 'save');
+  document.getElementById('sb-clear').classList.toggle('on', sb.mode === 'clear');
+}
+function sbMode(m) {
+  sb.mode = sb.mode === m ? '' : m; sb.arm = -1;
+  if (sb.mode === 'save') {
+    const d = current();
+    if (!d) { sb.mode = ''; sbMsg('nothing on the map to save'); }
+    else sbMsg(`SAVE ${pShown.live ? 'live patch' : pShort(d.name)} · pick a spot (SAVE again cancels)`);
+  } else if (sb.mode === 'clear') sbMsg('CLEAR · pick a saved spot, then click it again');
+  else sbMsg('pick a bank · SAVE keeps the patch on the map');
+  sbDraw();
+}
+document.getElementById('sb-save').onclick = () => sbMode('save');
+document.getElementById('sb-clear').onclick = () => sbMode('clear');
+document.getElementById('sb-banks').onclick = e => {
+  const b = e.target.closest('[data-b]'); if (!b) return;
+  sb.bank = +b.dataset.b; sb.arm = -1; sbStore(); sbDraw();
+};
+document.getElementById('sb-list').onclick = e => {
+  const r = e.target.closest('[data-s]'); if (!r) return;
+  const k = sb.bank * SB_SPOTS + +r.dataset.s, s = sb.spots[k], n = +r.dataset.s + 1;
+  if (sb.mode === 'save') {
+    const d = current(); if (!d) return sbMode('save');
+    // the live patch is kept as a snapshot of its name only (it changes as you patch): the spot opens RACK NOW
+    sb.spots[k] = pShown.live ? { live: true, name: 'Live patch', date: sbToday() }
+                              : { lib: pShown.lib, file: pShown.file, name: d.name, date: sbToday() };
+    sb.mode = ''; sb.cur = k; sbStore(); sbDraw();
+    sbMsg(`saved to BANK ${sb.bank + 1} · ${String(n).padStart(2, '0')}`);
+    try { Mind.note('patch', `save bank ${sb.bank + 1}.${n}: ${pShort(sb.spots[k].name)}`); } catch (e) {}
+    return;
+  }
+  if (sb.mode === 'clear') {
+    if (!s) return;
+    if (sb.arm !== k) { sb.arm = k; sbDraw(); return sbMsg(`click ${String(n).padStart(2, '0')} again to delete ${pShort(s.name)}`); }
+    sb.spots[k] = null; if (sb.cur === k) sb.cur = null;
+    sb.mode = ''; sb.arm = -1; sbStore(); sbDraw();
+    return sbMsg(`deleted BANK ${sb.bank + 1} · ${String(n).padStart(2, '0')}`);
+  }
+  if (!s) return;
+  if (!sbHas(s)) return sbMsg(`${s.file} is no longer in the patches folders`);
+  pShown = s.live ? { live: true } : { lib: s.lib, file: s.file };
+  sb.cur = k; patchSel = null; drawPick(); drawPatch(new Set(), true); syncOpenBtn(); sbDraw();
+  sbMsg(`BANK ${sb.bank + 1} · ${String(n).padStart(2, '0')} · ${pShort(s.name)}`);
+};
+sbDraw();
 function drawPatch(fresh, refit) {
   const d = current(), map = document.getElementById('patch-map');
   const keep = map.querySelector('#patch-zoom');
@@ -1134,6 +1244,7 @@ if (popupMode !== null) {
 document.getElementById('patch-close').onclick = closePatches;
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
+  if (sb.mode) { sb.mode = ''; sb.arm = -1; sbDraw(); sbMsg('cancelled'); return; }   // Esc cancels SAVE / CLEAR first
   if (document.getElementById('ro').classList.contains('on')) roShow(false);
   else closePatches();
 });
