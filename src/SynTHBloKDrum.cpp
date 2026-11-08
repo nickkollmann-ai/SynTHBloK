@@ -2127,6 +2127,10 @@ struct SynTHBloKDrumWidget : ModuleWidget {
 // 5 606, 6 HOUSE, 7 DUB, 8 INDUS); the audio thread loads it, like a press on the KIT row.
 // Outside the namespace above, so other files can call it.
 void randroydDrumKit(Module* m, int k) { if (DR* d = dynamic_cast<DR*>(m)) d->kitReq.store(k); }
+// a factory kit's row models (DM_*), so RANDROYD can put each groove row on the right instrument
+void randroydKitModels(int k, int out[8]) {
+    for (int r = 0; r < 8; r++) out[r] = (k >= 0 && k < kNumFactoryKit) ? kFactoryKit[k].model[r] : kKitModel[r];
+}
 // a kit with RANDROYD's genre shaping: add[row][macro] (TUNE DECAY TONE SNAP MOD DRIVE LEVEL PAN) on top of kit k
 void randroydDrumKitShaped(Module* m, int k, const float add[8][8]) {
     DR* d = dynamic_cast<DR*>(m);
