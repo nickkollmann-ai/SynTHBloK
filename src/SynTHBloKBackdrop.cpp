@@ -94,6 +94,7 @@ struct SynTHBloKBackdrop : Module {
     std::string imagePath;
     int fit = 0;
     float imgScale = 1.f, imgDim = 0.f;
+    float imgW = 1.f, imgH = 1.f, imgX = 0.f, imgY = 0.f;   // fine-tuning: width / height stretch, X / Y offset (of the image's size)
     int caseIdx = 1;
     float depth = 0.5f;
     bool shadow = true, rails = true;
@@ -111,6 +112,10 @@ struct SynTHBloKBackdrop : Module {
         json_object_set_new(r, "fit", json_integer(fit));
         json_object_set_new(r, "imgScale", json_real(imgScale));
         json_object_set_new(r, "imgDim", json_real(imgDim));
+        json_object_set_new(r, "imgW", json_real(imgW));
+        json_object_set_new(r, "imgH", json_real(imgH));
+        json_object_set_new(r, "imgX", json_real(imgX));
+        json_object_set_new(r, "imgY", json_real(imgY));
         json_object_set_new(r, "case", json_string(caseLibrary()[clamp(caseIdx, 0, (int) caseLibrary().size() - 1)].name.c_str()));
         json_object_set_new(r, "depth", json_real(depth));
         json_object_set_new(r, "shadow", json_boolean(shadow));
@@ -127,6 +132,10 @@ struct SynTHBloKBackdrop : Module {
         if (json_t* v = json_object_get(r, "fit")) fit = clamp((int) json_integer_value(v), 0, 3);
         if (json_t* v = json_object_get(r, "imgScale")) imgScale = clamp((float) json_number_value(v), 0.1f, 8.f);
         if (json_t* v = json_object_get(r, "imgDim")) imgDim = clamp((float) json_number_value(v), 0.f, 0.9f);
+        if (json_t* v = json_object_get(r, "imgW")) imgW = clamp((float) json_number_value(v), 0.25f, 4.f);
+        if (json_t* v = json_object_get(r, "imgH")) imgH = clamp((float) json_number_value(v), 0.25f, 4.f);
+        if (json_t* v = json_object_get(r, "imgX")) imgX = clamp((float) json_number_value(v), -1.f, 1.f);
+        if (json_t* v = json_object_get(r, "imgY")) imgY = clamp((float) json_number_value(v), -1.f, 1.f);
         if (json_t* v = json_object_get(r, "case")) {   // by name, so a library that grows keeps the choice
             std::string n = json_string_value(v);
             for (size_t i = 0; i < caseLibrary().size(); i++) if (caseLibrary()[i].name == n) caseIdx = (int) i;
@@ -256,6 +265,13 @@ struct BackdropLayer : widget::TransparentWidget {
         else if (m->fit == 3) {
             ox = v.pos.x + (v.size.x - w) * 0.5f; oy = v.pos.y + (v.size.y - h) * 0.5f;
             area = math::Rect(Vec(ox, oy), Vec(w, h));
+        }
+        // FINE-TUNING: stretch the width / height (about the image's centre) and move it by a share of its size
+        {
+            float cx = ox + w * 0.5f, cy = oy + h * 0.5f;
+            w *= m->imgW; h *= m->imgH;
+            ox = cx - w * 0.5f + m->imgX * w; oy = cy - h * 0.5f + m->imgY * h;
+            if (m->fit >= 2) area = math::Rect(Vec(ox, oy), Vec(w, h));
         }
         NVGpaint p = nvgImagePattern(args.vg, ox, oy, w, h, 0.f, image, 1.f);
         nvgBeginPath(args.vg);
@@ -536,6 +552,32 @@ struct BackdropPanel : widget::Widget {
     }
 };
 
+// a menu slider for a percentage setting (the value is a factor: 1 = 100 %)
+struct PctQuantity : Quantity {
+    float* v; float lo, hi, def; std::string label;
+    void setValue(float x) override { *v = clamp(x, lo, hi); }
+    float getValue() override { return *v; }
+    float getMinValue() override { return lo; }
+    float getMaxValue() override { return hi; }
+    float getDefaultValue() override { return def; }
+    float getDisplayValue() override { return *v * 100.f; }
+    void setDisplayValue(float d) override { setValue(d / 100.f); }
+    int getDisplayPrecision() override { return 3; }
+    std::string getLabel() override { return label; }
+    std::string getUnit() override { return "%"; }
+};
+struct PctSlider : ui::Slider {
+    PctSlider() { box.size.x = 220.f; }
+    ~PctSlider() { delete quantity; }
+};
+static ui::Slider* pctSlider(const std::string& label, float* v, float lo, float hi, float def) {
+    PctSlider* s = new PctSlider;
+    PctQuantity* q = new PctQuantity;
+    q->v = v; q->lo = lo; q->hi = hi; q->def = def; q->label = label;
+    s->quantity = q;
+    return s;
+}
+
 struct SynTHBloKBackdropWidget : ModuleWidget {
     SynTHBloKBackdropWidget(SynTHBloKBackdrop* module) {
         setModule(module);
@@ -588,14 +630,14 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         if (!m->imagePath.empty()) {
             menu->addChild(createIndexSubmenuItem("Image placement", std::vector<std::string>(kFitName, kFitName + 4),
                 [=]() { return (size_t) m->fit; }, [=](size_t i) { m->fit = (int) i; }));
-            menu->addChild(createSubmenuItem("Image scale (tiled / centred)", string::f("%d%%", (int) std::round(m->imgScale * 100.f)), [=](Menu* sub) {
-                for (float k : {0.25f, 0.5f, 0.75f, 1.f, 1.5f, 2.f, 3.f, 4.f})
-                    sub->addChild(createCheckMenuItem(string::f("%d%%", (int) (k * 100.f)), "", [=]() { return std::fabs(m->imgScale - k) < 0.01f; }, [=]() { m->imgScale = k; }));
-            }));
-            menu->addChild(createSubmenuItem("Darken the image", string::f("%d%%", (int) std::round(m->imgDim * 100.f)), [=](Menu* sub) {
-                for (float k : {0.f, 0.2f, 0.4f, 0.6f, 0.8f})
-                    sub->addChild(createCheckMenuItem(string::f("%d%%", (int) (k * 100.f)), "", [=]() { return std::fabs(m->imgDim - k) < 0.01f; }, [=]() { m->imgDim = k; }));
-            }));
+            // fine-tuning sliders, live: drag them and watch the rack (double-click one for its default)
+            menu->addChild(pctSlider("Scale (tiled / centred)", &m->imgScale, 0.1f, 8.f, 1.f));
+            menu->addChild(pctSlider("Width", &m->imgW, 0.25f, 4.f, 1.f));
+            menu->addChild(pctSlider("Height", &m->imgH, 0.25f, 4.f, 1.f));
+            menu->addChild(pctSlider("X offset", &m->imgX, -1.f, 1.f, 0.f));
+            menu->addChild(pctSlider("Y offset", &m->imgY, -1.f, 1.f, 0.f));
+            menu->addChild(pctSlider("Darken", &m->imgDim, 0.f, 0.9f, 0.f));
+            menu->addChild(createMenuItem("Reset the image fine-tuning", "", [=]() { m->imgScale = 1.f; m->imgW = m->imgH = 1.f; m->imgX = m->imgY = 0.f; m->imgDim = 0.f; }));
             menu->addChild(createMenuItem("Clear the image", "", [=]() { m->imagePath.clear(); }));
         }
         menu->addChild(new MenuSeparator);

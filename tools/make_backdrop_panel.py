@@ -48,12 +48,9 @@ p = ['<?xml version="1.0" encoding="UTF-8"?>',
      '<path d="M0,7 H%g" stroke="#ff7a00" stroke-width="0.3" stroke-opacity="0.75" fill="none"/>' % W,
      text_path('SynTHBloK-B', 2.4, 3.5, 2.25, REG, anchor='start', fill='#ffffff'),
      text_path('BACKDROP', 2.4, 6.3, 1.92, BOLD, anchor='start', fill='#ff7a00')]
-# the card, with the name up its middle
+# the card and its dark well (plain: no big lettering)
 p.append(frame(2.5, 9.0, W - 5.0, 116.5))
 p.append(well(5.0, 12.0, W - 10.0, 86.0))
-p.append('<g transform="translate(%g %g) rotate(-90)">' % (W / 2 + 2.6, 55.0))
-p.append(text_path('BACKDROP', 0, 0, 5.6, BOLD, anchor='middle', fill='#ff7a00', spacing=0.9))
-p.append('</g>')
 # what it does, small, under the well
 for i, line in enumerate(['BACKGROUND', 'CASE', 'TITLE']):
     p.append(text_path(line, W / 2, 101.6 + i * 2.2, 1.05, REG, fill='#cfcfcf'))
