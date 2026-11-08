@@ -24,3 +24,5 @@ tools/claude_thinking.json
 /singles/*/res
 /singles/*/LICENSE.txt
 /singles/*/make.log
+jobs/
+tools/pc_stats.json

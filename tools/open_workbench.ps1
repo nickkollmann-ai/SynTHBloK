@@ -3,6 +3,7 @@
 #   - the workbench server on 127.0.0.1:8766, and on the Tailscale address for the phone
 #   - tools/chat_feed.py (CHAT), tools/patch_feed.py (PATCH MAP + PATCHES) and tools/rack_open_server.py (OPEN IN RACK)
 #   - tools/pc_stats.ps1 (THIS PC: CPU, GPU, temps for THINKING and the top bar)
+#   - tools/claude_jobs.ps1 (Claude runs the repo's scripts hidden, via jobs\)
 # then opens the workbench in Firefox unless a Firefox window already shows it.
 $ErrorActionPreference = 'SilentlyContinue'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -34,6 +35,12 @@ $psRunning = (Get-CimInstance Win32_Process -Filter "Name='powershell.exe'").Com
 if ($psRunning -notmatch 'pc_stats\.ps1') {
     Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (Join-Path $PSScriptRoot 'pc_stats.ps1') -WindowStyle Hidden
     $done += 'pc_stats.ps1'
+}
+
+# CLAUDE JOBS: Claude runs the repo's scripts hidden through jobs\ (no windows over your work)
+if ($psRunning -notmatch 'claude_jobs\.ps1') {
+    Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (Join-Path $PSScriptRoot 'claude_jobs.ps1') -WindowStyle Hidden
+    $done += 'claude_jobs.ps1'
 }
 
 $ff = Get-Process firefox | Where-Object Path | Select-Object -First 1
