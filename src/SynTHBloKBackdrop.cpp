@@ -211,8 +211,8 @@ static std::vector<CaseStyle>& caseLibrary() {
 }
 
 // the SynTHBloK looks for the background
-static const int kLookN = 64;
-static const int kArtN = 44;
+static const int kLookN = 89;
+static const int kArtN = 69;
 enum { LOOK_GRADIENT = 18, LOOK_CASE_GRADIENT = 19, LOOK_ART = 20 };
 // ART: detailed pictures made once (tools/make_backdrop_art.py) and shipped in res/backdrops/: one textured
 // rectangle per frame, so they cost no more than a plain colour
@@ -222,7 +222,9 @@ static const char* const kArtFile[kArtN] = {"nebula", "aurora", "topographic", "
     // round 6 (Nov 2026): 25 pieces drawn from Nick's 50 approved Midjourney picks
     "motion", "mirror_swirl", "iris", "tunnel", "prism", "bronze_mandala", "flower_of_life", "gold_filament", "violet_neural", "cosmic_swirl",
     "dream_clouds", "ink_bloom", "glass_world", "copper_maze", "tessellation", "violet_ridges", "snow_globes", "mandelbrot", "julia",
-    "coral_cells", "lotus", "neon_marble", "melt", "third_eye", "rainbow_surf"};
+    "coral_cells", "lotus", "neon_marble", "melt", "third_eye", "rainbow_surf",
+    // round 6b: 25 more from the same picks
+    "hypercube", "lava", "op_art", "nebula_eye", "aurora_mandala", "crystal_cave", "ferns", "lightning", "dragon", "stained_glass", "chrome", "metatron", "penrose", "glow_forest", "bubbles", "kaleido_shards", "ripples", "attractor", "spirograph", "plasma", "vortex_streams", "jellyfish", "neon_lattice", "sunburst", "nautilus"};
 static const char* const kLookName[kLookN] = {"Plain colour", "Amber grid", "OLED glow", "Diamond plate", "Deep space", "Amber rails (Rack's look, warmer)",
     "Carbon weave", "Circuit traces", "CRT scanlines", "Hex mesh", "Blueprint", "Pegboard", "Acoustic foam", "Brushed steel",
     "Sunset fade", "Halftone dots", "Brick wall", "Wood slats", "Gradient (the colour, to black)", "Case gradient (follows the case)",
@@ -232,7 +234,8 @@ static const char* const kLookName[kLookN] = {"Plain colour", "Amber grid", "OLE
     "Dream: Motion paint", "Dream: Mirror swirl", "Dream: Iris vortex", "Dream: Illusion tunnel", "Dream: Prism shards", "Dream: Bronze mandala",
     "Dream: Flower of life", "Dream: Gold filament", "Dream: Violet neural", "Dream: Cosmic swirl", "Dream: Dream clouds", "Dream: Ink bloom",
     "Dream: Glass world", "Dream: Copper maze", "Dream: Tessellation", "Dream: Violet ridges", "Dream: Snow globes", "Dream: Mandelbrot",
-    "Dream: Julia bloom", "Dream: Coral cells", "Dream: Lotus kaleido", "Dream: Neon marble", "Dream: Melt", "Dream: Third eye", "Dream: Rainbow surf"};
+    "Dream: Julia bloom", "Dream: Coral cells", "Dream: Lotus kaleido", "Dream: Neon marble", "Dream: Melt", "Dream: Third eye", "Dream: Rainbow surf",
+    "Dream: Hypercube", "Dream: Lava lamp", "Dream: Op art", "Dream: Nebula eye", "Dream: Aurora mandala", "Dream: Crystal cave", "Dream: Neon ferns", "Dream: Lightning", "Dream: Dragon curve", "Dream: Stained glass", "Dream: Chrome drip", "Dream: Metatron", "Dream: Penrose", "Dream: Glowing forest", "Dream: Soap bubbles", "Dream: Kaleido shards", "Dream: Ripples", "Dream: Strange attractor", "Dream: Spirograph", "Dream: Plasma", "Dream: Vortex streams", "Dream: Jellyfish", "Dream: Neon lattice", "Dream: Sunburst", "Dream: Nautilus"};
 static const char* const kFitName[4] = {"Tiled across the rack", "Fill the screen (snaps to fit)", "Fit the screen (whole image shows)", "Centred on the screen"};
 static const int kColorN = 28;
 static const char* const kColorName[kColorN] = {"Black", "Charcoal", "Deep amber", "Ember", "Midnight teal", "Plum", "Forest", "Steel",
@@ -1617,6 +1620,32 @@ static const Theme kThemes[] = {
     {"MELTDOWN", LOOK_ART + 41, 0, "FORGE STEEL", 100.f, SW_COCOBOLO, F_OILED},
     {"THIRD EYE", LOOK_ART + 42, 0, "IRIDESCENT ANODIZED", 65.f, SW_AMBOYNA, F_GLOSS},
     {"RAINBOW SURF", LOOK_ART + 43, 0, "WEST COAST BOAT", 84.f, SW_CURLY_MAPLE, F_GLOSS},
+    // DREAM II combos (round 6b)
+    {"TESSERACT", LOOK_ART + 44, 0, "CARBON FIBER", 65.f, SW_MACASSAR, F_GLOSS},
+    {"LAVA LOUNGE", LOOK_ART + 45, 0, "WALNUT CONSOLE", 120.f, SW_BLACK_WALNUT, F_GLOSS},
+    {"OP POP", LOOK_ART + 46, 0, "POWDER COAT WHITE", 65.f, SW_HARD_MAPLE, F_SATIN},
+    {"RING NEBULA", LOOK_ART + 47, 0, "BLACK ANODIZED", 84.f, SW_WENGE, F_OILED},
+    {"AURORA HALO", LOOK_ART + 48, 0, "SMOKED ACRYLIC", 50.f, 0, 0},
+    {"CRYSTAL GROTTO", LOOK_ART + 49, 0, "CLEAR ACRYLIC", 50.f, SW_BIRDSEYE, F_GLOSS},
+    {"FERN GULLY", LOOK_ART + 50, 0, "OAK OPEN FRAME", 100.f, SW_SPALTED, F_OILED},
+    {"STORM CELL", LOOK_ART + 51, 0, "BRUSHED ALUMINUM", 65.f, SW_SHOU_SUGI_BAN, F_OILED},
+    {"DRAGON FOLD", LOOK_ART + 52, 0, "STEPPED NEON", 84.f, 0, 0},
+    {"CATHEDRAL", LOOK_ART + 53, 0, "EBONY GOLD CONSOLE", 120.f, SW_PADAUK, F_GLOSS},
+    {"CHROME DRIP", LOOK_ART + 54, 0, "STALKER 6U SILVER", 84.f, SW_ZEBRAWOOD, F_GLOSS},
+    {"METATRON", LOOK_ART + 55, 0, "POD GOLD", 65.f, SW_BUBINGA, F_GLOSS},
+    {"PENROSE", LOOK_ART + 56, 0, "CURVED VIOLET", 100.f, 0, 0},
+    {"GLOW FOREST", LOOK_ART + 57, 0, "MYCELIUM LATTICE", 84.f, 0, 0},
+    {"BUBBLE BATH", LOOK_ART + 58, 0, "POD BLUE", 65.f, SW_QUILTED_MAPLE, F_GLOSS},
+    {"SHARD SIX", LOOK_ART + 59, 0, "IRIDESCENT ANODIZED", 65.f, SW_AMBOYNA, F_SATIN},
+    {"RIPPLE POOL", LOOK_ART + 60, 0, "POWDER COAT TEAL", 65.f, SW_CLARO, F_OILED},
+    {"ATTRACTOR", LOOK_ART + 61, 0, "BLACK PLY STUDIO", 100.f, SW_COCOBOLO, F_SATIN},
+    {"SPIRO", LOOK_ART + 62, 0, "PRINTED PLA BLACK", 50.f, 0, 0},
+    {"PLASMA TV", LOOK_ART + 63, 0, "ROAD CASE", 84.f, SW_LEOPARD, F_OILED},
+    {"WHIRLPOOL", LOOK_ART + 64, 0, "SMOKED VIOLET ACRYLIC", 50.f, SW_PURPLEHEART, F_GLOSS},
+    {"DEEP SEA", LOOK_ART + 65, 0, "BLACKLIGHT POD", 65.f, SW_ZIRICOTE, F_SATIN},
+    {"NEON GRID CITY", LOOK_ART + 66, 0, "LAB EXTRUSION", 84.f, 0, 0},
+    {"SEVENTIES", LOOK_ART + 67, 0, "TIERED WALNUT", 120.f, SW_KOA, F_GLOSS},
+    {"GOLDEN SPIRAL", LOOK_ART + 68, 0, "CHERRY STUDIO", 100.f, SW_CURLY_MAPLE, F_GLOSS},
 };
 static const int kThemeN = (int) (sizeof(kThemes) / sizeof(kThemes[0]));
 static void applyTheme(SynTHBloKBackdrop* m, int i) {
@@ -1701,7 +1730,8 @@ static const char* const kLookShort[kLookN] = {"PLAIN", "AMBER GRID", "OLED GLOW
     "WILDSTYLE", "LIQUID", "KALEIDOSCOPE", "BIOLUMINESCENT", "MACHINE ELF", "ESCHER", "BIOMORPH", "STICKER BOMB", "GLASS SPHERES",
     "MOTION PAINT", "MIRROR SWIRL", "IRIS VORTEX", "TUNNEL", "PRISM SHARDS", "BRONZE MANDALA", "FLOWER OF LIFE", "GOLD FILAMENT",
     "VIOLET NEURAL", "COSMIC SWIRL", "DREAM CLOUDS", "INK BLOOM", "GLASS WORLD", "COPPER MAZE", "TESSELLATION", "VIOLET RIDGES",
-    "SNOW GLOBES", "MANDELBROT", "JULIA BLOOM", "CORAL CELLS", "LOTUS", "NEON MARBLE", "MELT", "THIRD EYE", "RAINBOW SURF"};
+    "SNOW GLOBES", "MANDELBROT", "JULIA BLOOM", "CORAL CELLS", "LOTUS", "NEON MARBLE", "MELT", "THIRD EYE", "RAINBOW SURF",
+    "HYPERCUBE", "LAVA LAMP", "OP ART", "NEBULA EYE", "AURORA MANDALA", "CRYSTAL CAVE", "NEON FERNS", "LIGHTNING", "DRAGON CURVE", "STAINED GLASS", "CHROME DRIP", "METATRON", "PENROSE", "GLOW FOREST", "SOAP BUBBLES", "KALEIDO SHARDS", "RIPPLES", "ATTRACTOR", "SPIROGRAPH", "PLASMA", "VORTEX STREAMS", "JELLYFISH", "NEON LATTICE", "SUNBURST", "NAUTILUS"};
 static const char* const kFitShort[4] = {"TILED", "FILL", "FIT", "CENTRED"};
 static const float kDepthMm[9] = {0.f, 25.f, 40.f, 50.f, 65.f, 84.f, 100.f, 120.f, 150.f};
 struct BackdropOled : widget::OpaqueWidget {

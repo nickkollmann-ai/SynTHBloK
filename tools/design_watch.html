@@ -3438,7 +3438,8 @@ async function bbTick() {
   const bw = document.getElementById('bb-wait');
   bw.classList.toggle('on', unread.length > 0);
   bw.innerHTML = unread.length ? `<b>${unread.length} note${unread.length > 1 ? 's' : ''} waiting.</b> Claude can't see this board on its own: in the Claude chat, say <b>"check BACKDROP"</b>.` : '';
-  try { TabLight.busy('lab', mode !== 'idle'); } catch (e) {}
+  // the tab light blinks only while Claude is actually working (not while a build waits for Nick), and stops after 10 min quiet
+  try { TabLight.busy('lab', ['think', 'build', 'shoot'].includes(mode) && Date.now() - (b.updated || 0) < 10 * 60e3); } catch (e) {}
 }
 document.getElementById('bb-strip').addEventListener('click', e => { const im = e.target.closest('img'); if (im) { BB.sel = im.dataset.i; bbTick(); } });
 document.getElementById('bb-img').onclick = e => labZoom(e.target.src);
@@ -3492,7 +3493,7 @@ setTimeout(() => { try { bbTick(); } catch (e) {} }, 800);
 // keep the LAB tab light busy while Claude works on BACKDROP, even when the tab is closed
 setInterval(async () => { if (document.getElementById('lab-bld').classList.contains('on')) return;
   try { const t = await getText('/tools/backdrop_build.json'); const b = t ? JSON.parse(t.replace(/^﻿/, '')) : {};
-    TabLight.busy('lab', b.updated && Date.now() - b.updated < 20 * 60e3 && b.mode && b.mode !== 'idle'); } catch (e) {} }, 6000);
+    TabLight.busy('lab', b.updated && Date.now() - b.updated < 10 * 60e3 && ['think', 'build', 'shoot'].includes(b.mode)); } catch (e) {} }, 6000);
 // SELF-UPDATE: when design_watch.html changes on disk the page reloads itself (same tab), so a new layout or look
 // shows without pressing F5.
 (() => {

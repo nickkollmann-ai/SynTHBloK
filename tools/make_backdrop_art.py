@@ -933,9 +933,403 @@ R6 = (motion, mirror_swirl, iris, tunnel, prism, bronze, flower_of_life, gold_fi
       dream_clouds, ink_bloom, glass_world, copper_maze, tessellate, violet_ridges, snow_globes, mandelbrot, julia,
       coral_cells, lotus, neon_marble, melt, third_eye, rainbow_surf)
 
+# ======== ROUND 6b: 25 more from the same 50 picks ========
+def _bg(seed, c0=(6, 4, 12), c1=(18, 8, 28)):
+    return ramp(noise(seed, 4, 2), [(0, c0), (1, c1)])
+
+
+def _line_glow(segs, cols, seed, width=2, blur=(2, 8, 18), scale=0.55):
+    def draw(d, rng):
+        for i, pts in enumerate(segs):
+            d.line(pts, fill=tuple(int(v) for v in cols[i % len(cols)]), width=width)
+    return glow_layer(draw, blur=blur, seed=seed) * scale
+
+
+# 45 HYPERCUBE (#77): tesseracts turning in 4D, projected as neon wireframes round the edges
+def hypercube():
+    rng = np.random.default_rng(451)
+    v = np.array([[(i >> k) & 1 for k in range(4)] for i in range(16)], float) * 2 - 1
+    edges = [(a, b) for a in range(16) for b in range(a + 1, 16) if np.sum(np.abs(v[a] - v[b])) == 2]
+    segs, cols = [], []
+    for j, (cx, cy, sz) in enumerate([(260, 260, 170), (W - 280, 250, 190), (240, H - 260, 150), (W - 260, H - 250, 175), (W / 2, 120, 110), (W / 2, H - 110, 110)]):
+        t1, t2 = rng.random() * 6, rng.random() * 6
+        R = np.eye(4); c, s_ = np.cos(t1), np.sin(t1); R[[0, 0, 3, 3], [0, 3, 0, 3]] = [c, -s_, s_, c]
+        Q = np.eye(4); c, s_ = np.cos(t2), np.sin(t2); Q[[1, 1, 2, 2], [1, 2, 1, 2]] = [c, -s_, s_, c]
+        p = v @ R.T @ Q.T
+        k = 2.6 / (3.2 - p[:, 3]); xy = p[:, :2] * k[:, None] * sz
+        for a, b in edges:
+            segs.append([(cx + xy[a, 0], cy + xy[a, 1]), (cx + xy[b, 0], cy + xy[b, 1])]); cols.append(NEON[j % 6])
+    img = _line_glow(segs, cols, 452, 2) + _bg(453)
+    save('hypercube', vignette(img, 0.4))
+
+
+# 46 LAVA LAMP (#65, #90): soft metaballs of molten colour drifting up the sides
+def lava():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    rng = np.random.default_rng(461); f = np.zeros((H, W)); hue = np.zeros((H, W))
+    for i in range(34):
+        cx = rng.choice([rng.uniform(0, W * 0.28), rng.uniform(W * 0.72, W)]); cy = rng.random() * H; r = rng.uniform(50, 150)
+        g = r * r / ((x - cx) ** 2 + (y - cy) ** 2 + 1); f += g; hue += g * (i % 6)
+    hue /= f + 1e-6
+    m = np.clip((f - 1.0) / 0.6, 0, 1)
+    col = np.stack([ramp(np.full(1, 0.5), [(0, NEON[k]), (1, NEON[k])])[0] for k in range(6)])
+    c = col[np.clip(np.round(hue).astype(int), 0, 5)]
+    img = c * (m * (0.25 + 0.4 * np.clip(f / 4, 0, 1)))[..., None] + c * ndimage.gaussian_filter(m, 20)[..., None] * 0.25
+    img *= (0.55 + 0.45 * np.clip(1 - np.abs(np.sin(f * 2.5)) / 0.15, 0, 1))[..., None]
+    save('lava', vignette(img + np.array([8, 4, 10]), 0.45))
+
+
+# 47 OP ART (#97-#112): moire rings from two centres, black and white bands shifting into neon at the edges
+def op_art():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    a = np.sin(np.hypot(x - W * 0.3, y - H * 0.5) / 9); b = np.sin(np.hypot(x - W * 0.7, y - H * 0.5) / 9)
+    m = (a * b > 0).astype(float)
+    edge = np.clip(np.hypot((x - W / 2) / (W / 2), (y - H / 2) / (H / 2)) - 0.3, 0, 1)
+    col = neon_ramp(x / W + y / H * 0.5)
+    img = (m[..., None] * (col * edge[..., None] + 120 * (1 - edge[..., None]))) * 0.55
+    save('op_art', vignette(calm_centre(img, 0.75), 0.4))
+
+
+# 48 NEBULA EYE (#76, #86): a ring nebula, gas glowing round a dark heart, stars behind
+def nebula_eye():
+    x, y, r, a = polar()
+    n = noise(481, 8, 3, 0.6)
+    ring = np.exp(-((r / 520 - 1 + (n - 0.5) * 0.5) / 0.18) ** 2)
+    col = ramp(np.clip(r / 900 + n * 0.3, 0, 1), [(0, (40, 220, 255)), (0.5, (190, 60, 255)), (0.8, (255, 90, 60)), (1, (255, 200, 120))])
+    img = col * (ring * (0.4 + n))[..., None] * 0.9
+    img = stars(img, 482, 2200)
+    save('nebula_eye', vignette(img, 0.35))
+
+
+# 49 AURORA MANDALA (#86, #135): curtains of aurora light turning round a dark centre
+def aurora_mandala():
+    x, y, r, a = polar()
+    n = noise(491, 5, 2, 0.5)
+    rays = np.abs(np.sin(a * 18 + n * 6)) ** 6 * np.exp(-((r - 560) / 300) ** 2)
+    col = ramp(np.clip(r / 900, 0, 1), [(0, (40, 255, 160)), (0.5, (60, 180, 255)), (1, (220, 80, 255))])
+    img = col * (rays * 0.9 + ndimage.gaussian_filter(rays, 8) * 0.8)[..., None] + np.array([4, 6, 14])
+    save('aurora_mandala', vignette(img, 0.4))
+
+
+# 50 CRYSTAL CAVE (#119, #121): crystal points growing in from the top and bottom, lit from inside
+def crystal_cave():
+    rng = np.random.default_rng(501)
+    im = Image.new('RGB', (W, H)); d = ImageDraw.Draw(im)
+    for i in range(160):
+        top = i % 2 == 0; bx = rng.random() * W; w_ = rng.uniform(18, 70); ln = rng.uniform(120, 420)
+        by = 0 if top else H; tip = by + (ln if top else -ln)
+        c = np.array(NEON[int(rng.integers(0, 6))]) * rng.uniform(0.3, 0.8)
+        d.polygon([(bx - w_ / 2, by), (bx + w_ / 2, by), (bx + rng.normal() * 10, tip)], fill=tuple(int(v) for v in c))
+        d.line([(bx, by), (bx + rng.normal() * 5, tip)], fill=tuple(int(min(255, v * 1.8)) for v in c), width=2)
+    a = np.asarray(im).astype(float)
+    img = a * 0.8 + ndimage.gaussian_filter(a, (14, 14, 0)) * 0.9 + np.array([6, 4, 12])
+    save('crystal_cave', vignette(img, 0.4))
+
+
+# 51 NEON FERNS (#191, #194): Barnsley ferns unfurling from the corners in glowing green and cyan
+def ferns():
+    rng = np.random.default_rng(511); acc = np.zeros((H, W))
+    T = [(0, 0, 0, 0.16, 0, 0, 0.01), (0.85, 0.04, -0.04, 0.85, 0, 1.6, 0.85), (0.2, -0.26, 0.23, 0.22, 0, 1.6, 0.07), (-0.15, 0.28, 0.26, 0.24, 0, 0.44, 0.07)]
+    pr = np.cumsum([t[6] for t in T])
+    for (ox, oy, sc, rot, flip) in [(90, H, 150, 0.5, 1), (W - 90, H, 150, -0.5, -1), (140, 0, 120, 2.7, 1), (W - 140, 0, 120, -2.7, -1)]:
+        p = np.zeros(2); pts = []
+        for i in range(140000):
+            t = T[int(np.searchsorted(pr, rng.random()))]
+            p = np.array([t[0] * p[0] + t[1] * p[1] + t[4], t[2] * p[0] + t[3] * p[1] + t[5]]); pts.append(p.copy())
+        P = np.array(pts) * sc; P[:, 0] *= flip
+        c, s_ = np.cos(rot), np.sin(rot)
+        X = ox + P[:, 0] * c - P[:, 1] * s_; Y = oy - (P[:, 0] * s_ + P[:, 1] * c)
+        m = (X >= 0) & (X < W) & (Y >= 0) & (Y < H)
+        np.add.at(acc, (Y[m].astype(int), X[m].astype(int)), 1)
+    k = np.clip(acc / 3, 0, 1)
+    col = ramp(k, [(0, (0, 0, 0)), (0.5, (40, 255, 140)), (1, (180, 255, 255))])
+    img = col + ndimage.gaussian_filter(col, (6, 6, 0)) * 1.5 + np.array([2, 8, 10])
+    save('ferns', vignette(img, 0.4))
+
+
+# 52 LIGHTNING (#82): branching arcs of electricity crackling in from the edges
+def lightning():
+    segs, cols = [], []
+    rng = np.random.default_rng(521)
+    def bolt(x0, y0, a, ln, depth):
+        if depth == 0: return
+        pts = [(x0, y0)]
+        for k in range(int(ln / 14)):
+            a += rng.normal() * 0.35; x0 += np.cos(a) * 14; y0 += np.sin(a) * 14; pts.append((x0, y0))
+            if rng.random() < 0.06: bolt(x0, y0, a + rng.choice([-0.7, 0.7]), ln * 0.5, depth - 1)
+        segs.append(pts); cols.append((200, 220, 255) if depth > 2 else (140, 120, 255))
+    for i in range(26):
+        side = i % 4
+        x0, y0, a = [(rng.random() * W, 0, np.pi / 2), (rng.random() * W, H, -np.pi / 2), (0, rng.random() * H, 0), (W, rng.random() * H, np.pi)][side]
+        bolt(x0, y0, a, rng.uniform(250, 480), 4)
+    img = _line_glow(segs, cols, 522, 2, (2, 6, 16, 40), 0.8) + np.array([4, 4, 14])
+    save('lightning', vignette(img, 0.4))
+
+
+# 53 DRAGON CURVE (#67-#75): Heighway dragons folding round the frame in neon
+def dragon():
+    def curve(n):
+        s_ = [1]
+        for i in range(n): s_ = s_ + [1] + [-v for v in s_[::-1]]
+        return s_
+    turns = curve(13); segs, cols = [], []
+    for j, (x0, y0, a0, st) in enumerate([(300, 260, 0, 4.2), (W - 300, H - 260, np.pi, 4.2), (W - 340, 280, np.pi / 2, 3.6), (340, H - 280, -np.pi / 2, 3.6)]):
+        x, y, a = x0, y0, a0; pts = [(x, y)]
+        for t in turns:
+            a += t * np.pi / 2; x += np.cos(a) * st; y += np.sin(a) * st; pts.append((x, y))
+        for k in range(0, len(pts) - 1, 400): segs.append(pts[k:k + 401]); cols.append(NEON[(j + k // 400) % 6])
+    img = _line_glow(segs, cols, 531, 1, (1.5, 5, 14), 0.6) + _bg(532)
+    save('dragon', vignette(calm_centre(img, 0.5), 0.4))
+
+
+# 54 STAINED GLASS (#119, #121): leaded glass in jewel colours, the light coming through unevenly
+def stained_glass():
+    rng = np.random.default_rng(541)
+    from scipy.spatial import cKDTree
+    pts = rng.random((420, 2)) * [W, H]
+    y, x = np.mgrid[0:H:2, 0:W:2].astype(float)
+    dd, ii = cKDTree(pts).query(np.stack([x.ravel(), y.ravel()], 1), k=2)
+    d0, d1, i0 = dd[:, 0].reshape(x.shape), dd[:, 1].reshape(x.shape), ii[:, 0].reshape(x.shape)
+    lead = np.clip(1 - (d1 - d0) / 4, 0, 1)
+    jewel = np.array([(160, 20, 40), (20, 60, 160), (200, 150, 20), (20, 120, 60), (110, 30, 140), (20, 140, 150)], float)
+    c = jewel[i0 % 6] * (0.45 + 0.55 * noise(542, 4, 2, 0.5, x.shape[1], x.shape[0]))[..., None]
+    c = c * (1 - lead[..., None]) + np.array([12, 10, 8]) * lead[..., None]
+    img = np.asarray(Image.fromarray(np.clip(c, 0, 255).astype(np.uint8)).resize((W, H), Image.BILINEAR)).astype(float)
+    save('stained_glass', vignette(calm_centre(img, 0.7), 0.45))
+
+
+# 55 CHROME DRIP (#90, #96): liquid chrome ribbons reflecting a neon sky
+def chrome():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    n = ndimage.gaussian_filter(noise(551, 5, 2, 0.5), 5)
+    t = np.sin(x / 150 + n * 8) + np.sin(y / 110 + n * 6)
+    gy, gx = np.gradient(t)
+    refl = np.clip(0.5 + gy * 25, 0, 1)
+    sky = ramp(refl, [(0, (10, 6, 30)), (0.4, (60, 60, 90)), (0.6, (230, 230, 240)), (0.75, (255, 60, 180)), (1, (40, 230, 255))])
+    band = np.clip(1 - np.abs(np.sin(t * 1.6)) / 0.5, 0, 1) ** 0.7
+    img = sky * band[..., None] * 0.7
+    save('chrome', vignette(calm_centre(img, 0.7), 0.45))
+
+
+# 56 METATRON (#135, #157): Metatron's cube, thirteen circles and every line between them, in gold
+def metatron():
+    segs, cols = [], []
+    for (cx, cy, R) in [(W / 2, H / 2, 300)]:
+        P = [(cx, cy)] + [(cx + R * np.cos(k * np.pi / 3 + np.pi / 6), cy + R * np.sin(k * np.pi / 3 + np.pi / 6)) for k in range(6)] + \
+            [(cx + 2 * R * np.cos(k * np.pi / 3 + np.pi / 6), cy + 2 * R * np.sin(k * np.pi / 3 + np.pi / 6)) for k in range(6)]
+        for i in range(13):
+            for j in range(i + 1, 13): segs.append([P[i], P[j]]); cols.append((255, 196, 90))
+        for (px, py) in P:
+            segs.append([(px + R / 2 * np.cos(t), py + R / 2 * np.sin(t)) for t in np.linspace(0, 2 * np.pi, 80)]); cols.append((90, 230, 220))
+    img = _line_glow(segs, cols, 561, 2, (2, 7, 20), 0.5) + np.array([6, 5, 8])
+    x, y, r, a = polar(); img *= np.clip((r - 60) / 260, 0.15, 1)[..., None]
+    save('metatron', vignette(img, 0.35))
+
+
+# 57 PENROSE (#80, #81): Penrose rhombs, never repeating, edges lit in two neons
+def penrose():
+    gold = (1 + 5 ** 0.5) / 2
+    tri = []
+    for i in range(10):
+        b = complex(np.cos((2 * i - 1) * np.pi / 10), np.sin((2 * i - 1) * np.pi / 10)) * 1300
+        c = complex(np.cos((2 * i + 1) * np.pi / 10), np.sin((2 * i + 1) * np.pi / 10)) * 1300
+        if i % 2 == 0: b, c = c, b
+        tri.append((0, 0j, b, c))
+    for g in range(7):
+        nt = []
+        for col, A, B, C in tri:
+            if col == 0:
+                P = A + (B - A) / gold; nt += [(0, C, P, B), (1, P, C, A)]
+            else:
+                Q = B + (A - B) / gold; R = B + (C - B) / gold; nt += [(1, R, C, A), (1, Q, R, B), (0, R, Q, A)]
+        tri = nt
+    im = Image.new('RGB', (W, H)); d = ImageDraw.Draw(im)
+    for col, A, B, C in tri:
+        pts = [(z.real + W / 2, z.imag + H / 2) for z in (A, B, C)]
+        d.polygon(pts, fill=(40, 12, 60) if col else (10, 40, 60))
+        d.line([pts[1], pts[0], pts[2]], fill=NEON[0] if col else NEON[1], width=1)
+    a = np.asarray(im).astype(float)
+    img = a * 1.0 + ndimage.gaussian_filter(a, (5, 5, 0)) * 1.0
+    save('penrose', vignette(calm_centre(img, 0.6), 0.45))
+
+
+# 58 GLOWING FOREST (#191): recursive trees of light growing up from the foot, bioluminescent buds
+def glow_forest():
+    rng = np.random.default_rng(581); segs, cols = [], []
+    def tree(x, y, a, ln, depth):
+        if depth == 0: return
+        ex, ey = x + np.cos(a) * ln, y + np.sin(a) * ln
+        segs.append([(x, y), (ex, ey)]); cols.append((40, 200 - depth * 10, 255) if depth < 4 else (20, 80, 120))
+        for s_ in (-1, 1): tree(ex, ey, a + s_ * rng.uniform(0.25, 0.55), ln * rng.uniform(0.65, 0.8), depth - 1)
+    for i in range(14):
+        tree(rng.random() * W, H + 10, -np.pi / 2 + rng.normal() * 0.1, rng.uniform(70, 150), 9)
+    img = _line_glow(segs, cols, 582, 1, (2, 6, 16), 0.5) + _bg(583, (2, 4, 10), (6, 14, 24))
+    save('glow_forest', vignette(img, 0.4))
+
+
+# 59 SOAP BUBBLES (#192): a drift of iridescent bubbles, thin-film colour round each rim
+def bubbles():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    img = _bg(591, (4, 4, 8), (10, 8, 18)); rng = np.random.default_rng(592)
+    for i in range(70):
+        cx, cy, R = rng.random() * W, rng.random() * H, rng.uniform(25, 120)
+        if ((cx - W / 2) / (W * 0.32)) ** 2 + ((cy - H / 2) / (H * 0.32)) ** 2 < 1: continue
+        x0, x1, y0, y1 = int(max(cx - R - 2, 0)), int(min(cx + R + 2, W)), int(max(cy - R - 2, 0)), int(min(cy + R + 2, H))
+        if x1 <= x0 or y1 <= y0: continue
+        r = np.hypot(x[y0:y1, x0:x1] - cx, y[y0:y1, x0:x1] - cy) / R
+        film = neon_ramp(r * 2.5 + (y[y0:y1, x0:x1] - cy) / R * 0.4 + i * 0.1, cols=(1, 4, 0, 5, 2, 1))
+        k = (np.clip(1 - np.abs(r - 0.95) / 0.08, 0, 1) * 0.9 + np.clip(r, 0, 1) ** 6 * 0.4) * (r < 1.02)
+        spec = np.exp(-((x[y0:y1, x0:x1] - cx + R * 0.4) ** 2 + (y[y0:y1, x0:x1] - cy + R * 0.4) ** 2) / (R * 0.12) ** 2)
+        img[y0:y1, x0:x1] = img[y0:y1, x0:x1] + film * k[..., None] * 0.6 + 255 * spec[..., None] * 0.6
+    save('bubbles', vignette(img, 0.4))
+
+
+# 60 KALEIDO SHARDS (#67-#75): a six-fold kaleidoscope of torn neon texture, sharp mirror seams
+def kaleido_shards():
+    x, y, r, a = polar()
+    seg = np.pi / 3; am = np.abs(np.mod(a, 2 * seg) - seg)
+    u, v = r * np.cos(am), r * np.sin(am)
+    src = ndimage.gaussian_filter(noise(601, 4, 2, 0.5), 3)
+    sx = np.clip(np.mod(u, W) .astype(int), 0, W - 1); sy = np.clip(np.mod(v * 2, H).astype(int), 0, H - 1)
+    t = src[sy, sx]
+    shard = np.clip(1 - np.abs(np.sin(t * 12)) / 0.25, 0, 1)
+    img = neon_ramp(t * 1.5 + r / 1200) * shard[..., None] * np.clip((r - 140) / 380, 0.06, 1)[..., None] * 0.8
+    save('kaleido_shards', vignette(img, 0.4))
+
+
+# 61 RIPPLES (#98): two stones dropped in neon water, their rings crossing into an interference pattern
+def ripples():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    s_ = 0
+    for (cx, cy) in [(W * 0.12, H * 0.2), (W * 0.88, H * 0.8), (W * 0.85, H * 0.15)]:
+        d = np.hypot(x - cx, y - cy); s_ = s_ + np.sin(d / 14) / (1 + d / 900)
+    k = np.clip(s_ / 2.2 + 0.5, 0, 1) ** 3
+    img = neon_ramp(s_ * 0.1 + x / W * 0.4, cols=(1, 4, 0, 1)) * k[..., None] * 0.8
+    save('ripples', vignette(calm_centre(img, 0.7), 0.4))
+
+
+# 62 STRANGE ATTRACTOR (#77): a Clifford attractor, millions of points tracing a silk veil of light
+def attractor():
+    a_, b_, c_, d_ = -1.4, 1.6, 1.0, 0.7
+    n = 2_400_000; xs = np.empty(n); ys = np.empty(n); x0 = y0 = 0.1
+    xv = np.full(4000, 0.1) + np.random.default_rng(621).random(4000) * 0.01; yv = xv.copy()
+    acc = np.zeros((H, W))
+    xv = np.random.default_rng(621).random(20000) * 0.1; yv = xv.copy()
+    for i in range(500):
+        xv, yv = np.sin(a_ * yv) + c_ * np.cos(a_ * xv), np.sin(b_ * xv) + d_ * np.cos(b_ * yv)
+        if i > 20:
+            px = ((xv + 2.1) / 4.2 * H * 1.25 + (W - H * 1.25) / 2).astype(int); py = ((yv + 1.8) / 3.6 * H).astype(int)
+            m = (px >= 0) & (px < W) & (py >= 0) & (py < H); np.add.at(acc, (py[m], px[m]), 1)
+    k = np.log1p(acc) / np.log1p(acc.max())
+    img = neon_ramp(k * 0.8 + 0.6, cols=(4, 0, 3, 5)) * k[..., None] ** 1.2 * 1.1
+    img += ndimage.gaussian_filter(img, (4, 4, 0)) * 0.6
+    save('attractor', vignette(calm_centre(img, 0.45), 0.4))
+
+
+# 63 SPIROGRAPH (#135): looping hypotrochoids layered round the frame, like a neon drafting toy
+def spirograph():
+    segs, cols = [], []
+    for j, (cx, cy, R, r, d) in enumerate([(260, 260, 200, 75, 110), (W - 260, 260, 210, 84, 120), (260, H - 260, 180, 72, 90), (W - 260, H - 260, 200, 88, 130), (W / 2, -60, 260, 104, 150), (W / 2, H + 60, 260, 91, 140)]):
+        t = np.linspace(0, 2 * np.pi * r / np.gcd(R, r), 5000)
+        X = cx + (R - r) * np.cos(t) + d * np.cos((R - r) / r * t); Y = cy + (R - r) * np.sin(t) - d * np.sin((R - r) / r * t)
+        segs.append(list(zip(X, Y))); cols.append(NEON[j % 6])
+    img = _line_glow(segs, cols, 631, 1, (1.5, 5, 14), 0.6) + _bg(632)
+    save('spirograph', vignette(img, 0.4))
+
+
+# 64 PLASMA (#65, #86): the old demo-scene plasma, sines folding into soft neon fields, dimmed in the middle
+def plasma():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    v = np.sin(x / 110) + np.sin(y / 80) + np.sin((x + y) / 140) + np.sin(np.hypot(x - W * 0.7, y - H * 0.3) / 90)
+    img = neon_ramp(v * 0.18) * (0.35 + 0.25 * np.sin(v * 3)[..., None])
+    save('plasma', vignette(calm_centre(img, 0.8), 0.45))
+
+
+# 65 VORTEX STREAMS (#76, #113): dense coloured streamlines pulled into whirlpools at the corners
+def vortex_streams():
+    y, x = np.mgrid[0:H // 4, 0:W // 4].astype(float) * 4
+    ang = np.zeros(x.shape)
+    for (cx, cy, s_) in [(0, 0, 1), (W, 0, -1), (0, H, -1), (W, H, 1), (W / 2, H / 2, 1)]:
+        ang += s_ * np.exp(-np.hypot(x - cx, y - cy) / 700) * 3
+    rng = np.random.default_rng(651); segs, cols = [], []
+    for i in range(1400):
+        px, py = rng.random() * W, rng.random() * H; pts = []
+        for k in range(60):
+            gx, gy = min(int(px / 4), W // 4 - 1), min(int(py / 4), H // 4 - 1)
+            a = np.arctan2(py - H / 2, px - W / 2) + np.pi / 2 + ang[gy, gx]
+            px += np.cos(a) * 5; py += np.sin(a) * 5
+            if not (0 <= px < W and 0 <= py < H): break
+            pts.append((px, py))
+        if len(pts) > 3: segs.append(pts); cols.append(np.array(NEON[i % 6]) * 0.6)
+    img = _line_glow(segs, cols, 652, 1, (1.5, 6), 0.55) + np.array([6, 4, 10])
+    save('vortex_streams', vignette(calm_centre(img, 0.65), 0.4))
+
+
+# 66 JELLYFISH (#195): translucent bells trailing glowing tentacles through deep water
+def jellyfish():
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    img = ramp(y / H, [(0, (2, 10, 26)), (1, (0, 2, 8))]); rng = np.random.default_rng(661); segs, cols = [], []
+    for i in range(9):
+        cx, cy, R = rng.choice([rng.uniform(80, W * 0.3), rng.uniform(W * 0.7, W - 80)]), rng.uniform(80, H * 0.7), rng.uniform(50, 110)
+        c = np.array([(120, 220, 255), (255, 120, 220), (180, 140, 255)][i % 3], float)
+        dx, dy = (x - cx) / R, (y - cy) / (R * 0.7)
+        bell = (dx ** 2 + dy ** 2 < 1) & (dy < 0.3)
+        rim = np.clip(1 - np.abs(np.hypot(dx, dy) - 1) / 0.06, 0, 1) * (dy < 0.3)
+        img = img + c * (bell * 0.18 + rim * 0.6)[..., None]
+        for t in range(10):
+            tx = cx + (t / 9 - 0.5) * R * 1.6; pts = [(tx + np.sin(k / 6 + t) * 10, cy + R * 0.25 + k * 6) for k in range(int(rng.uniform(30, 70)))]
+            segs.append(pts); cols.append(c * 0.6)
+    img = img + _line_glow(segs, cols, 662, 1, (2, 6), 0.6)
+    save('jellyfish', vignette(img, 0.4))
+
+
+# 67 NEON LATTICE (#96): an isometric lattice of neon tubes stretching away, gaps of black between
+def neon_lattice():
+    segs, cols = [], []
+    s_ = 70
+    for i in range(-30, 60):
+        segs.append([(i * s_, 0), (i * s_ - H * 1.732, H)]); cols.append(NEON[0])
+        segs.append([(i * s_ - W, 0), (i * s_ - W + H * 1.732, H)]); cols.append(NEON[1])
+    for j in range(0, H, int(s_ * 0.866)): segs.append([(0, j), (W, j)]); cols.append(NEON[4])
+    img = _line_glow(segs, [np.array(c) * 0.8 for c in cols], 671, 2, (2, 8), 0.9)
+    y, x = np.mgrid[0:H, 0:W].astype(float)
+    img *= (0.25 + 0.75 * noise(672, 3, 2, 0.5))[..., None]
+    save('neon_lattice', vignette(calm_centre(img, 0.75), 0.45))
+
+
+# 68 SUNBURST (#87, #98): seventies rays in warm psychedelic colour, fanning from below
+def sunburst():
+    x, y, r, a = polar(W / 2, H * 1.15)
+    rays = (np.floor((a + np.pi) / (np.pi / 24)) % 2)
+    col = ramp(np.clip(r / 1500, 0, 1), [(0, (255, 210, 60)), (0.3, (255, 120, 30)), (0.55, (230, 40, 110)), (0.8, (120, 30, 160)), (1, (20, 10, 40))])
+    img = col * (0.25 + 0.4 * rays)[..., None]
+    save('sunburst', vignette(calm_centre(img, 0.7), 0.45))
+
+
+# 69 NAUTILUS (#90, #115): a golden spiral of chambers, pearly walls glowing, curling in from a corner
+def nautilus():
+    x, y, r, a = polar(W * 0.62, H * 0.58)
+    b = np.log((1 + 5 ** 0.5) / 2) / (np.pi / 2)
+    u = (np.log(np.maximum(r, 1)) / b - a) / (2 * np.pi)          # which turn of the spiral this point sits on
+    f = np.mod(u, 1)
+    wall = np.clip(1 - np.abs(f - 0.5) / 0.05, 0, 1)
+    turn = np.floor(u)
+    sept = np.clip(1 - np.abs(np.sin(a * 5 + turn)) / 0.04, 0, 1) * (np.abs(f - 0.5) < 0.5) * 0.35
+    shade = np.sin(f * np.pi) ** 2
+    col = ramp(np.clip(r / 1100, 0, 1), [(0, (255, 240, 225)), (0.35, (250, 180, 130)), (0.7, (190, 90, 160)), (1, (70, 40, 130))])
+    img = col * (wall * 0.9 + sept + shade * 0.12)[..., None] * np.clip(r / 120, 0, 1)[..., None]
+    img += ndimage.gaussian_filter(img, (6, 6, 0)) * 0.5 + np.array([6, 4, 10])
+    save('nautilus', vignette(calm_centre(img, 0.4), 0.4))
+
+
+R6B = (hypercube, lava, op_art, nebula_eye, aurora_mandala, crystal_cave, ferns, lightning, dragon, stained_glass, chrome,
+       metatron, penrose, glow_forest, bubbles, kaleido_shards, ripples, attractor, spirograph, plasma, vortex_streams,
+       jellyfish, neon_lattice, sunburst, nautilus)
+
+
 if __name__ == '__main__':
     import sys
     wanted = set(sys.argv[1:])
-    for fn in (nebula, aurora, topo, synthwave, flow, crystal, scope, marble, circuit, spectrum) + PSY + R6:
-        if not wanted or fn.__name__ in wanted or ('psy' in wanted and fn in PSY) or ('r6' in wanted and fn in R6):
+    for fn in (nebula, aurora, topo, synthwave, flow, crystal, scope, marble, circuit, spectrum) + PSY + R6 + R6B:
+        if not wanted or fn.__name__ in wanted or ('psy' in wanted and fn in PSY) or ('r6' in wanted and fn in R6) or ('r6b' in wanted and fn in R6B):
             fn()
