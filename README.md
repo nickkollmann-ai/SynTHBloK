@@ -3,7 +3,7 @@
 **SynTHBloK** by **NoiZee ToyZ**: free VCV Rack 2 modules for hard techno and live grooveboxes. Synth voices, drum
 synths, filters, effects, mixers, a mastering strip and a sample player, each its own small plugin.
 
-![SynTHBloK QUAD](web-images/screenshots/SynTHBloK.png)
+![SynTHBloK QUAD](web-images/screenshots/Quad.png)
 
 ## Install
 
