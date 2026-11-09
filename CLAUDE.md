@@ -111,7 +111,7 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   (real panels screw on from the inside). CASE MATERIAL builds the frame itself in any kPanelMat material. The old CASE ENDS
   material/finish option is removed (Nov 2026; saved sideMat/sideFinish are ignored). Themes put their wood on the panels.
   Side panels XOR rack ears: picking one turns the other off. With ears there is NO case: an open rack, Rack's rails screwing
-  straight onto the ears (ears at the row ends, a round hole + our socket screw, 23 px = 10-32 cap, at every rail). With side
+  straight onto the ears (ears at the row ends; a round hole + our socket screw, 23 px = 10-32 cap, only at the very top and bottom rails). With side
   panels on, the case's own ends are hidden (drawn 2 px, square); they come back when the panels go. Ears are 92 px wide,
   STRAIGHT or CONTOURED (earShape: the outer edge dips 9 px along each row). END SHAPE / END WIDTH are gone: cases keep their ends.
   Man-made textures: `make_wood_textures.py mats` -> res/cases/mat_*.png. RACK EARS (kEarFin): L-shaped brackets, a lip

@@ -1183,11 +1183,11 @@ struct BackdropLayer : widget::TransparentWidget {
                 nvgFillPaint(vg, half ? nvgLinearGradient(vg, hx, 0, hx + lip * 0.5f, 0, b, a) : nvgLinearGradient(vg, hx, 0, hx + lip * 0.5f, 0, a, b));
                 nvgFill(vg);
             }
-            // oval mounting slots, dark, with a lit lower lip: one at each rail (top and bottom of every row)
             float cx = px + plate * 0.5f;
+            // only at the top of the first row and the bottom of the last (none where two rows meet)
             std::vector<float> slots;
-            for (float rt : rowTops) { slots.push_back(rt + 7.5f); slots.push_back(rt + RACK_GRID_HEIGHT - 7.5f); }
-            if (slots.empty()) { slots.push_back(y + 22.f); slots.push_back(y + h - 22.f); }
+            if (!rowTops.empty()) { slots.push_back(rowTops.front() + 7.5f); slots.push_back(rowTops.back() + RACK_GRID_HEIGHT - 7.5f); }
+            else { slots.push_back(y + 22.f); slots.push_back(y + h - 22.f); }
             // round holes with our black socket-head screw in each, bigger than the modules' M3 screws: a 10-32 rack
             // screw's socket cap is about 7.9 mm across (23 px; the modules' screw is 15 px)
             static std::shared_ptr<window::Svg> screw;
