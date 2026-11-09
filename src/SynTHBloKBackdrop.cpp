@@ -1186,7 +1186,7 @@ struct BackdropLayer : widget::TransparentWidget {
             float cx = px + plate * 0.5f;
             // only at the top of the first row and the bottom of the last (none where two rows meet)
             std::vector<float> slots;
-            if (!rowTops.empty()) { slots.push_back(rowTops.front() + 7.5f); slots.push_back(rowTops.back() + RACK_GRID_HEIGHT - 7.5f); }
+            if (!rowTops.empty()) { float ins = 7.5f + mm2px(5.f); slots.push_back(rowTops.front() + ins); slots.push_back(rowTops.back() + RACK_GRID_HEIGHT - ins); }   // 5 mm in from the rails, so the heads sit on the ear
             else { slots.push_back(y + 22.f); slots.push_back(y + h - 22.f); }
             // round holes with our black socket-head screw in each, bigger than the modules' M3 screws: a 10-32 rack
             // screw's socket cap is about 7.9 mm across (23 px; the modules' screw is 15 px)
