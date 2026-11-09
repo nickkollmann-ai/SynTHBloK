@@ -128,7 +128,7 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   STRAIGHT or CONTOURED (earShape: rounded top and bottom outer corners, 18 px). Each ear's wing (the L's side) runs
   back as deep as DEPTH (swept like the case; shows below the rows / plates), and the plate shows a sheet-metal edge. NoiZee ToyZ ears (isNoizee: index >= 10):
   NOIZEE TOYZ = big wordmark + orange rule, then BADGE (hex Z logo), ENGRAVED (etched raw alu), BACKLIT (slots + name lit
-  orange, glow follows BACKDROP's audio input), CIRCUIT (the logo's line + lightning Z); earName hides the name only. END SHAPE / END WIDTH are gone: cases keep their ends.
+  orange, a steady glow), CIRCUIT (the logo's line + lightning Z); earName hides the name only. END SHAPE / END WIDTH are gone: cases keep their ends.
   Man-made textures: `make_wood_textures.py mats` -> res/cases/mat_*.png. RACK EARS (kEarFin): L-shaped brackets, a lip
   down each case end (outside any side panels), a plate bent out with two oval slots; 9 plain finishes (aluminium, black,
   gold, copper, bronze, green, primary red/blue/yellow) + NOIZEE TOYZ (black, orange rule, name optional: earName).
@@ -137,7 +137,9 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   IMAGE steps NONE / MY IMAGES / LOAD FILE, MY PRESET steps the presets / SAVE AS (the wheel skips the dialog slots).
   Themes (remade): mostly case only; 6 wear side panels, 6 wear rack ears (Theme.ear / earShape). a LIVE PREVIEW strip (art, case colour, panels, ears), label-over-value rows with arrows, a hint line.
   No NAME key on the panel: the NAME tab starts typing and carries the status LED (amber = this one dresses the rack, red =
-  another does). Small jacks (SmallJack) for L/R, a 10-segment meter between them; four screws at 3.5 mm like every module.
+  another does). No inputs since Nov 2026 (the L/R jacks and the meter came off;
+  the OLED runs down to just above the bottom screws); the tabs are squared keys, all softly backlit, the chosen one brighter.
+  Four screws at 3.5 mm like every module.
   Screws: since Nov 2026 every module has four SocketScrews, 3.5 mm in from each corner (y 3.5 and 125 mm). Before that
   15 modules had only the two top ones (since before v2.1.0); the bottom pair sits over the cards' corners, as it always
   did on the four-screw modules (Quad, filters, Player...).

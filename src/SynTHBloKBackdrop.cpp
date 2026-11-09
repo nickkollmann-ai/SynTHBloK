@@ -320,24 +320,12 @@ struct SynTHBloKBackdrop : Module {
     std::string presetPath;   // the preset last loaded or saved (shown on the THEME page)
 
     // the info strip's level meter: patch your mix into L / R
-    enum InputIds { IN_L, IN_R, NUM_INPUTS };
     float peak[2] = {0.f, 0.f}, hold[2] = {0.f, 0.f}, level[2] = {0.f, 0.f};
     int infoMode = 0;   // the info strip on the case's top: 0 auto (cases with a 1U row), 1 on, 2 off
     SynTHBloKBackdrop() {
-        config(0, NUM_INPUTS, 0, 0);
-        configInput(IN_L, "Meter L (the info strip's level meter)");
-        configInput(IN_R, "Meter R (normalled to L)");
-    }
-    void process(const ProcessArgs& args) override {
-        if (!inputs[IN_L].isConnected() && !inputs[IN_R].isConnected()) { peak[0] = peak[1] = level[0] = level[1] = 0.f; return; }
-        float l = inputs[IN_L].getVoltageSum() / 5.f, r = inputs[IN_R].isConnected() ? inputs[IN_R].getVoltageSum() / 5.f : l;
-        float in[2] = {std::fabs(l), std::fabs(r)};
-        float fall = std::exp(-args.sampleTime / 0.25f), slow = 1.f - std::exp(-args.sampleTime / 0.3f), hfall = std::exp(-args.sampleTime / 1.5f);
-        for (int c = 0; c < 2; c++) {
-            peak[c] = std::max(in[c], peak[c] * fall);
-            level[c] += (in[c] * in[c] - level[c]) * slow;   // mean square
-            hold[c] = std::max(peak[c], hold[c] * hfall);
-        }
+        // no audio in (Nov 2026: the L/R jacks and the level meter came off the panel); peak/hold stay at 0, so the
+        // BACKLIT ears and plates glow steadily and the info strip's meter rests
+        config(0, 0, 0, 0);
     }
 
     json_t* dataToJson() override {
@@ -1764,25 +1752,14 @@ static void* gOwner = NULL;
 
 // ---------------------------------------------------------------------------------------------------------
 // THE PANEL: res/SynTHBloKBackdrop.svg (tools/make_backdrop_panel.py), 12 HP, the SynTHBloK look. This widget
-// adds the level meter (the status light lives in the OLED's NAME tab).
+// draws nothing extra now (the status light lives in the OLED's NAME tab; the meter and jacks are gone).
 // ---------------------------------------------------------------------------------------------------------
 struct BackdropPanel : widget::Widget {
     SynTHBloKBackdrop* module = NULL;
     void* widget = NULL;
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
-        // the level meter between L and R: ten segments, green, amber, red (the louder side)
-        if (module) {
-            float lv = std::max(module->peak[0], module->peak[1]);
-            float db = 20.f * std::log10(std::max(lv, 1e-4f));
-            int lit = (int) std::round(clamp((db + 42.f) / 48.f, 0.f, 1.f) * 10.f);
-            float mx = box.size.x * 0.5f - mm2px(1.4f), mw = mm2px(2.8f), segH = mm2px(1.15f), y0 = mm2px(123.9f);
-            for (int k = 0; k < 10; k++) {
-                NVGcolor c = k < 6 ? nvgRGB(60, 255, 140) : k < 8 ? nvgRGB(255, 190, 60) : nvgRGB(255, 60, 60);
-                nvgBeginPath(args.vg); nvgRect(args.vg, mx, y0 - (k + 1) * (segH + 0.6f), mw, segH);
-                nvgFillColor(args.vg, k < lit ? c : nvgLerpRGBA(c, nvgRGB(0, 0, 0), 0.8f)); nvgFill(args.vg);
-            }
-        }
+        // (nothing now: the level meter came off the panel with the jacks)
     }
 };
 
@@ -2342,11 +2319,11 @@ struct BackdropOled : widget::OpaqueWidget {
         float tx0 = 0.f;
         for (int k = 0; k < kPages; k++) {
             float tw = tabW(k);
-            if (k == page) {
-                nvgBeginPath(vg); nvgRect(vg, tx0 + 0.6f, 1.f, tw - 1.2f, kTabH - 2.f);
-                nvgFillColor(vg, oled::amber()); nvgFill(vg);
-            }
-            nvgFillColor(vg, k == page ? oled::ink() : oled::dim());
+            // squared tab keys: every one softly backlit, the chosen one brighter (less translucent) with a lit rim
+            nvgBeginPath(vg); nvgRect(vg, tx0 + 0.8f, 1.f, tw - 1.6f, kTabH - 2.f);
+            nvgFillColor(vg, oled::amber(k == page ? 150 : 34)); nvgFill(vg);
+            nvgStrokeColor(vg, oled::amber(k == page ? 235 : 90)); nvgStrokeWidth(vg, 0.7f); nvgStroke(vg);
+            nvgFillColor(vg, k == page ? nvgRGB(255, 246, 225) : oled::amber());
             float lx = k == kNamePage ? 3.5f : 0.f;   // NAME carries the status light, a small LED beside the word
             nvgText(vg, tx0 + tw * 0.5f + 0.1f + lx, kTabH * 0.5f + 0.5f, tabs[k], NULL);
             if (k == kNamePage) {
@@ -2504,13 +2481,10 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         p->widget = this;
         addChild(p);
         addChild(createWidget<BackdropTitle>(mm2px(Vec(8.5f, 0.f))));
-        float cxm = 60.96f * 0.5f;   // 12 HP
-        addInput(createInputCentered<SmallJack>(mm2px(Vec(cxm - 8.f, 117.6f)), module, SynTHBloKBackdrop::IN_L));   // the meter (small jacks, as the MTX modules)
-        addInput(createInputCentered<SmallJack>(mm2px(Vec(cxm + 8.f, 117.6f)), module, SynTHBloKBackdrop::IN_R));
         BackdropOled* om = new BackdropOled;   // the OLED menu fills the well; the name field rides in its NAME page
         om->module = module;
         om->box.pos = mm2px(Vec(5.6f, 12.6f));
-        om->box.size = mm2px(Vec(49.76f, 92.8f));   // the well runs down to where the NAME key was
+        om->box.size = mm2px(Vec(49.76f, 107.8f));   // the well runs down to just above the bottom screws
         om->owner = this;
         addChild(om);
         NameOled* nf = new NameOled;

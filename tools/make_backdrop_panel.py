@@ -48,12 +48,8 @@ p = ['<?xml version="1.0" encoding="UTF-8"?>',
      ]   # the header words are drawn by the module, like every MTX module (SynTHBloK white, the name orange)
 # the card and its dark well (plain: no big lettering)
 p.append(frame(2.5, 9.0, W - 5.0, 116.5))
-p.append(well(5.0, 12.0, W - 10.0, 94.0))   # the OLED menu (the NAME key and status light now live in its NAME tab)
-p.append('<rect x="%g" y="110.2" width="4.4" height="14.6" rx="0.6" fill="#0a0a0a" stroke="#2c2c2c" stroke-width="0.25"/>' % (W / 2 - 2.2))   # the level meter's window
+p.append(well(5.0, 12.0, W - 10.0, 109.0))   # the OLED menu, down to just above the bottom screws (no jacks or meter since Nov 2026)
 p.append(text_path('NoiZee ToyZ', W / 2, 127.9, 1.944, REG, fill='#808080'))   # the same footer as the MTX modules
-# the meter inputs' rings (L, R)
-for jx in (W / 2 - 8.0, W / 2 + 8.0):   # small jacks, as on the MTX modules
-    p.append('<circle cx="%g" cy="117.6" r="3.4" fill="#0c0c0c" stroke="#2c2c2c" stroke-width="0.25"/>' % jx)
 p.append('</svg>')
 open(os.path.join(ROOT, 'res', 'SynTHBloKBackdrop.svg'), 'w', encoding='utf-8').write('\n'.join(p) + '\n')
 print('wrote res/SynTHBloKBackdrop.svg')
