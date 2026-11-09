@@ -2247,9 +2247,9 @@ struct BackdropOled : widget::OpaqueWidget {
     // the four tabs (Nov 2026): square keys with contoured (rounded) corners, in a row across the top
     static constexpr float kTabGap = 2.f, kTabR = 4.f;
     float tabSide() { return (box.size.x - 2.f * kPad - 3.f * kTabGap) / 4.f; }   // the size of four across, so they stay small
-    math::Rect tabRect(int k) {   // the three, centred
-        float s = tabSide(), gap = (box.size.x - 2.f * kPad - kPages * s) / (kPages - 1);
-        return math::Rect(Vec(kPad + k * (s + gap), 1.f), Vec(s, s));
+    math::Rect tabRect(int k) {   // four across: LOOK, CASE, SIDES, then (k == kPages) the COLLAPSE key
+        float s = tabSide();
+        return math::Rect(Vec(kPad + k * (s + kTabGap), 1.f), Vec(s, s));
     }
     float tabH() { return tabSide() + 1.f; }
     float catY() { return tabH() + 3.f + kPrevH + 3.f; }
@@ -2292,7 +2292,7 @@ struct BackdropOled : widget::OpaqueWidget {
     }
     void hit(Vec p, int& tab, int& c, int& key, int& pgk) {
         tab = c = key = pgk = -1;
-        if (p.y < tabH()) { for (int k = 0; k < kPages; k++) if (tabRect(k).contains(p)) tab = k; return; }
+        if (p.y < tabH()) { for (int k = 0; k <= kPages; k++) if (tabRect(k).contains(p)) tab = k; return; }
         std::vector<math::Rect> cr = catRects();
         for (size_t i = 0; i < cr.size(); i++) if (cr[i].contains(p)) { c = (int) i; return; }
         Grid g = grid(); int n = pageCount(g), cp = curPage(g), pp = perPage(g);
@@ -2302,20 +2302,20 @@ struct BackdropOled : widget::OpaqueWidget {
     // NAME page, very bottom: the small COLLAPSE FILL row (label, then BLANK RIGHT / BLANK LEFT / EMPTY)
     static constexpr float kFillH = 8.f;
     float fillY() { return box.size.y - kFillH - 2.f; }
-    math::Rect fillRect(int i) {   // i: 0 the COLLAPSE key, 1..3 the fill keys
+    math::Rect fillRect(int i) {   // i: 0 the label, 1..3 the fill keys
         float x0 = kPad, iw = box.size.x - 2.f * kPad, lw = iw * 0.28f, kw = (iw - lw) / 3.f;
         if (i == 0) return math::Rect(Vec(x0, fillY()), Vec(lw, kFillH));
         return math::Rect(Vec(x0 + lw + (i - 1) * kw + kGap * 0.5f, fillY()), Vec(kw - kGap, kFillH));
     }
     int hoverFill = -1;
-    int fillHit(Vec p) { for (int i = 0; i <= 3; i++) if (fillRect(i).contains(p)) return i; return -1; }
+    int fillHit(Vec p) { for (int i = 1; i <= 3; i++) if (fillRect(i).contains(p)) return i; return -1; }
     void onButton(const ButtonEvent& e) override {
         if (e.button != GLFW_MOUSE_BUTTON_LEFT || e.action != GLFW_PRESS) { OpaqueWidget::onButton(e); return; }
         e.consume(this);
         int f = fillHit(e.pos);
-        if (f == 0) { pendingAct = [=]() { if (onCollapse) onCollapse(); }; return; }   // on release: it rebuilds the module's face
         if (f > 0) { if (module) { static const int v[4] = {0, 1, 2, 0}; module->blankFill = v[f]; } return; }
         int tab, c, key, pgk; hit(e.pos, tab, c, key, pgk);
+        if (tab == kPages) { pendingAct = [=]() { if (onCollapse) onCollapse(); }; return; }   // COLLAPSE, on release
         if (tab >= 0) {
             page = tab; pgPicked = false;
             if (page == kNamePage && name) { step(); name->visible = true; nameWanted = true; }   // NAME: start typing
@@ -2476,6 +2476,11 @@ struct BackdropOled : widget::OpaqueWidget {
             }
             keyText(vg, r, tabs[k], k == page, 6.6f);
         }
+        {   // the fourth key: COLLAPSE (folded, the face shows the same key as EXPAND, in the NoiZee orange)
+            math::Rect r = tabRect(kPages);
+            keyBox(vg, r, false, hoverTab == kPages, kTabR);
+            keyText(vg, r, "COLLAPSE", false, 5.6f);
+        }
         drawPreview(vg, kPad, tabH() + 3.f, W - 2.f * kPad, kPrevH);
         // categories
         std::vector<std::string> cs = cats(); std::vector<math::Rect> cr = catRects();
@@ -2543,10 +2548,11 @@ struct BackdropOled : widget::OpaqueWidget {
             nvgText(vg, W * 0.5f, pagerY() + kPageH * 0.5f, "ANOTHER BACKDROP IS DRESSING THE RACK", NULL);
         }
         {   // the small bottom row on every page: COLLAPSE, then what fills the gap it leaves
-            static const char* const fl[4] = {"\xe2\x80\xba COLLAPSE \xe2\x80\xb9", "FILL: BLANK R", "FILL: BLANK L", "LEAVE EMPTY"};
+            static const char* const fl[4] = {"COLLAPSE FILL", "BLANK RIGHT", "BLANK LEFT", "LEAVE EMPTY"};
             static const int fv[4] = {-1, 1, 2, 0};
-            keyBox(vg, fillRect(0), false, hoverFill == 0, 1.5f);
-            keyText(vg, fillRect(0), fl[0], false, 4.4f);
+            math::Rect lr = fillRect(0);
+            nvgFontSize(vg, 4.2f); nvgTextLetterSpacing(vg, 0.3f); nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+            nvgFillColor(vg, oled::amber(170)); nvgText(vg, lr.pos.x, lr.pos.y + kFillH * 0.5f + 0.3f, fl[0], NULL);
             for (int i = 1; i <= 3; i++) {
                 bool on = module && module->blankFill == fv[i];
                 math::Rect r = fillRect(i);
@@ -2637,7 +2643,7 @@ struct BackdropFace : widget::TransparentWidget {
         nvgStrokeColor(vg, nvgRGB(0x2c, 0x2c, 0x2c)); nvgStrokeWidth(vg, mm2px(0.25f)); nvgStroke(vg);
         // the strip: what is on the background now
         SynTHBloKBackdrop* m = module;
-        float sx = mm2px(4.2f), sy = mm2px(21.5f), sw = w - 2.f * sx, sh = mm2px(102.f);   // under the EXPAND key
+        float sx = mm2px(4.2f), sy = mm2px(25.6f), sw = w - 2.f * sx, sh = mm2px(98.f);   // under the EXPAND key
         NVGcolor col = m ? kColor[clamp(m->colorIdx, 0, kColorN - 1)] : nvgRGB(40, 20, 60);
         nvgBeginPath(vg); nvgRect(vg, sx, sy, sw, sh);
         nvgFillPaint(vg, nvgLinearGradient(vg, 0, sy, 0, sy + sh, nvgLerpRGBA(col, nvgRGB(255, 255, 255), 0.1f), nvgLerpRGBA(col, nvgRGB(0, 0, 0), 0.5f))); nvgFill(vg);
@@ -2680,15 +2686,15 @@ struct BackdropExpand : widget::OpaqueWidget {
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
         NVGcontext* vg = args.vg;
-        // folded only (the full module's COLLAPSE key lives in the OLED's bottom row): a square key, arrows over EXPAND
+        // folded only: the COLLAPSE key (the fourth top key on the full module) becomes EXPAND, lit in the NoiZee orange
         float W = box.size.x, H = box.size.y;
         nvgBeginPath(vg); nvgRoundedRect(vg, 0.3f, 0.3f, W - 0.6f, H - 0.6f, 4.f);
-        nvgFillColor(vg, oled::amber(hot ? 90 : 40)); nvgFill(vg);
-        nvgStrokeColor(vg, oled::amber(hot ? 235 : 130)); nvgStrokeWidth(vg, 0.7f); nvgStroke(vg);
+        nvgFillColor(vg, nvgRGBA(255, 122, 0, hot ? 150 : 95)); nvgFill(vg);
+        nvgStrokeColor(vg, nvgRGBA(255, 170, 70, hot ? 255 : 200)); nvgStrokeWidth(vg, 0.8f); nvgStroke(vg);
         if (std::shared_ptr<window::Font> font = APP->window->uiFont) {
-            nvgFontFaceId(vg, font->handle); nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE); nvgFillColor(vg, oled::amber());
-            nvgFontSize(vg, 12.f); nvgTextLetterSpacing(vg, 2.f); nvgText(vg, W * 0.5f, H * 0.4f, "\xe2\x80\xb9 \xe2\x80\xba", NULL);
-            nvgFontSize(vg, 5.f); nvgTextLetterSpacing(vg, 0.4f); nvgText(vg, W * 0.5f, H * 0.74f, "EXPAND", NULL);
+            nvgFontFaceId(vg, font->handle); nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+            nvgFillColor(vg, nvgRGB(255, 246, 225)); nvgFontSize(vg, 5.6f); nvgTextLetterSpacing(vg, 0.4f);
+            nvgText(vg, W * 0.5f, H * 0.5f + 0.3f, "EXPAND", NULL);
         }
     }
 };
@@ -2708,8 +2714,8 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         face->visible = false;
         addChild(face);
         expand = new BackdropExpand;
-        expand->box.size = mm2px(Vec(10.f, 10.f));   // folded only: a square key at the top, the picture strip below it
-        expand->box.pos = Vec(0.f, mm2px(10.f));
+        expand->box.size = mm2px(Vec(11.4f, 11.4f));   // folded only: the size of a top key, where the top row sits
+        expand->box.pos = Vec(0.f, mm2px(12.6f) + 1.f);
         expand->act = [=]() { SynTHBloKBackdrop* m = dynamic_cast<SynTHBloKBackdrop*>(this->module); if (m) setCollapsed(!m->collapsed); };
         expand->folded = [=]() { SynTHBloKBackdrop* m = dynamic_cast<SynTHBloKBackdrop*>(this->module); return m && m->collapsed; };
         addChild(expand);
@@ -2856,7 +2862,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         SynTHBloKBackdrop* m = getModule<SynTHBloKBackdrop>();
         if (!m) return;
         if (folded != m->collapsed) fold(false);   // a patch or preset changed it
-        if (m->collapsed) growStep();
+        // (the gap-filling growStep is off again, Nov 2026: folded stays 7 HP, as before)
         // take the rack if no BACKDROP has it: the layer goes just above Rack's rails (its first child)
         if (!gOwner && APP->scene && APP->scene->rack && !APP->scene->rack->children.empty()) {
             gLayer = new BackdropLayer;
