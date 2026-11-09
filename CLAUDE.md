@@ -110,6 +110,11 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   Man-made textures: `make_wood_textures.py mats` -> res/cases/mat_*.png. RACK EARS (kEarFin): L-shaped brackets, a lip
   down each case end (outside any side panels), a plate bent out with two oval slots; 9 plain finishes (aluminium, black,
   gold, copper, bronze, green, primary red/blue/yellow) + NOIZEE TOYZ (black, orange rule, name optional: earName).
+  BACKDROP is 12 HP since Nov 2026 (was 6; `tools/make_backdrop_panel.py`). OLED: 5 tabs THEME / BG / CASE / SIDES / NAME
+  (kNamePage = 4), a LIVE PREVIEW strip (art, case colour, panels, ears), label-over-value rows with arrows, a hint line;
+  status light beside NAME, a 10-segment level meter between the L/R jacks.
+  Screws: the MTX / drum / singles modules have had two top screws since before v2.1.0 (checked against the tag); the
+  SocketScrew change only swapped the look (silver -> black socket head), no positions moved.
   Rails: BACKDROP never draws rails. Each case row is left open edge to edge (a shorter row's empty end too), so Rack's own
   rails show across the whole case between the side panels; the LAB ASSEMBLY copies Rack's rail look.
 - `tools/build_and_reload.ps1`: build, close Rack cleanly, devinstall, screenshots, reopen Rack.
