@@ -138,8 +138,8 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   choices below as a grid of square keys in numbered pages (‹ 1 2 .. ›; the wheel turns pages; no list stepping). LOOK: THEME /
   BG / COLOUR (swatches) / IMAGE (NONE, LOAD FILE, MY FOLDER, the 50 IMAGE BANK thumbnails, then MY IMAGES) / PRESET. CASE:
   CASE / MATERIAL / DEPTH / SHADOW. SIDES: OFF / PANELS / EARS act at once, then MATERIAL-or-FINISH / SHAPE / (FINISH) / MORE.
-  NAME: the field, SHOW / HIDE, USE FILE NAME, COLLAPSE. IMAGE BANK: res/bank/bank_NN.jpg (+thumb_NN.jpg), 50 of Nick's own
-  Midjourney picks (fetched via the built-in browser into tools/mj_art/, which curl can't: 403), saved as bankImg (1..50).
+  NAME: the field, SHOW / HIDE, USE FILE NAME, COLLAPSE. IMAGE BANK: res/bank/bank_NN.jpg (full size, the background) + thumb_NN.jpg
+  (192 px, the OLED keys): 44 pictures Nick chose (Nov 2026, replacing the first 50; black letterbox bars trimmed), numbered darkest first; bankImg 1..44.
   COLLAPSE: 7 HP, the modules' face with a tall strip of the current background and an EXPAND key (expanding pushes
   neighbours with setModulePosForce); presets keep the module's fold. FILL (blankFill): collapsing makes a 5 HP BLANK in the void,
   right of BACKDROP or left (BACKDROP shifts right); that BLANK has lockedTo = the BACKDROP's id (no resizing; freed if the

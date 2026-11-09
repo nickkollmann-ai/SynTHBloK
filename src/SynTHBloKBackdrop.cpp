@@ -440,7 +440,7 @@ namespace {
 // ---------------------------------------------------------------------------------------------------------
 // IMAGE BANK (Nov 2026): 50 pictures shipped with the plugin (res/bank/bank_NN.jpg + thumb_NN.jpg), from Nick's own
 // abstract artwork; picked on the OLED's IMAGE page. Saved by number (bankImg), so patches move between machines.
-static const int kBankN = 50;
+static const int kBankN = 44;
 static std::string bankPath(int n) { return asset::plugin(pluginInstance, string::f("res/bank/bank_%02d.jpg", clamp(n, 1, kBankN))); }
 static std::string bankThumbPath(int n) { return asset::plugin(pluginInstance, string::f("res/bank/thumb_%02d.jpg", clamp(n, 1, kBankN))); }
 static std::string bgImagePath(SynTHBloKBackdrop* m) { return !m->imagePath.empty() ? m->imagePath : m->bankImg > 0 ? bankPath(m->bankImg) : std::string(); }
