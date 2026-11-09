@@ -677,9 +677,15 @@ footer .nav:hover{border-color:var(--cy)}
 #core-deck h4::after{content:"";display:inline-block;width:5px;height:5px;margin-left:8px;border-radius:50%;background:var(--cy);opacity:.6;vertical-align:middle;animation:tpulse 2.4s ease-in-out infinite}
 #cm-svg{width:100%;height:190px;display:block}
 #cm-svg .node rect{fill:#020b10;stroke:#0f6b7a;stroke-width:1.2;transition:stroke .6s}
+#cm-svg .dial .disc{fill:#020b10;stroke:#0f6b7a;stroke-width:1;transition:stroke .6s}
+#cm-svg .dial .ticks{stroke:#0f6b7a;stroke-width:.7;opacity:.8}
+#cm-svg .dial .ring{fill:none;stroke:#00e5ff;stroke-width:1.2;stroke-dasharray:3 2.2;opacity:.55}
+#cm-svg .dial .arcs{fill:none;stroke:#00e5ff;stroke-width:1.6;opacity:.75}
+#cm-svg .dial .load{fill:none;stroke-width:2;stroke-linecap:round;transition:stroke .6s;filter:drop-shadow(0 0 2px currentColor)}
+#cm-svg .dial .core{fill:#00e5ff;opacity:.8}
 #cm-svg .node .glow{transition:opacity .6s}
-#cm-svg .node text{font:600 9px var(--mono,monospace);letter-spacing:.12em;fill:#8fb3bf}
-#cm-svg .node .v{font:600 11px var(--mono,monospace);fill:#e6f4f8;letter-spacing:.02em}
+#cm-svg .node text{font:600 8px var(--mono,monospace);letter-spacing:.12em;fill:#8fb3bf}
+#cm-svg .node .v{font:600 9.5px var(--mono,monospace);fill:#e6f4f8;letter-spacing:.02em}
 #cm-svg .link{stroke:#0f3b46;stroke-width:1.4;fill:none}
 #core-gg{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
 #core-gg .gg{padding:2px 2px 4px}#core-gg .gg svg{max-width:112px}#core-gg .gg b{font-size:8.5px;margin-top:-6px}#core-gg .gg small{font-size:8.5px}
@@ -4061,20 +4067,35 @@ function gkSet(id, frac, val, unit, sub, hot) {
     <g class="rot">${[0, 72, 144, 216, 288].map(a => `<path d="M27 27 C 31 17, 40 13, 43 18 C 40 23, 33 25, 27 27 Z" fill="#00e5ff" fill-opacity=".55" transform="rotate(${a} 27 27)"/>`).join('')}<circle cx="27" cy="27" r="5" fill="#04161c" stroke="#00e5ff"/></g></svg>
     <div><b>${label}</b><span>-</span><em></em></div></div>`;
   document.getElementById('core-fanlist').innerHTML = rotor('gpu', 'GPU FAN') + rotor('cpu', 'CPU FAN') + rotor('case', 'CASE FAN');
-  // living map
-  const N = { cpu: [260, 100, 'CPU'], ram: [130, 42, 'MEMORY'], gpu: [390, 42, 'GPU'], c: [130, 158, 'C: DRIVE'], f: [390, 158, 'F: DRIVE'], net: [470, 100, 'NETWORK'], scr: [50, 100, 'SCREEN'] };
+  // living map: each part of the PC is a small THINKING dial (tick ring, load arc, a dashed ring and inner arcs that
+  // spin with its load, a radar sweep) with one dot per data flow orbiting it, each at that flow's speed; the dots
+  // travelling the links between the dials still show the traffic
+  const N = { cpu: [260, 100, 'CPU'], ram: [130, 38, 'MEMORY'], gpu: [390, 38, 'GPU'], c: [130, 162, 'C: DRIVE'], f: [390, 162, 'F: DRIVE'], net: [470, 100, 'NETWORK'], scr: [50, 100, 'SCREEN'] };
   const L = [['cpu', 'ram'], ['cpu', 'gpu'], ['ram', 'c'], ['c', 'f'], ['cpu', 'net'], ['gpu', 'scr'], ['cpu', 'c']];
-  const svg = document.getElementById('cm-svg'), NS = 'http://www.w3.org/2000/svg';
-  let s = '<defs><radialGradient id="cmglow"><stop offset="0" stop-color="#00e5ff" stop-opacity=".55"/><stop offset="1" stop-color="#00e5ff" stop-opacity="0"/></radialGradient></defs>';
+  const svg = document.getElementById('cm-svg'), R = 17;
+  const arc = (x, y, r, a0, a1) => { const p = a => [x + r * Math.cos(a), y + r * Math.sin(a)], [x0, y0] = p(a0), [x1, y1] = p(a1);
+    return `M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`; };
+  let s = '<defs><radialGradient id="cmglow"><stop offset="0" stop-color="#00e5ff" stop-opacity=".55"/><stop offset="1" stop-color="#00e5ff" stop-opacity="0"/></radialGradient>' +
+    '<linearGradient id="cmsweep" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#00e5ff" stop-opacity="0"/><stop offset="1" stop-color="#00e5ff" stop-opacity=".35"/></linearGradient></defs>';
   L.forEach(([a, b]) => { const p = N[a], q = N[b]; s += `<path class="link" d="M${p[0]} ${p[1]} L${q[0]} ${q[1]}"/>`; });
   s += '<g id="cm-dots"></g>';
   for (const k in N) { const [x, y, t] = N[k];
-    s += `<g class="node" id="cmn-${k}"><circle class="glow" cx="${x}" cy="${y}" r="34" fill="url(#cmglow)" opacity=".2"/><rect x="${x - 40}" y="${y - 17}" width="80" height="34" rx="4"/>
-      <text x="${x}" y="${y - 4}" text-anchor="middle">${t}</text><text class="v" id="cmv-${k}" x="${x}" y="${y + 10}" text-anchor="middle">-</text></g>`; }
+    let ticks = ''; for (let i = 0; i < 36; i++) { const a = i / 36 * 2 * Math.PI, r0 = i % 9 ? R + 2.5 : R + 1.5, r1 = R + 4;
+      ticks += `M${(x + r0 * Math.cos(a)).toFixed(1)} ${(y + r0 * Math.sin(a)).toFixed(1)}L${(x + r1 * Math.cos(a)).toFixed(1)} ${(y + r1 * Math.sin(a)).toFixed(1)}`; }
+    s += `<g class="node dial" id="cmn-${k}"><circle class="glow" cx="${x}" cy="${y}" r="30" fill="url(#cmglow)" opacity=".2"/>
+      <circle class="disc" cx="${x}" cy="${y}" r="${R}"/><path class="ticks" d="${ticks}"/>
+      <path class="sweep" d="M${x} ${y} L${x + R - 2} ${y} A${R - 2} ${R - 2} 0 0 1 ${(x + (R - 2) * Math.cos(.7)).toFixed(1)} ${(y + (R - 2) * Math.sin(.7)).toFixed(1)} Z" fill="url(#cmsweep)"/>
+      <circle class="ring" cx="${x}" cy="${y}" r="${R - 5}"/>
+      <path class="arcs" d="${arc(x, y, R - 9, 0, 1.6)} ${arc(x, y, R - 9, Math.PI, Math.PI + 1.6)}"/>
+      <path class="load" d=""/><g class="orb"></g><circle class="core" cx="${x}" cy="${y}" r="2"/>
+      <text x="${x}" y="${y - R - 6}" text-anchor="middle">${t}</text><text class="v" id="cmv-${k}" x="${x}" y="${y + R + 12}" text-anchor="middle">-</text></g>`; }
   svg.innerHTML = s;
   const dotsG = document.getElementById('cm-dots');
-  const flows = L.map(([a, b]) => ({ a: N[a], b: N[b], rate: 0, dots: [], key: a + '-' + b }));
+  const flows = L.map(([a, b]) => ({ a: N[a], b: N[b], ka: a, kb: b, rate: 0, dots: [], key: a + '-' + b }));
   const flowOf = k => flows.find(f => f.key === k);
+  // each dial: its load (set by coreLive), spin angles, and one orbiting dot per flow it takes part in
+  const D = {}; for (const k in N) D[k] = { load: 0, rot: Math.random() * 6, arcs: 0, sweep: Math.random() * 6, orbs: flows.filter(f => f.ka === k || f.kb === k).map((f, i, all) => ({ f, a: i / all.length * 2 * Math.PI, r: R - 1 - (i % 2) * 4 })) };
+  const tone = v => v > .85 ? '#ff3b5c' : v > .7 ? '#ffbe5a' : v > .02 ? '#3dff9a' : '#0f6b7a';
   let last = performance.now(), acc = 0;
   function frame(now) {
     requestAnimationFrame(frame);
@@ -4091,12 +4112,28 @@ function gkSet(id, frac, val, unit, sub, hot) {
         html += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(1.4 + 1.6 * f.rate).toFixed(1)}" fill="${c}" opacity="${(.35 + .6 * f.rate).toFixed(2)}"/>`; });
     });
     dotsG.innerHTML = html;
+    // the dials
+    for (const k in N) { const g = document.getElementById('cmn-' + k), st = D[k], [x, y] = N[k]; if (!g) continue;
+      st.rot += step * (.4 + 3 * st.load); st.arcs -= step * (.6 + 4 * st.load); st.sweep += step * (1 + 2.5 * st.load);
+      const deg = r => (r * 180 / Math.PI).toFixed(1);
+      g.querySelector('.ring').setAttribute('transform', `rotate(${deg(st.rot)} ${x} ${y})`);
+      g.querySelector('.arcs').setAttribute('transform', `rotate(${deg(st.arcs)} ${x} ${y})`);
+      g.querySelector('.sweep').setAttribute('transform', `rotate(${deg(st.sweep)} ${x} ${y})`);
+      const lv = Math.max(.02, Math.min(1, st.load)), la = g.querySelector('.load');
+      la.setAttribute('d', arc(x, y, R + .5, -Math.PI / 2, -Math.PI / 2 + lv * 2 * Math.PI * .999)); la.style.stroke = tone(st.load);
+      let o = '';
+      st.orbs.forEach(b => { b.a += step * (.3 + 4 * b.f.rate) * (b.r < R - 2 ? -1 : 1);
+        const c = b.f.rate > .75 ? '#ffbe5a' : '#00e5ff';
+        o += `<circle cx="${(x + b.r * Math.cos(b.a)).toFixed(1)}" cy="${(y + b.r * Math.sin(b.a)).toFixed(1)}" r="${(1.1 + 1.3 * b.f.rate).toFixed(1)}" fill="${c}" opacity="${(.45 + .5 * b.f.rate).toFixed(2)}"/>`;
+        o += `<path d="${arc(x, y, b.r, b.a - .5 - b.f.rate, b.a)}" stroke="${c}" stroke-opacity="${(.15 + .35 * b.f.rate).toFixed(2)}" stroke-width="1" fill="none"/>`; });
+      g.querySelector('.orb').innerHTML = o; }
   }
   requestAnimationFrame(frame);
   const heatCol = c => c > 85 ? '#ff4d3a' : c > 70 ? '#ffbe5a' : '#0f6b7a';
   const setNode = (k, val, load, temp) => { const g = document.getElementById('cmn-' + k); if (!g) return;
     document.getElementById('cmv-' + k).textContent = val; g.querySelector('.glow').setAttribute('opacity', (.15 + .75 * Math.min(1, load)).toFixed(2));
-    g.querySelector('rect').style.stroke = temp != null ? heatCol(temp) : load > .85 ? '#ffbe5a' : '#0f6b7a'; };
+    D[k].load = Math.max(0, Math.min(1, load || 0));
+    g.querySelector('.disc').style.stroke = temp != null ? heatCol(temp) : load > .85 ? '#ffbe5a' : '#0f6b7a'; };
   window.coreLive = function (st) {
     const cpu = st.cpu || {}, g = st.gpu || {}, r = st.ram || {}, d = st.disk || {}, n = st.net || {}, zones = st.zones || [];
     const c = (st.drives || []).find(x => x.d === 'C:') || {}, f = (st.drives || []).find(x => x.d === 'F:');
