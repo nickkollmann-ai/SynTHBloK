@@ -146,6 +146,9 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   a theme or a look turns it back on (the picture stays loaded). Old patches without lookOn: on unless a picture was loaded.
   Collapsed, the face fills the gap by itself (growStep): from 7 HP up to its full 12 HP over the free space on its right;
   while any module is dragged or added it drops to 7 HP so one can go there (foldHp; folded tracks the state, not the width).
+  COLLAPSE / EXPAND is one small key (BackdropExpand, 18 x 2.8 mm) in the gap under the OLED well (y 122.25 mm), centred,
+  in the same place folded or not, labelled with what it does. The NAME page keeps the fill choice as a small row at its
+  very bottom (COLLAPSE FILL: BLANK RIGHT / BLANK LEFT / EMPTY, fillRect); the COLLAPSE key left the OLED grid.
   The four top tabs are square keys with 4 px rounded corners (tabRect/tabSide).
   COLLAPSE: 7 HP, the modules' face with a tall strip of the current background and an EXPAND key (expanding pushes
   neighbours with setModulePosForce); presets keep the module's fold. FILL (blankFill): collapsing makes a 5 HP BLANK in the void,
