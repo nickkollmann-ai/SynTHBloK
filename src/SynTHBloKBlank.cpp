@@ -1,14 +1,14 @@
 // SynTHBloK BLANK: a NoiZee ToyZ blank panel for the empty spaces in a rack. Three looks (the BACKDROP rack ears'
 // designs): BADGE (the hex Z logo as an enamel badge), BACKLIT (slots and the name lit orange from behind; the light is
 // drawn on Rack's light layer, so it glows with the room lights down) and CIRCUIT (the logo's line, nodes and
-// lightning Z). Drag the right edge to resize it, 3 to 32 HP. No inputs or outputs.
+// lightning Z). Drag the right edge to resize it, 1 to 32 HP (1-2 HP: centred screws, a thin card). No inputs or outputs.
 // Ships in the MTX pack and as its own small plugin (singles/SynTHBloK-Blanks), so it draws everything itself.
 #include "plugin.hpp"
 
 namespace {
 
 static const char* const kBlankStyle[] = {"BADGE", "BACKLIT", "CIRCUIT"};
-static const int kMinHp = 3, kMaxHp = 32, kDefHp = 4;
+static const int kMinHp = 1, kMaxHp = 32, kDefHp = 4;   // 1 and 2 HP: the skinny blanks that fill a single gap
 
 struct SynTHBloKBlank : Module {
     int style = 0, hp = kDefHp;
@@ -87,10 +87,13 @@ struct BlankWidget : ModuleWidget {
     }
     void place() {
         float w = box.size.x;
+        bool skinny = w < RACK_GRID_WIDTH * 2.5f;   // 1-2 HP: one screw top and bottom, centred (as on real skinny blanks)
+        handle->box.size.x = skinny ? RACK_GRID_WIDTH * 0.4f : RACK_GRID_WIDTH * 0.75f;
         handle->box.pos = Vec(w - handle->box.size.x, 0);
         for (int k = 0; k < 4; k++) {
-            float cx = (k & 1) ? w - mm2px(3.5f) : mm2px(3.5f);
+            float cx = skinny ? w * 0.5f : (k & 1) ? w - mm2px(3.5f) : mm2px(3.5f);
             screws[k]->box.pos.x = cx - screws[k]->box.size.x * 0.5f;
+            screws[k]->visible = !(skinny && (k & 1));
         }
     }
     void step() override {
@@ -115,7 +118,8 @@ struct BlankWidget : ModuleWidget {
         nvgFillPaint(vg, nvgLinearGradient(vg, 0, 0, 0, h, nvgRGBA(255, 255, 255, 9), nvgRGBA(0, 0, 0, 41))); nvgFill(vg);
         nvgBeginPath(vg); nvgRect(vg, 0, 0, w, mm2px(7.f)); nvgFillColor(vg, nvgRGB(8, 8, 8)); nvgFill(vg);
         nvgBeginPath(vg); nvgRect(vg, 0, mm2px(7.f) - 0.45f, w, 0.9f); nvgFillColor(vg, nvgRGBA(255, 122, 0, 190)); nvgFill(vg);
-        nvgBeginPath(vg); nvgRoundedRect(vg, mm2px(2.5f), mm2px(9.f), w - mm2px(5.f), mm2px(116.5f), mm2px(1.2f));
+        float ci = w < mm2px(12.f) ? mm2px(0.6f) : mm2px(2.5f);   // the card's inset (thin on the skinny blanks)
+        nvgBeginPath(vg); nvgRoundedRect(vg, ci, mm2px(9.f), w - 2.f * ci, mm2px(116.5f), mm2px(w < mm2px(12.f) ? 0.6f : 1.2f));
         nvgFillColor(vg, nvgRGB(0x16, 0x16, 0x16)); nvgFill(vg);
         nvgStrokeColor(vg, nvgRGB(0x2c, 0x2c, 0x2c)); nvgStrokeWidth(vg, mm2px(0.25f)); nvgStroke(vg);
         if (std::shared_ptr<window::Font> font = APP->window->uiFont) {
@@ -193,7 +197,7 @@ struct BlankWidget : ModuleWidget {
         menu->addChild(createIndexPtrSubmenuItem("Look", {kBlankStyle[0], kBlankStyle[1], kBlankStyle[2]}, &m->style));
         menu->addChild(createBoolPtrMenuItem("Show the NoiZee ToyZ name", "", &m->showName));
         menu->addChild(createSubmenuItem("Width", string::f("%d HP", m->hp), [=](Menu* sub) {
-            for (int w : {3, 4, 6, 8, 10, 12, 16, 20, 24, 32})
+            for (int w : {1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 32})
                 sub->addChild(createCheckMenuItem(string::f("%d HP", w), "", [=]() { return m->hp == w; }, [=]() {
                     ModuleWidget* mw = this;
                     math::Rect old = mw->box, nb = old;

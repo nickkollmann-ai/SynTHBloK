@@ -17,7 +17,7 @@ SynTHBloK (brand NoiZee ToyZ, 29 modules, GPL-3.0-or-later), sold as 16 VCV Rack
 - BLANK (`src/SynTHBloKBlank.cpp`, Nov 2026) ships in BOTH the MTX pack and its own single `SynTHBloK-Blanks`
   (lineup.json `shared`, which make_plugins.py allows in more than one plugin). It draws its own face matching the
   modules' panels (#111, header strip + orange rule, #161616 card, grey footer), looks BADGE / BACKLIT (light on Rack's
-  light layer) / CIRCUIT, 3-32 HP (drag the right edge or the Width menu), four corner screws. BACKDROP is in lineup.json
+  light layer) / CIRCUIT, 1-32 HP (drag the right edge or the Width menu), four corner screws (1-2 HP: one centred top and bottom). BACKDROP is in lineup.json
   now too (it had been hand-added, so make_plugins.py would have dropped it); its VCV name is plain "BACKDROP".
 - Singles' RES lists come from scanning sources + plugin.hpp: after the SocketScrew change make_plugins.py had not been
   re-run, so the singles shipped without res/SocketScrewBlack.svg (no screws in them). Re-run it after touching plugin.hpp.
