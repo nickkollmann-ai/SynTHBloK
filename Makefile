@@ -40,10 +40,11 @@ SOURCES += src/SynTHBloKMatrixFx.cpp
 SOURCES += src/SynTHBloKEcho.cpp
 SOURCES += src/SynTHBloKLoop.cpp
 SOURCES += src/SynTHBloKMatrixSong.cpp
-SOURCES += src/SynTHBloKBackdrop.cpp
 SOURCES += src/ModulePictures.cpp
 SOURCES += src/SynTHBloKJam.cpp
 SOURCES += src/SynTHBloKRandroyd.cpp
+SOURCES += src/SynTHBloKBackdrop.cpp
+SOURCES += src/SynTHBloKBlank.cpp
 # <<< sources
 
 # Files added to the release package by `make dist`.

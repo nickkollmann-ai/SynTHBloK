@@ -14,6 +14,8 @@ extern Model* modelSynTHBloKLoop;
 extern Model* modelSynTHBloKMatrixSong;
 extern Model* modelSynTHBloKJam;
 extern Model* modelSynTHBloKRandroyd;
+extern Model* modelSynTHBloKBackdrop;
+extern Model* modelSynTHBloKBlank;
 
 void init(Plugin* p) {
     pluginInstance = p;
@@ -29,4 +31,5 @@ void init(Plugin* p) {
     p->addModel(modelSynTHBloKJam);
     p->addModel(modelSynTHBloKRandroyd);
     p->addModel(modelSynTHBloKBackdrop);
+    p->addModel(modelSynTHBloKBlank);
 }

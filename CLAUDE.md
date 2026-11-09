@@ -8,12 +8,19 @@ something that matters next time (a fix, a gotcha, a decision), add it here, the
 SynTHBloK (brand NoiZee ToyZ, 29 modules, GPL-3.0-or-later), sold as 16 VCV Rack 2 plugins. Branch: `master`.
 - The **MTX pack** is the repo root (plugin slug `SynTHBloK`, 11 modules that work together through COMPOSER,
   JAM and RANDROYD). In the VCV Library process: thread https://github.com/VCVRack/library/issues/1015.
-- **Singles** (15 plugins, 18 modules) live in `singles/<slug>/` (e.g. `SynTHBloK-Kick`), each its own plugin
+- **Singles** (16 plugins, 19 modules) live in `singles/<slug>/` (e.g. `SynTHBloK-Kick`), each its own plugin
   built from the shared `src/` (via VPATH, see `singles/common.mk`).
 - `tools/lineup.json` says which module goes where (and the VCV store bundles); `tools/modules.json` holds each
   module's name/description/tags. After editing either: `python3 tools/make_plugins.py` (writes every plugin.json,
   the registrations and the Makefiles). RANDROYD's `locate()` table and `tools/convert_slugs.py` list the same
   singles: keep the three in step. All plugins share one version; `tools/release.ps1` bumps them together.
+- BLANK (`src/SynTHBloKBlank.cpp`, Nov 2026) ships in BOTH the MTX pack and its own single `SynTHBloK-Blanks`
+  (lineup.json `shared`, which make_plugins.py allows in more than one plugin). It draws its own face matching the
+  modules' panels (#111, header strip + orange rule, #161616 card, grey footer), looks BADGE / BACKLIT (light on Rack's
+  light layer) / CIRCUIT, 3-32 HP (drag the right edge or the Width menu), four corner screws. BACKDROP is in lineup.json
+  now too (it had been hand-added, so make_plugins.py would have dropped it); its VCV name is plain "BACKDROP".
+- Singles' RES lists come from scanning sources + plugin.hpp: after the SocketScrew change make_plugins.py had not been
+  re-run, so the singles shipped without res/SocketScrewBlack.svg (no screws in them). Re-run it after touching plugin.hpp.
 - RANDROYD builds with what's installed: RACK mode lists missing singles, BUILD mode skips recipes needing them.
 
 ## Build (Windows)

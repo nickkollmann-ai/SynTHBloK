@@ -1,9 +1,9 @@
 {
-  "_about": "Which module goes in which plugin. SynTHBloK sells as the MTX pack (the repo root, plugin slug SynTHBloK) plus singles (singles/<slug>/), one plugin each; VCV sells bundles of them (see bundles). Module manifests (name, description, tags) live in modules. After editing: python3 tools/make_plugins.py. RANDROYD's locate() table (src/SynTHBloKRandroyd.cpp) and tools/convert_slugs.py must list the same singles.",
+  "_about": "Which module goes in which plugin. SynTHBloK sells as the MTX pack (the repo root, plugin slug SynTHBloK) plus singles (singles/<slug>/), one plugin each; VCV sells bundles of them (see bundles). Module manifests (name, description, tags) live in modules. After editing: python3 tools/make_plugins.py. RANDROYD's locate() table (src/SynTHBloKRandroyd.cpp) and tools/convert_slugs.py must list the same singles. A module in shared may sit in more than one plugin (BLANK: the MTX pack and its own single).",
   "mtx": {
     "slug": "SynTHBloK",
     "name": "SynTHBloK MTX",
-    "modules": ["Matrix8", "MatrixForge", "Duo", "Drum", "MtxQuad", "MatrixFx", "Echo", "Loop", "MatrixSong", "Jam", "Randroyd"]
+    "modules": ["Matrix8", "MatrixForge", "Duo", "Drum", "MtxQuad", "MatrixFx", "Echo", "Loop", "MatrixSong", "Jam", "Randroyd", "Backdrop", "Blank"]
   },
   "singles": [
     {"slug": "SynTHBloK-Quad", "name": "SynTHBloK QUAD", "modules": ["Quad"]},
@@ -20,9 +20,12 @@
     {"slug": "SynTHBloK-Euclid", "name": "SynTHBloK Euclid", "modules": ["Euclid"]},
     {"slug": "SynTHBloK-JamProbe", "name": "SynTHBloK JAM Probe", "modules": ["JamProbe"]},
     {"slug": "SynTHBloK-MixFire", "name": "SynTHBloK MIX Fire Edition", "modules": ["Mix24", "Mix8", "Mix12"]},
-    {"slug": "SynTHBloK-PlayerPlus", "name": "SynTHBloK Player Plus", "modules": ["Player", "PlayerView"]}
+    {"slug": "SynTHBloK-PlayerPlus", "name": "SynTHBloK Player Plus", "modules": ["Player", "PlayerView"]},
+    {"slug": "SynTHBloK-Blanks", "name": "SynTHBloK Blanks", "modules": ["Blank"]}
   ],
+  "shared": ["Blank"],
   "sources": {
+    "Backdrop": ["SynTHBloKBackdrop.cpp"], "Blank": ["SynTHBloKBlank.cpp"],
     "Quad": ["SynTHBloK.cpp"], "Poly": ["SynTHBloKPoly.cpp"], "Stereo": ["SynTHBloKStereo.cpp"],
     "DualFilter": ["SynTHBloKDualFilter.cpp"], "NoizeeFlagshipFilter": ["NoizeeFlagshipFilter.cpp"],
     "Resonator": ["SynTHBloKFilter.cpp"], "FX": ["SynTHBloKFXModule.cpp"], "GrainForge": ["SynTHBloKGrainForge.cpp"],
@@ -36,7 +39,7 @@
     "Jam": ["SynTHBloKJam.cpp"], "Randroyd": ["SynTHBloKRandroyd.cpp"]
   },
   "bundles": [
-    {"name": "SynTHBloK Full Suite", "plugins": ["SynTHBloK", "SynTHBloK-Quad", "SynTHBloK-Poly", "SynTHBloK-StereoPhaser", "SynTHBloK-DualFilter", "SynTHBloK-MorphFilter", "SynTHBloK-Resonator", "SynTHBloK-CharacterDelay", "SynTHBloK-GrainForge", "SynTHBloK-BloKMaster", "SynTHBloK-Kick", "SynTHBloK-SnareHat", "SynTHBloK-Euclid", "SynTHBloK-JamProbe", "SynTHBloK-MixFire", "SynTHBloK-PlayerPlus"]},
+    {"name": "SynTHBloK Full Suite", "plugins": ["SynTHBloK", "SynTHBloK-Quad", "SynTHBloK-Poly", "SynTHBloK-StereoPhaser", "SynTHBloK-DualFilter", "SynTHBloK-MorphFilter", "SynTHBloK-Resonator", "SynTHBloK-CharacterDelay", "SynTHBloK-GrainForge", "SynTHBloK-BloKMaster", "SynTHBloK-Kick", "SynTHBloK-SnareHat", "SynTHBloK-Euclid", "SynTHBloK-JamProbe", "SynTHBloK-MixFire", "SynTHBloK-PlayerPlus", "SynTHBloK-Blanks"]},
     {"name": "SynTHBloK Synth Voice", "plugins": ["SynTHBloK-Quad", "SynTHBloK-Poly", "SynTHBloK-StereoPhaser"]},
     {"name": "SynTHBloK Drums", "plugins": ["SynTHBloK-Kick", "SynTHBloK-SnareHat", "SynTHBloK-Euclid"]},
     {"name": "SynTHBloK FX & Master", "plugins": ["SynTHBloK-DualFilter", "SynTHBloK-MorphFilter", "SynTHBloK-Resonator", "SynTHBloK-CharacterDelay", "SynTHBloK-GrainForge", "SynTHBloK-BloKMaster"]},

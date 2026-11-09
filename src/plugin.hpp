@@ -15,6 +15,7 @@ struct SocketScrew : app::SvgScrew {
 
 extern Model* modelSynTHBloK;
 extern Model* modelSynTHBloKBackdrop;
+extern Model* modelSynTHBloKBlank;
 extern Model* modelSynTHBloKPoly;
 extern Model* modelSynTHBloKStereo;
 extern Model* modelSynTHBloKFX;

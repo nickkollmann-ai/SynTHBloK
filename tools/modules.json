@@ -300,6 +300,23 @@
         "Random",
         "Utility"
       ]
+    },
+    "Backdrop": {
+      "slug": "Backdrop",
+      "name": "BACKDROP",
+      "description": "Dresses the whole rack: a background (colour, SynTHBloK looks or your image), a case around the modules from a library of case styles, and the patch title",
+      "tags": [
+        "Visual",
+        "Utility"
+      ]
+    },
+    "Blank": {
+      "slug": "Blank",
+      "name": "BLANK",
+      "description": "A NoiZee ToyZ blank panel for empty rack space: badge, backlit or circuit look, 3 to 32 HP",
+      "tags": [
+        "Blank"
+      ]
     }
   }
 }

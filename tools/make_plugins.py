@@ -88,7 +88,8 @@ def main():
     root = load('plugin.json')
     # every module in exactly one plugin, with a source and a Model
     placed = list(lineup['mtx']['modules']) + [m for s in lineup['singles'] for m in s['modules']]
-    probs = [m for m in modules if placed.count(m) != 1]
+    shared = lineup.get('shared', [])   # modules allowed in more than one plugin (BLANK)
+    probs = [m for m in modules if placed.count(m) != 1 and not (m in shared and placed.count(m) >= 1)]
     probs += [m for m in placed if m not in modules or m not in vars_ or m not in lineup['sources']]
     if probs:
         sys.exit('lineup problem with: ' + ', '.join(sorted(set(probs))))
