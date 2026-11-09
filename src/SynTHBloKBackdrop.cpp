@@ -292,6 +292,18 @@ static const char* const kColorName[kColorN] = {"Black", "Charcoal", "Deep amber
 static const NVGcolor kColor[kColorN] = {rgb(6, 6, 6), rgb(22, 22, 24), rgb(40, 22, 6), rgb(46, 12, 6), rgb(6, 30, 36), rgb(34, 14, 38), rgb(10, 30, 16), rgb(36, 40, 46),
     rgb(8, 14, 40), rgb(22, 12, 52), rgb(52, 8, 12), rgb(44, 10, 26), rgb(70, 28, 10), rgb(44, 30, 22), rgb(42, 44, 14), rgb(26, 44, 22), rgb(34, 44, 70), rgb(0, 54, 64), rgb(64, 8, 54), rgb(30, 34, 38),
     rgb(70, 66, 62), rgb(120, 100, 70), rgb(200, 96, 10), rgb(214, 204, 182), rgb(30, 8, 50), rgb(60, 6, 42), rgb(18, 42, 6), rgb(8, 12, 64)};
+// DISPLAY ORDER (Nov 2026): every list shows darkest to lightest, NoiZee ToyZ builds first (tools/make_backdrop_order.py
+// writes the table). The stored numbers never change, so patches keep their looks; only what the OLED and menus show moves.
+#include "BackdropOrder.hpp"
+static_assert(sizeof(kOrderLook) / sizeof(int) == kLookN && sizeof(kOrderColor) / sizeof(int) == kColorN, "re-run make_backdrop_order.py");
+// the order to show a list of n in: the table where it covers it, the rest (cases from cases.json) after, in file order
+static std::vector<int> showOrder(const int* o, int on, int n) {
+    std::vector<int> v; std::vector<bool> seen(n, false);
+    for (int i = 0; i < on; i++) if (o[i] < n && !seen[o[i]]) { v.push_back(o[i]); seen[o[i]] = true; }
+    for (int i = 0; i < n; i++) if (!seen[i]) v.push_back(i);
+    return v;
+}
+#define SHOW_ORDER(tab, n) showOrder(tab, (int) (sizeof(tab) / sizeof(int)), (n))
 
 } // namespace
 
@@ -303,6 +315,8 @@ struct SynTHBloKBackdrop : Module {
     std::string imagePath;
     int bankImg = 0;          // the IMAGE BANK picture (1..kBankN, res/bank), used when imagePath is empty; 0: none
     bool collapsed = false;   // COLLAPSE: the module folds to 7 HP, showing a strip of the background
+    int blankFill = 1;        // the 5 HP left by collapsing: 0 left empty, 1 a BLANK on the right, 2 on the left
+    int64_t blankId = -1;     // that BLANK (locked to this BACKDROP while collapsed)
     int fit = 1;   // fill the screen: the image always snaps to cover the whole background
     float imgScale = 1.f, imgDim = 0.f;
     float imgW = 1.f, imgH = 1.f, imgX = 0.f, imgY = 0.f;   // fine-tuning: width / height stretch, X / Y offset (of the image's size)
@@ -339,6 +353,8 @@ struct SynTHBloKBackdrop : Module {
         json_object_set_new(r, "image", json_string(imagePath.c_str()));
         json_object_set_new(r, "bankImg", json_integer(bankImg));
         json_object_set_new(r, "collapsed", json_boolean(collapsed));
+        json_object_set_new(r, "blankFill", json_integer(blankFill));
+        json_object_set_new(r, "blankId", json_integer(blankId));
         json_object_set_new(r, "fit", json_integer(fit));
         json_object_set_new(r, "imgScale", json_real(imgScale));
         json_object_set_new(r, "imgDim", json_real(imgDim));
@@ -380,6 +396,8 @@ struct SynTHBloKBackdrop : Module {
         if (json_t* v = json_object_get(r, "image")) imagePath = json_string_value(v);
         if (json_t* v = json_object_get(r, "bankImg")) bankImg = (int) json_integer_value(v);
         if (json_t* v = json_object_get(r, "collapsed")) collapsed = json_boolean_value(v);
+        if (json_t* v = json_object_get(r, "blankFill")) blankFill = clamp((int) json_integer_value(v), 0, 2);
+        if (json_t* v = json_object_get(r, "blankId")) blankId = json_integer_value(v);
         if (json_t* v = json_object_get(r, "fit")) fit = clamp((int) json_integer_value(v), 0, 3);
         if (json_t* v = json_object_get(r, "imgScale")) imgScale = clamp((float) json_number_value(v), 0.1f, 8.f);
         if (json_t* v = json_object_get(r, "imgDim")) imgDim = clamp((float) json_number_value(v), 0.f, 0.9f);
@@ -2143,12 +2161,12 @@ struct BackdropOled : widget::OpaqueWidget {
         auto addThumb = [&](const std::string& t, bool on, std::function<void()> f) { Item it; it.thumb = t; it.hasSw = false; it.on = on; it.act = f; g.items.push_back(it); };
         int c = cat[page];
         if (page == 0) {
-            if (c == 0) { for (int i = 0; i < kThemeN; i++) add(kThemes[i].name, m->themeIdx == i, [=]() { applyTheme(m, i); }); }
+            if (c == 0) { for (int i : SHOW_ORDER(kOrderTheme, kThemeN)) add(kThemes[i].name, m->themeIdx == i, [=]() { applyTheme(m, i); }); }
             else if (c == 1) {
                 add("OFF", !m->showBg, [=]() { m->showBg = false; hand(); });
-                for (int i = 0; i < kLookN; i++) add(kLookShort[i], m->showBg && m->look == i, [=]() { m->look = i; m->showBg = true; hand(); });
+                for (int i : SHOW_ORDER(kOrderLook, kLookN)) add(kLookShort[i], m->showBg && m->look == i, [=]() { m->look = i; m->showBg = true; hand(); });
             }
-            else if (c == 2) { g.cols = 4; g.keyH = 20.f; for (int i = 0; i < kColorN; i++) addSw(kColor[i], m->colorIdx == i, [=]() { m->colorIdx = i; hand(); }); }
+            else if (c == 2) { g.cols = 4; g.keyH = 20.f; for (int i : SHOW_ORDER(kOrderColor, kColorN)) addSw(kColor[i], m->colorIdx == i, [=]() { m->colorIdx = i; hand(); }); }
             else if (c == 3) {   // IMAGE: the bank of built-in pictures, then the person's own (MY IMAGES), and loading one
                 g.cols = 3; g.keyH = 22.f;
                 bool none = m->imagePath.empty() && m->bankImg <= 0;
@@ -2160,7 +2178,7 @@ struct BackdropOled : widget::OpaqueWidget {
                     if (path) { useImage(m, path); std::free(path); }
                 });
                 add("MY FOLDER", false, [=]() { system::openDirectory(myImagesDir()); });
-                for (int i = 1; i <= kBankN; i++) addThumb(bankThumbPath(i), m->bankImg == i && m->imagePath.empty(), [=]() { useBank(m, i); });
+                for (int i : SHOW_ORDER(kOrderBank, kBankN + 1)) if (i > 0) addThumb(bankThumbPath(i), m->bankImg == i && m->imagePath.empty(), [=]() { useBank(m, i); });
                 for (const std::string& p : myImages()) add(string::uppercase(system::getStem(p)), m->imagePath == p, [=]() { useImage(m, p); });
             }
             else {   // PRESET
@@ -2171,10 +2189,10 @@ struct BackdropOled : widget::OpaqueWidget {
         }
         else if (page == 1) {
             const std::vector<CaseStyle>& lib = caseLibrary();
-            if (c == 0) { for (int i = 0; i < (int) lib.size(); i++) add(lib[i].name, m->caseIdx == i && m->earKind == 0, [=]() { m->caseIdx = i; m->earKind = 0; hand(); }); }
+            if (c == 0) { for (int i : SHOW_ORDER(kOrderCase, (int) lib.size())) add(lib[i].name, m->caseIdx == i && m->earKind == 0, [=]() { m->caseIdx = i; m->earKind = 0; hand(); }); }
             else if (c == 1) {
                 add("ITS OWN", m->caseMat == 0, [=]() { m->caseMat = 0; hand(); });
-                for (int i = 1; i < kPanelNoizee; i++) add(kPanelMat[i].name, m->caseMat == i, [=]() { m->caseMat = i; hand(); });
+                for (int i : SHOW_ORDER(kOrderPanel, kPanelNoizee)) if (i > 0) add(kPanelMat[i].name, m->caseMat == i, [=]() { m->caseMat = i; hand(); });
             }
             else if (c == 2) { g.cols = 3; g.keyH = 16.f; for (int k = 0; k < 9; k++) { float v = kDepthMm[k]; add(k ? string::f("%d MM", (int) v) : std::string("FLAT"), std::fabs(m->depthMm - v) < 0.5f, [=]() { m->depthMm = v; hand(); }); } }
             else { g.keyH = 16.f; add("SHADOW ON", m->shadow, [=]() { m->shadow = true; }); add("SHADOW OFF", !m->shadow, [=]() { m->shadow = false; }); }
@@ -2183,7 +2201,7 @@ struct BackdropOled : widget::OpaqueWidget {
             bool ears = m->earKind > 0;
             int k = c - 3;   // the categories after the three mode keys
             if (ears) {
-                if (k == 0) { for (int i = 1; i < kEarFinN; i++) add(kEarFin[i].name, m->earKind == i, [=]() { m->earKind = i; lastEar = i; hand(); }); }
+                if (k == 0) { for (int i : SHOW_ORDER(kOrderEar, kEarFinN)) if (i > 0) add(kEarFin[i].name, m->earKind == i, [=]() { m->earKind = i; lastEar = i; hand(); }); }
                 else if (k == 1) { g.keyH = 16.f; add("STRAIGHT", m->earShape == 0, [=]() { m->earShape = 0; }); add("CONTOURED", m->earShape == 1, [=]() { m->earShape = 1; }); }
                 else if (k == 2) {
                     g.cols = 1; g.keyH = 14.f;
@@ -2192,7 +2210,7 @@ struct BackdropOled : widget::OpaqueWidget {
                 }
             }
             else if (m->panelMat > 0) {
-                if (k == 0) { for (int i = 1; i < kPanelMatN; i++) add(kPanelMat[i].name, m->panelMat == i, [=]() { m->panelMat = i; lastPanel = i; hand(); }); }
+                if (k == 0) { for (int i : SHOW_ORDER(kOrderPanel, kPanelMatN)) if (i > 0) add(kPanelMat[i].name, m->panelMat == i, [=]() { m->panelMat = i; lastPanel = i; hand(); }); }
                 else if (k == 1) { g.cols = 3; g.keyH = 16.f; static const char* const sh[3] = {"SQUARE", "SEMI", "ROUND"};
                     for (int i = 0; i < 3; i++) { int v = kPanelShapeOrder[i]; add(sh[i], m->panelShape == v, [=]() { m->panelShape = v; }); } }
                 else if (k == 2) { g.cols = 3; g.keyH = 16.f; for (int i = 0; i < 3; i++) add(kSideFinish[i], m->panelFinish == i, [=]() { m->panelFinish = i; }); }
@@ -2210,6 +2228,9 @@ struct BackdropOled : widget::OpaqueWidget {
             add("HIDE", !m->showTitle, [=]() { m->showTitle = false; });
             add("USE FILE NAME", false, [=]() { m->title.clear(); });
             add("COLLAPSE", false, [=]() { if (onCollapse) onCollapse(); });
+            add("FILL: BLANK RIGHT", m->blankFill == 1, [=]() { m->blankFill = 1; });
+            add("FILL: BLANK LEFT", m->blankFill == 2, [=]() { m->blankFill = 2; });
+            add("FILL: LEAVE EMPTY", m->blankFill == 0, [=]() { m->blankFill = 0; });
         }
         return g;
     }
@@ -2670,11 +2691,41 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
     // COLLAPSE / EXPAND: 12 HP <-> 7 HP. Expanding pushes the neighbours aside if they are in the way.
     BackdropFace* face = NULL; BackdropExpand* expand = NULL; BackdropOled* oled = NULL; NameOled* nameField = NULL;
     widget::Widget* screws[4] = {};
+    // Collapsing leaves a 5 HP void; with FILL on, a BLANK is made there (right of BACKDROP, or left: then BACKDROP
+    // moves right so the blank takes its old left edge). That blank is locked to this BACKDROP and to the void's size;
+    // expanding removes it (and, if it was on the left, BACKDROP moves back to its old place).
     void setCollapsed(bool c) {
         SynTHBloKBackdrop* m = dynamic_cast<SynTHBloKBackdrop*>(module);
-        if (!m || m->collapsed == c) return;
-        m->collapsed = c;
-        fold(true);
+        if (!m || m->collapsed == c || !APP->scene || !APP->scene->rack) return;
+        float gap = RACK_GRID_WIDTH * 5.f;
+        if (c) {
+            Vec p = box.pos;
+            m->collapsed = true;
+            if (m->blankFill == 2) box.pos.x += gap;   // the blank goes on the left: BACKDROP shifts right into place
+            fold(false);
+            m->blankId = -1;
+            if (m->blankFill > 0 && modelSynTHBloKBlank) {
+                engine::Module* bm = modelSynTHBloKBlank->createModule();
+                json_t* j = json_object();   // 5 HP, locked to this BACKDROP
+                json_object_set_new(j, "hp", json_integer(5));
+                json_object_set_new(j, "lockedTo", json_integer(m->id));
+                bm->dataFromJson(j);
+                json_decref(j);
+                APP->engine->addModule(bm);
+                app::ModuleWidget* bw = modelSynTHBloKBlank->createModuleWidget(bm);
+                bw->box.pos = m->blankFill == 2 ? p : Vec(p.x + RACK_GRID_WIDTH * 7.f, p.y);
+                APP->scene->rack->addModule(bw);
+                m->blankId = bm->id;
+            }
+        }
+        else {
+            app::ModuleWidget* bw = m->blankId >= 0 ? APP->scene->rack->getModule(m->blankId) : NULL;
+            if (bw && m->blankFill == 2 && bw->box.pos.x < box.pos.x) box.pos.x = bw->box.pos.x;   // back to its old left edge
+            if (bw) bw->removeAction();
+            m->blankId = -1;
+            m->collapsed = false;
+            fold(true);
+        }
     }
     void fold(bool push) {
         SynTHBloKBackdrop* m = dynamic_cast<SynTHBloKBackdrop*>(module);
@@ -2757,18 +2808,24 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         if (!m) return;
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuItem(m->collapsed ? "Expand BACKDROP" : "Collapse BACKDROP (7 HP)", "", [=]() { setCollapsed(!m->collapsed); }));
+        menu->addChild(createIndexSubmenuItem("When collapsed, fill the 5 HP with", {"Nothing", "A BLANK on the right", "A BLANK on the left"},
+            [=]() { return (size_t) m->blankFill; }, [=](size_t i) { m->blankFill = (int) i; }));
         menu->addChild(createSubmenuItem("Image bank", m->bankImg > 0 && m->imagePath.empty() ? string::f("#%d", m->bankImg) : "", [=](Menu* sub) {
             sub->addChild(createCheckMenuItem("None", "", [=]() { return m->bankImg <= 0 || !m->imagePath.empty(); }, [=]() { m->bankImg = 0; }));
-            for (int i = 1; i <= kBankN; i++)
+            for (int i : SHOW_ORDER(kOrderBank, kBankN + 1)) if (i > 0)
                 sub->addChild(createCheckMenuItem(string::f("Picture %d", i), "", [=]() { return m->bankImg == i && m->imagePath.empty(); }, [=]() { useBank(m, i); m->themeIdx = -1; }));
         }));
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("BACKGROUND"));
         menu->addChild(createBoolPtrMenuItem("Draw the background", "", &m->showBg));
-        menu->addChild(createIndexSubmenuItem("Look", std::vector<std::string>(kLookName, kLookName + kLookN),
-            [=]() { return (size_t) m->look; }, [=](size_t i) { m->look = (int) i; }));
-        menu->addChild(createIndexSubmenuItem("Colour", std::vector<std::string>(kColorName, kColorName + kColorN),
-            [=]() { return (size_t) m->colorIdx; }, [=](size_t i) { m->colorIdx = (int) i; }));
+        menu->addChild(createSubmenuItem("Look", kLookName[clamp(m->look, 0, kLookN - 1)], [=](Menu* sub) {   // darkest first
+            for (int i : SHOW_ORDER(kOrderLook, kLookN))
+                sub->addChild(createCheckMenuItem(kLookName[i], "", [=]() { return m->look == i; }, [=]() { m->look = i; m->themeIdx = -1; }));
+        }));
+        menu->addChild(createSubmenuItem("Colour", kColorName[clamp(m->colorIdx, 0, kColorN - 1)], [=](Menu* sub) {
+            for (int i : SHOW_ORDER(kOrderColor, kColorN))
+                sub->addChild(createCheckMenuItem(kColorName[i], "", [=]() { return m->colorIdx == i; }, [=]() { m->colorIdx = i; m->themeIdx = -1; }));
+        }));
         menu->addChild(createSubmenuItem("My images", string::f("%d", (int) myImages().size()), [=](Menu* sub) {
             std::vector<std::string> L = myImages();
             if (L.empty()) sub->addChild(createMenuLabel("(none yet: drop images in the folder)"));
@@ -2820,14 +2877,13 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         menu->addChild(createMenuLabel("CASE"));
         menu->addChild(createSubmenuItem("Case", caseLibrary()[clamp(m->caseIdx, 0, (int) caseLibrary().size() - 1)].name, [=](Menu* sub) {
             const std::vector<CaseStyle>& lib = caseLibrary();
-            for (size_t i = 0; i < lib.size(); i++)
-                sub->addChild(createCheckMenuItem(lib[i].name, "", [=]() { return m->caseIdx == (int) i; }, [=]() { m->caseIdx = (int) i; }));
+            for (int i : SHOW_ORDER(kOrderCase, (int) lib.size()))
+                sub->addChild(createCheckMenuItem(lib[i].name, "", [=]() { return m->caseIdx == i; }, [=]() { m->caseIdx = i; }));
         }));
         auto matMenu = [=](Menu* sub, int* v, const char* none) {
-            for (int i = 0; i < (v == &m->caseMat ? kPanelNoizee : kPanelMatN); i++) {   // the NoiZee plates are panel-only
-                if (i == 1) { sub->addChild(new MenuSeparator); sub->addChild(createMenuLabel("Woods")); }
-                if (i == kPanelManMade) { sub->addChild(new MenuSeparator); sub->addChild(createMenuLabel("Man-made")); }
-                if (i == kPanelNoizee) { sub->addChild(new MenuSeparator); sub->addChild(createMenuLabel("NoiZee ToyZ")); }
+            bool first = true;
+            for (int i : SHOW_ORDER(kOrderPanel, v == &m->caseMat ? kPanelNoizee : kPanelMatN)) {   // the NoiZee plates are panel-only
+                if (i > 0 && first) { sub->addChild(new MenuSeparator); sub->addChild(createMenuLabel("Darkest to lightest")); first = false; }
                 sub->addChild(createCheckMenuItem(i ? kPanelMat[i].name : none, "", [=]() { return *v == i; }, [=]() { *v = i; m->themeIdx = -1; if (v == &m->panelMat && i > 0) m->earKind = 0; }));
             }
         };
@@ -2844,8 +2900,8 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
             sub->addChild(createMenuLabel("Turns the rack ears off (a case has one or the other)"));
         }));
         menu->addChild(createSubmenuItem("Rack ears", kEarFin[clamp(m->earKind, 0, kEarFinN - 1)].name, [=](Menu* sub) {
-            for (int i = 0; i < kEarFinN; i++) {
-                if (i == 1) sub->addChild(new MenuSeparator);
+            for (int i : SHOW_ORDER(kOrderEar, kEarFinN)) {   // NONE, the NoiZee ToyZ ears, then dark to light
+                if (i == kOrderEar[1]) sub->addChild(new MenuSeparator);
                 sub->addChild(createCheckMenuItem(kEarFin[i].name, "", [=]() { return m->earKind == i; }, [=]() { m->earKind = i; m->themeIdx = -1; if (i > 0) m->panelMat = 0; }));
             }
             sub->addChild(new MenuSeparator);

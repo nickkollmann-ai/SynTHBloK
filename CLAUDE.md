@@ -141,12 +141,17 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   NAME: the field, SHOW / HIDE, USE FILE NAME, COLLAPSE. IMAGE BANK: res/bank/bank_NN.jpg (+thumb_NN.jpg), 50 of Nick's own
   Midjourney picks (fetched via the built-in browser into tools/mj_art/, which curl can't: 403), saved as bankImg (1..50).
   COLLAPSE: 7 HP, the modules' face with a tall strip of the current background and an EXPAND key (expanding pushes
-  neighbours with setModulePosForce); presets keep the module's fold.
+  neighbours with setModulePosForce); presets keep the module's fold. FILL (blankFill): collapsing makes a 5 HP BLANK in the void,
+  right of BACKDROP or left (BACKDROP shifts right); that BLANK has lockedTo = the BACKDROP's id (no resizing; freed if the
+  BACKDROP goes); expanding removes it (removeAction) and BACKDROP takes its old place back.
   Themes (remade): mostly case only; 6 wear side panels, 6 wear rack ears (Theme.ear / earShape). a LIVE PREVIEW strip (art, case colour, panels, ears), label-over-value rows with arrows, a hint line.
   No NAME key on the panel: the NAME tab starts typing and carries the status LED (amber = this one dresses the rack, red =
   another does). No inputs since Nov 2026 (the L/R jacks and the meter came off;
   the OLED runs down to just above the bottom screws); the tabs and option boxes are square keys packed tight, all softly backlit, the chosen one brighter.
   Four screws at 3.5 mm like every module.
+  ORDER (Nov 2026): every list (themes, BG looks, colours, cases, materials, ears, image bank) SHOWS darkest to lightest,
+  NoiZee ToyZ builds first; stored numbers never move. `python3 tools/make_backdrop_order.py` writes src/BackdropOrder.hpp
+  (art/bank brightness measured from res/): re-run it after adding any of those, or the static_assert stops the build.
   Screws: since Nov 2026 every module has four SocketScrews, 3.5 mm in from each corner (y 3.5 and 125 mm). Before that
   15 modules had only the two top ones (since before v2.1.0); the bottom pair sits over the cards' corners, as it always
   did on the four-screw modules (Quad, filters, Player...).

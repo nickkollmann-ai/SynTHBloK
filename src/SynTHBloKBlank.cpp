@@ -13,18 +13,21 @@ static const int kMinHp = 1, kMaxHp = 32, kDefHp = 4;   // 1 and 2 HP: the skinn
 struct SynTHBloKBlank : Module {
     int style = 0, hp = kDefHp;
     bool showName = true;
+    int64_t lockedTo = -1;   // a BACKDROP's id: made by its COLLAPSE to fill the 5 HP it left; its size is fixed then
     SynTHBloKBlank() { config(0, 0, 0, 0); }
     json_t* dataToJson() override {
         json_t* r = json_object();
         json_object_set_new(r, "style", json_integer(style));
         json_object_set_new(r, "hp", json_integer(hp));
         json_object_set_new(r, "showName", json_boolean(showName));
+        json_object_set_new(r, "lockedTo", json_integer(lockedTo));
         return r;
     }
     void dataFromJson(json_t* r) override {
         if (json_t* v = json_object_get(r, "style")) style = clamp((int) json_integer_value(v), 0, 2);
         if (json_t* v = json_object_get(r, "hp")) hp = clamp((int) json_integer_value(v), kMinHp, kMaxHp);
         if (json_t* v = json_object_get(r, "showName")) showName = json_boolean_value(v);
+        if (json_t* v = json_object_get(r, "lockedTo")) lockedTo = json_integer_value(v);
     }
 };
 
@@ -57,7 +60,7 @@ struct BlankResize : OpaqueWidget {
     }
     void onDragMove(const DragMoveEvent& e) override {
         ModuleWidget* mw = getAncestorOfType<ModuleWidget>();
-        if (!mw || !module) return;
+        if (!mw || !module || module->lockedTo >= 0) return;   // locked to a BACKDROP: its size is the void's
         float dx = APP->scene->rack->getMousePos().x - dragPos.x;
         math::Rect nb = startBox, old = mw->box;
         nb.size.x = clamp(std::round((startBox.size.x + dx) / RACK_GRID_WIDTH), (float) kMinHp, (float) kMaxHp) * RACK_GRID_WIDTH;
@@ -98,6 +101,7 @@ struct BlankWidget : ModuleWidget {
     }
     void step() override {
         SynTHBloKBlank* m = dynamic_cast<SynTHBloKBlank*>(module);
+        if (m && m->lockedTo >= 0 && !APP->engine->getModule(m->lockedTo)) m->lockedTo = -1;   // its BACKDROP is gone: free
         if (m) {
             float w = RACK_GRID_WIDTH * clamp(m->hp, kMinHp, kMaxHp);
             if (box.size.x != w) { box.size.x = w; place(); }
@@ -196,6 +200,10 @@ struct BlankWidget : ModuleWidget {
         menu->addChild(new MenuSeparator);
         menu->addChild(createIndexPtrSubmenuItem("Look", {kBlankStyle[0], kBlankStyle[1], kBlankStyle[2]}, &m->style));
         menu->addChild(createBoolPtrMenuItem("Show the NoiZee ToyZ name", "", &m->showName));
+        if (m->lockedTo >= 0) {
+            menu->addChild(createMenuLabel(string::f("Width: %d HP (locked: it fills its BACKDROP's collapse)", m->hp)));
+            return;
+        }
         menu->addChild(createSubmenuItem("Width", string::f("%d HP", m->hp), [=](Menu* sub) {
             for (int w : {1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 32})
                 sub->addChild(createCheckMenuItem(string::f("%d HP", w), "", [=]() { return m->hp == w; }, [=]() {
