@@ -146,10 +146,11 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   a theme or a look turns it back on (the picture stays loaded). Old patches without lookOn: on unless a picture was loaded.
   Collapsed, the face fills the gap by itself (growStep): from 7 HP up to its full 12 HP over the free space on its right;
   while any module is dragged or added it drops to 7 HP so one can go there (foldHp; folded tracks the state, not the width).
-  COLLAPSE / EXPAND is one small key (BackdropExpand, 18 x 2.8 mm) in the gap under the OLED well (y 122.25 mm), centred,
-  in the same place folded or not, labelled with what it does. The NAME page keeps the fill choice as a small row at its
-  very bottom (COLLAPSE FILL: BLANK RIGHT / BLANK LEFT / EMPTY, fillRect); the COLLAPSE key left the OLED grid.
-  The four top tabs are square keys with 4 px rounded corners (tabRect/tabSide).
+  COLLAPSE lives in the OLED's bottom row on every page, under the page numbers (fillRect 0), with the fill choice beside
+  it (FILL: BLANK R / BLANK L / LEAVE EMPTY). Folded, EXPAND is a square key (BackdropExpand, 10 mm) at the top of the face,
+  the picture strip below it.
+  NAME came off (Nov 2026): three tabs LOOK / CASE / SIDES (square keys, 4 px rounded corners, the size of four across,
+  centred: tabRect/tabSide), no title on the rack, no title menu, no name field (kNamePage = 99 keeps the old paths dormant).
   COLLAPSE: 7 HP, the modules' face with a tall strip of the current background and an EXPAND key (expanding pushes
   neighbours with setModulePosForce); presets keep the module's fold. FILL (blankFill): collapsing makes a 5 HP BLANK in the void,
   right of BACKDROP or left (BACKDROP shifts right); that BLANK has lockedTo = the BACKDROP's id (no resizing; freed if the

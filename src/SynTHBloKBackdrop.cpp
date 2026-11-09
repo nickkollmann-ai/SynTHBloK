@@ -1758,7 +1758,7 @@ struct BackdropLayer : widget::TransparentWidget {
                 }
             });
         // the patch title, above the first block
-        if (m->showTitle && !bl.empty()) {
+        if (false && m->showTitle && !bl.empty()) {   // the name came off (Nov 2026): no title on the rack
             std::string t = m->title;
             if (t.empty()) {
                 std::string p = APP->patch->path;
@@ -2128,9 +2128,9 @@ struct BackdropOled : widget::OpaqueWidget {
     // OLED v3 (Nov 2026): tabs, the live preview, a row of CATEGORY keys, and the chosen category's choices below as a
     // grid of square keys, in numbered pages (no stepping or scrolling through lists)
     static constexpr float kPad = 3.f, kPrevH = 34.f, kCatH = 13.f, kPageH = 12.f, kGap = 1.f;
-    static const int kPages = 4;   // LOOK, CASE, SIDES, NAME
-    static const int kNamePage = 3;
-    int page = 0, cat[kPages] = {0, 0, 0, 0}, pg = 0, hoverKey = -1, hoverCat = -1, hoverPg = -1, hoverTab = -1;
+    static const int kPages = 3;   // LOOK, CASE, SIDES (the NAME tab came off, Nov 2026)
+    static const int kNamePage = 99;   // gone: never the page
+    int page = 0, cat[kPages] = {0, 0, 0}, pg = 0, hoverKey = -1, hoverCat = -1, hoverPg = -1, hoverTab = -1;
     bool pgPicked = false;   // set when the person turns pages; until then the page follows the current choice
     struct Item { std::string label; NVGcolor sw; bool hasSw; std::string thumb; bool on; std::function<void()> act; };
     struct Grid { std::vector<Item> items; int cols; float keyH; };
@@ -2246,12 +2246,15 @@ struct BackdropOled : widget::OpaqueWidget {
     // geometry
     // the four tabs (Nov 2026): square keys with contoured (rounded) corners, in a row across the top
     static constexpr float kTabGap = 2.f, kTabR = 4.f;
-    float tabSide() { return (box.size.x - 2.f * kPad - 3.f * kTabGap) / kPages; }
-    math::Rect tabRect(int k) { float s = tabSide(); return math::Rect(Vec(kPad + k * (s + kTabGap), 1.f), Vec(s, s)); }
+    float tabSide() { return (box.size.x - 2.f * kPad - 3.f * kTabGap) / 4.f; }   // the size of four across, so they stay small
+    math::Rect tabRect(int k) {   // the three, centred
+        float s = tabSide(), gap = (box.size.x - 2.f * kPad - kPages * s) / (kPages - 1);
+        return math::Rect(Vec(kPad + k * (s + gap), 1.f), Vec(s, s));
+    }
     float tabH() { return tabSide() + 1.f; }
     float catY() { return tabH() + 3.f + kPrevH + 3.f; }
     float gridY() { return page == kNamePage ? catY() + 16.f : catY() + kCatH + 9.f; }
-    float pagerY() { return box.size.y - kPageH - 2.f; }
+    float pagerY() { return box.size.y - 8.f - 2.f - kPageH - 1.f; }   // above the COLLAPSE / FILL row
     int perPage(const Grid& g) { int rows = std::max(1, (int) ((pagerY() - 3.f - gridY() + kGap) / (g.keyH + kGap))); return rows * g.cols; }
     int pageCount(const Grid& g) { int pp = perPage(g); return std::max(1, ((int) g.items.size() + pp - 1) / pp); }
     int curPage(const Grid& g) {
@@ -2299,17 +2302,18 @@ struct BackdropOled : widget::OpaqueWidget {
     // NAME page, very bottom: the small COLLAPSE FILL row (label, then BLANK RIGHT / BLANK LEFT / EMPTY)
     static constexpr float kFillH = 8.f;
     float fillY() { return box.size.y - kFillH - 2.f; }
-    math::Rect fillRect(int i) {   // i: 0 label, 1..3 keys
+    math::Rect fillRect(int i) {   // i: 0 the COLLAPSE key, 1..3 the fill keys
         float x0 = kPad, iw = box.size.x - 2.f * kPad, lw = iw * 0.28f, kw = (iw - lw) / 3.f;
         if (i == 0) return math::Rect(Vec(x0, fillY()), Vec(lw, kFillH));
         return math::Rect(Vec(x0 + lw + (i - 1) * kw + kGap * 0.5f, fillY()), Vec(kw - kGap, kFillH));
     }
     int hoverFill = -1;
-    int fillHit(Vec p) { if (page != kNamePage) return -1; for (int i = 1; i <= 3; i++) if (fillRect(i).contains(p)) return i; return -1; }
+    int fillHit(Vec p) { for (int i = 0; i <= 3; i++) if (fillRect(i).contains(p)) return i; return -1; }
     void onButton(const ButtonEvent& e) override {
         if (e.button != GLFW_MOUSE_BUTTON_LEFT || e.action != GLFW_PRESS) { OpaqueWidget::onButton(e); return; }
         e.consume(this);
         int f = fillHit(e.pos);
+        if (f == 0) { pendingAct = [=]() { if (onCollapse) onCollapse(); }; return; }   // on release: it rebuilds the module's face
         if (f > 0) { if (module) { static const int v[4] = {0, 1, 2, 0}; module->blankFill = v[f]; } return; }
         int tab, c, key, pgk; hit(e.pos, tab, c, key, pgk);
         if (tab >= 0) {
@@ -2457,7 +2461,7 @@ struct BackdropOled : widget::OpaqueWidget {
         nvgFontFaceId(vg, font->handle);
         float W = box.size.x;
         // tabs
-        static const char* const tabs[kPages] = {"LOOK", "CASE", "SIDES", "NAME"};
+        static const char* const tabs[kPages] = {"LOOK", "CASE", "SIDES"};
         for (int k = 0; k < kPages; k++) {
             math::Rect r = tabRect(k);
             keyBox(vg, r, k == page, k == hoverTab, kTabR);
@@ -2536,14 +2540,13 @@ struct BackdropOled : widget::OpaqueWidget {
         }
         else if (module && gOwner && gOwner != owner) {
             nvgFontSize(vg, 5.f); nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE); nvgFillColor(vg, nvgRGB(220, 70, 50));
-            nvgText(vg, W * 0.5f, (page == kNamePage ? fillY() - 8.f : pagerY()) + kPageH * 0.5f, "ANOTHER BACKDROP IS DRESSING THE RACK", NULL);
+            nvgText(vg, W * 0.5f, pagerY() + kPageH * 0.5f, "ANOTHER BACKDROP IS DRESSING THE RACK", NULL);
         }
-        if (page == kNamePage) {   // the small COLLAPSE FILL row
-            static const char* const fl[4] = {"COLLAPSE FILL", "BLANK RIGHT", "BLANK LEFT", "EMPTY"};
+        {   // the small bottom row on every page: COLLAPSE, then what fills the gap it leaves
+            static const char* const fl[4] = {"\xe2\x80\xba COLLAPSE \xe2\x80\xb9", "FILL: BLANK R", "FILL: BLANK L", "LEAVE EMPTY"};
             static const int fv[4] = {-1, 1, 2, 0};
-            math::Rect lr = fillRect(0);
-            nvgFontSize(vg, 4.2f); nvgTextLetterSpacing(vg, 0.3f); nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-            nvgFillColor(vg, oled::amber(170)); nvgText(vg, lr.pos.x, lr.pos.y + kFillH * 0.5f + 0.3f, fl[0], NULL);
+            keyBox(vg, fillRect(0), false, hoverFill == 0, 1.5f);
+            keyText(vg, fillRect(0), fl[0], false, 4.4f);
             for (int i = 1; i <= 3; i++) {
                 bool on = module && module->blankFill == fv[i];
                 math::Rect r = fillRect(i);
@@ -2634,7 +2637,7 @@ struct BackdropFace : widget::TransparentWidget {
         nvgStrokeColor(vg, nvgRGB(0x2c, 0x2c, 0x2c)); nvgStrokeWidth(vg, mm2px(0.25f)); nvgStroke(vg);
         // the strip: what is on the background now
         SynTHBloKBackdrop* m = module;
-        float sx = mm2px(4.2f), sy = mm2px(11.f), sw = w - 2.f * sx, sh = mm2px(110.f);
+        float sx = mm2px(4.2f), sy = mm2px(21.5f), sw = w - 2.f * sx, sh = mm2px(102.f);   // under the EXPAND key
         NVGcolor col = m ? kColor[clamp(m->colorIdx, 0, kColorN - 1)] : nvgRGB(40, 20, 60);
         nvgBeginPath(vg); nvgRect(vg, sx, sy, sw, sh);
         nvgFillPaint(vg, nvgLinearGradient(vg, 0, sy, 0, sy + sh, nvgLerpRGBA(col, nvgRGB(255, 255, 255), 0.1f), nvgLerpRGBA(col, nvgRGB(0, 0, 0), 0.5f))); nvgFill(vg);
@@ -2677,14 +2680,15 @@ struct BackdropExpand : widget::OpaqueWidget {
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
         NVGcontext* vg = args.vg;
-        bool f = folded && folded();
-        nvgBeginPath(vg); nvgRoundedRect(vg, 0.3f, 0.3f, box.size.x - 0.6f, box.size.y - 0.6f, 1.5f);
+        // folded only (the full module's COLLAPSE key lives in the OLED's bottom row): a square key, arrows over EXPAND
+        float W = box.size.x, H = box.size.y;
+        nvgBeginPath(vg); nvgRoundedRect(vg, 0.3f, 0.3f, W - 0.6f, H - 0.6f, 4.f);
         nvgFillColor(vg, oled::amber(hot ? 90 : 40)); nvgFill(vg);
-        nvgStrokeColor(vg, oled::amber(hot ? 235 : 130)); nvgStrokeWidth(vg, 0.6f); nvgStroke(vg);
+        nvgStrokeColor(vg, oled::amber(hot ? 235 : 130)); nvgStrokeWidth(vg, 0.7f); nvgStroke(vg);
         if (std::shared_ptr<window::Font> font = APP->window->uiFont) {
-            nvgFontFaceId(vg, font->handle); nvgFontSize(vg, 5.2f); nvgTextLetterSpacing(vg, 0.5f);
-            nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE); nvgFillColor(vg, oled::amber());
-            nvgText(vg, box.size.x * 0.5f, box.size.y * 0.5f + 0.3f, f ? "\xe2\x80\xb9 EXPAND \xe2\x80\xba" : "\xe2\x80\xba COLLAPSE \xe2\x80\xb9", NULL);
+            nvgFontFaceId(vg, font->handle); nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE); nvgFillColor(vg, oled::amber());
+            nvgFontSize(vg, 12.f); nvgTextLetterSpacing(vg, 2.f); nvgText(vg, W * 0.5f, H * 0.4f, "\xe2\x80\xb9 \xe2\x80\xba", NULL);
+            nvgFontSize(vg, 5.f); nvgTextLetterSpacing(vg, 0.4f); nvgText(vg, W * 0.5f, H * 0.74f, "EXPAND", NULL);
         }
     }
 };
@@ -2704,8 +2708,8 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         face->visible = false;
         addChild(face);
         expand = new BackdropExpand;
-        expand->box.size = mm2px(Vec(18.f, 2.8f));   // fits between the well (to 121.8 mm) and the card's edge (125.5 mm)
-        expand->box.pos = Vec(0.f, mm2px(122.25f));
+        expand->box.size = mm2px(Vec(10.f, 10.f));   // folded only: a square key at the top, the picture strip below it
+        expand->box.pos = Vec(0.f, mm2px(10.f));
         expand->act = [=]() { SynTHBloKBackdrop* m = dynamic_cast<SynTHBloKBackdrop*>(this->module); if (m) setCollapsed(!m->collapsed); };
         expand->folded = [=]() { SynTHBloKBackdrop* m = dynamic_cast<SynTHBloKBackdrop*>(this->module); return m && m->collapsed; };
         addChild(expand);
@@ -2718,12 +2722,6 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         om->onCollapse = [=]() { setCollapsed(true); };
         addChild(om);
         oled = om;
-        NameOled* nf = new NameOled;
-        nf->module = module;
-        nf->visible = false;
-        om->name = nf;
-        addChild(nf);   // after the menu, so it gets the clicks in its row
-        nameField = nf;
         // four screws, 3.5 mm in from each corner, as on every module
         for (int k = 0; k < 4; k++) {
             screws[k] = createWidgetCentered<SocketScrew>(mm2px(Vec((k & 1) ? 60.96f - 3.5f : 3.5f, k < 2 ? 3.5f : 125.f)));
@@ -2804,7 +2802,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         if (oled) oled->visible = !c;
         if (nameField && c) nameField->visible = false;
         if (face) { face->visible = c; face->box.size = box.size; }
-        if (expand) { expand->visible = true; expand->box.pos.x = (w - expand->box.size.x) * 0.5f; }
+        if (expand) { expand->visible = c; expand->box.pos.x = (w - expand->box.size.x) * 0.5f; }
         for (int k = 0; k < 4; k++) if (screws[k]) screws[k]->box.pos.x = ((k & 1) ? w - mm2px(3.5f) : mm2px(3.5f)) - screws[k]->box.size.x * 0.5f;
     }
     // CASE SNAPSHOTS (a dev aid): if Rack's user folder holds SynTHBloK/snap_cases.txt when this BACKDROP opens, it
@@ -2997,23 +2995,6 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
             std::string dir = asset::user("SynTHBloK");
             system::createDirectories(dir);
             system::openDirectory(dir);
-        }));
-        menu->addChild(new MenuSeparator);
-        menu->addChild(createMenuLabel("TITLE"));
-        menu->addChild(createBoolPtrMenuItem("Show the patch title", "", &m->showTitle));
-        menu->addChild(createSubmenuItem("Title text", m->title.empty() ? "the patch name" : m->title, [=](Menu* sub) {
-            ui::TextField* tf = new ui::TextField;
-            tf->box.size.x = 220.f;
-            tf->placeholder = "the patch name";
-            tf->setText(m->title);
-            struct Apply : ui::MenuItem {
-                SynTHBloKBackdrop* m; ui::TextField* tf;
-                void onAction(const ActionEvent& e) override { m->title = tf->getText(); nameThePatch(m->title); }
-            };
-            sub->addChild(tf);
-            Apply* a = new Apply; a->m = m; a->tf = tf; a->text = "Set";
-            sub->addChild(a);
-            sub->addChild(createMenuItem("Use the patch name", "", [=]() { m->title.clear(); }));
         }));
     }
 };
