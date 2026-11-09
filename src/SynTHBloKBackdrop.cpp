@@ -1087,9 +1087,9 @@ struct BackdropLayer : widget::TransparentWidget {
     // in the same material, darker, and it throws its own shadow. No screws on the face:
     // real panels are screwed on from the inside.
     // DEPTH: the panel is as deep as the case. It is swept back toward the lower right exactly as drawCase sweeps the case
-    // (by d = depth * 0.18), so its side and foot follow the case's own side and foot. pass 0 draws the shadow (before
-    // the case), pass 1 the depth and the face (after it); the left panel's depth is clipped where the case front
-    // stands in front of it.
+    // (by d = depth * 0.18), so its side and foot follow the case's own side and foot. The order makes the hidden parts
+    // hide: pass 0 the shadows, pass 1 the LEFT panel's depth (then the case, which covers what of it lies behind the
+    // case), pass 2 the RIGHT panel's depth (over the case's right side, which it stands in front of), pass 3 the faces.
     void drawPanels(NVGcontext* vg, const CaseStyle& cs, math::Rect in, int mat, int shape, int finish, bool doShadow, float depthMm, int pass) {
         const PanelMat& pm = kPanelMat[clamp(mat, 1, kPanelMatN - 1)];
         int img = pm.tex ? tex(vg, pm.tex) : -1;
@@ -1102,7 +1102,7 @@ struct BackdropLayer : widget::TransparentWidget {
         float d = std::max(4.f, mm2px(depthMm) * 0.18f);   // as deep as the case (a little depth even on a flat case)
         for (int side = 0; side < 2; side++) {
             float px = side ? x + w : x - pw;
-            if (pass == 0) {
+            if (pass == 0) {   // the shadow
                 if (doShadow) {
                     nvgBeginPath(vg); nvgRect(vg, px - 40.f, py - 30.f, pw + d + 90.f, ph + d + 90.f);
                     nvgFillPaint(vg, nvgBoxGradient(vg, px + d * 0.8f + 4.f, py + d * 0.9f + 8.f, pw, ph, rad + 6.f, 16.f, nvgRGBA(0, 0, 0, 150), nvgRGBA(0, 0, 0, 0)));
@@ -1110,14 +1110,12 @@ struct BackdropLayer : widget::TransparentWidget {
                 }
                 continue;
             }
-            // the depth: the outline swept back to the lower right, darker toward the back
+            if (pass == 1 || pass == 2) {   // the depth (pass 1: the left panel's, pass 2: the right one's)
+            if ((pass == 1) != (side == 0)) continue;
+            // the outline swept back to the lower right, darker toward the back
             int nd = std::max(2, std::min(24, (int) (d / 1.5f)));
-            for (int clip = 0; clip < (side ? 1 : 2); clip++) {
+            {
                 nvgSave(vg);
-                if (!side) {   // the left panel's depth runs behind the case: show it only left of, and below, the case front
-                    if (clip == 0) nvgIntersectScissor(vg, px - 4.f, py - 4.f, x - px + 4.f, ph + d + 8.f);
-                    else nvgIntersectScissor(vg, x, py + ph, pw + d + 4.f, d + 4.f);
-                }
                 // every face carries the material: each layer is the texture (one continuous pattern), then a shade
                 // that deepens toward the back, so the side and foot read as the same piece turned away from the light
                 for (int k = nd; k >= 1; k--) {
@@ -1129,7 +1127,9 @@ struct BackdropLayer : widget::TransparentWidget {
                 }
                 nvgRestore(vg);
             }
-            // the face
+            continue;
+            }
+            // pass 3: the face
             nvgBeginPath(vg); nvgRoundedRect(vg, px, py, pw, ph, rad);
             nvgFillColor(vg, avg); nvgFill(vg);
             if (img >= 0) { nvgFillPaint(vg, nvgImagePattern(vg, px, py, 260.f, 260.f, (float) M_PI * 0.5f, img, 1.f)); nvgFill(vg); }
@@ -1307,13 +1307,13 @@ struct BackdropLayer : widget::TransparentWidget {
             (void) dir;
         }
     }
-    void drawCase(NVGcontext* vg, const CaseStyle& cs, math::Rect in, float depthMm, bool doShadow, bool doRails, const std::vector<float>& rowTops) {
-        if (cs.extras & X_OPEN) { drawOpenFrame(vg, cs, in, depthMm, doShadow, doRails, rowTops); return; }
-        float s = cs.side, t = 6.f, tt = topLip(cs);   // ends, the bottom lip and the top lip (taller with a 1U row)
+    // the case's shadow (drawCase draws it; with side panels it is drawn first, apart, so the left panel's depth can go
+    // between the shadow and the case)
+    void caseShadow(NVGcontext* vg, const CaseStyle& cs, math::Rect in, float depthMm) {
+        float s = cs.side, t = 6.f, tt = topLip(cs);
         float x = in.pos.x - s, y = in.pos.y - tt, w = in.size.x + 2.f * s, h = in.size.y + t + tt;
-        float d = mm2px(depthMm) * 0.18f;   // the visible side, below and to the right: the real depth, seen at a slant
-        if (doShadow) {
-            // two shadows: a wide soft ambient one, and a tight contact one where the case meets the surface
+        float d = mm2px(depthMm) * 0.18f;
+        {
             float rr = caseRadius(cs);
             nvgBeginPath(vg);
             nvgRect(vg, x - 80.f, y - 60.f, w + d + 180.f, h + d + 180.f);
@@ -1324,6 +1324,13 @@ struct BackdropLayer : widget::TransparentWidget {
             nvgFillPaint(vg, nvgBoxGradient(vg, x + d * 0.8f + 1.f, y + d * 0.9f + 3.f, w, h, rr + 2.f, 10.f, nvgRGBA(0, 0, 0, 150), nvgRGBA(0, 0, 0, 0)));
             nvgFill(vg);
         }
+    }
+    void drawCase(NVGcontext* vg, const CaseStyle& cs, math::Rect in, float depthMm, bool doShadow, bool doRails, const std::vector<float>& rowTops) {
+        if (cs.extras & X_OPEN) { drawOpenFrame(vg, cs, in, depthMm, doShadow, doRails, rowTops); return; }
+        float s = cs.side, t = 6.f, tt = topLip(cs);   // ends, the bottom lip and the top lip (taller with a 1U row)
+        float x = in.pos.x - s, y = in.pos.y - tt, w = in.size.x + 2.f * s, h = in.size.y + t + tt;
+        float d = mm2px(depthMm) * 0.18f;   // the visible side, below and to the right: the real depth, seen at a slant
+        if (doShadow) caseShadow(vg, cs, in, depthMm);
         float rr = caseRadius(cs);
         if (d > 0.5f && rr > 0.f) {   // a rounded case: its rounded outline swept back for the depth
             int n = std::max(2, std::min(24, (int) (d / 1.5f)));
@@ -1693,9 +1700,12 @@ struct BackdropLayer : widget::TransparentWidget {
                     if (m->earKind > 0) { drawEars(args.vg, b.r, m->earKind, m->earName, m->earShape, m->shadow, b.rows, std::max(m->peak[0], m->peak[1])); continue; }
                     if (m->panelMat > 0) {   // side panels replace the case's own ends (they come back when the panels go)
                         CaseStyle pc = cs; pc.side = 2.f; pc.ends = E_SQUARE;
-                        drawPanels(args.vg, pc, b.r, m->panelMat, m->panelShape, m->panelFinish, m->shadow, m->depthMm, 0);
-                        if (!m->noCase) drawCase(args.vg, pc, b.r, m->depthMm, m->shadow, false, b.rows);   // CASE OFF: just the panels
-                        drawPanels(args.vg, pc, b.r, m->panelMat, m->panelShape, m->panelFinish, m->shadow, m->depthMm, 1);
+                        bool box = !m->noCase && !(pc.extras & X_OPEN);
+                        if (box && m->shadow) caseShadow(args.vg, pc, b.r, m->depthMm);
+                        for (int pass = 0; pass < 4; pass++) {
+                            if (pass == 2 && !m->noCase) drawCase(args.vg, pc, b.r, m->depthMm, m->shadow && !box, false, b.rows);   // CASE OFF: just the panels
+                            drawPanels(args.vg, pc, b.r, m->panelMat, m->panelShape, m->panelFinish, m->shadow, m->depthMm, pass);
+                        }
                     }
                     else drawCase(args.vg, cs, b.r, m->depthMm, m->shadow, false, b.rows);
                 }
