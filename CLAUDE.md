@@ -113,14 +113,16 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   Side panels XOR rack ears: picking one turns the other off. With ears there is NO case: an open rack, Rack's rails screwing
   straight onto the ears (ears at the row ends; a round hole + our socket screw, 23 px = 10-32 cap, only at the very top and bottom rails). With side
   panels on, the case's own ends are hidden (drawn 2 px, square); they come back when the panels go. Ears are 92 px wide,
-  STRAIGHT or CONTOURED (earShape: the outer edge dips 9 px along each row). END SHAPE / END WIDTH are gone: cases keep their ends.
+  STRAIGHT or CONTOURED (earShape: rounded top and bottom outer corners, 18 px). NoiZee ToyZ ears (isNoizee: index >= 10):
+  NOIZEE TOYZ = big wordmark + orange rule, then BADGE (hex Z logo), ENGRAVED (etched raw alu), BACKLIT (slots + name lit
+  orange, glow follows BACKDROP's audio input), CIRCUIT (the logo's line + lightning Z); earName hides the name only. END SHAPE / END WIDTH are gone: cases keep their ends.
   Man-made textures: `make_wood_textures.py mats` -> res/cases/mat_*.png. RACK EARS (kEarFin): L-shaped brackets, a lip
   down each case end (outside any side panels), a plate bent out with two oval slots; 9 plain finishes (aluminium, black,
   gold, copper, bronze, green, primary red/blue/yellow) + NOIZEE TOYZ (black, orange rule, name optional: earName).
   BACKDROP is 12 HP since Nov 2026 (was 6; `tools/make_backdrop_panel.py`). OLED (simplified): 4 tabs LOOK / CASE / SIDES /
   NAME (kNamePage = 3), 3-5 rows each; SIDES is one NONE/PANELS/EARS switch; rows are < > steppers or option boxes (Row.opts);
   IMAGE steps NONE / MY IMAGES / LOAD FILE, MY PRESET steps the presets / SAVE AS (the wheel skips the dialog slots).
-  Themes (remade): mostly case only; 6 wear side panels, 5 wear rack ears (Theme.ear / earShape). a LIVE PREVIEW strip (art, case colour, panels, ears), label-over-value rows with arrows, a hint line.
+  Themes (remade): mostly case only; 6 wear side panels, 6 wear rack ears (Theme.ear / earShape). a LIVE PREVIEW strip (art, case colour, panels, ears), label-over-value rows with arrows, a hint line.
   No NAME key on the panel: the NAME tab starts typing and carries the status LED (amber = this one dresses the rack, red =
   another does). Small jacks (SmallJack) for L/R, a 10-segment meter between them; four screws at 3.5 mm like every module.
   Screws: since Nov 2026 every module has four SocketScrews, 3.5 mm in from each corner (y 3.5 and 125 mm). Before that

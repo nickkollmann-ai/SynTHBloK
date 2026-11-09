@@ -173,9 +173,13 @@ static const EarFin kEarFin[] = {
     {"COPPER", 184, 100, 62, 0.9f, false}, {"BRONZE", 140, 104, 58, 0.9f, false}, {"GREEN ANODIZED", 36, 120, 72, 0.45f, false},
     {"PRIMARY RED", 196, 28, 30, 0.45f, false}, {"PRIMARY BLUE", 24, 72, 180, 0.45f, false}, {"PRIMARY YELLOW", 232, 190, 24, 0.45f, true},
     {"NOIZEE TOYZ", 34, 34, 38, 0.45f, false},
+    // more NoiZee ToyZ ears (Nov 2026): the logo badge, an engraved plate, backlit slots, the logo's circuit line
+    {"NOIZEE BADGE", 26, 26, 29, 0.45f, false}, {"NOIZEE ENGRAVED", 160, 163, 168, 0.9f, true},
+    {"NOIZEE BACKLIT", 16, 16, 17, 0.3f, false}, {"NOIZEE CIRCUIT", 12, 14, 14, 0.3f, false},
 };
 static const int kEarFinN = (int) (sizeof(kEarFin) / sizeof(kEarFin[0]));
-static const int kEarNoizee = 10;
+static const int kEarNoizee = 10;   // the first NoiZee ToyZ ear; every ear from here on is one (isNoizee)
+static inline bool isNoizee(int k) { return k >= kEarNoizee; }
 static const int kSideMatN = (int) (sizeof(kSideMat) / sizeof(kSideMat[0]));
 static NVGcolor sideColor(int i) {
     static const int c[][3] = {{0, 0, 0}, {92, 58, 34}, {168, 124, 78}, {136, 60, 34}, {44, 30, 24}, {196, 170, 130}, {196, 162, 114}, {38, 33, 30},
@@ -1120,36 +1124,100 @@ struct BackdropLayer : widget::TransparentWidget {
             nvgStrokeColor(vg, nvgRGBA(0, 0, 0, 90)); nvgStrokeWidth(vg, 1.f); nvgStroke(vg);
         }
     }
+    // ---- the NoiZee ToyZ ears' artwork, between the top and bottom screws (sy0, sy1). The name reads bottom to top and
+    // sits low, ending just above the bottom screw. name = false leaves the name off (the art stays).
+    void earText(NVGcontext* vg, const char* t, float cx, float yEnd, float size, float spacing, NVGcolor c, int style) {
+        std::shared_ptr<window::Font> font = APP->window->uiFont;
+        if (!font) return;
+        nvgSave(vg);
+        nvgTranslate(vg, cx, yEnd); nvgRotate(vg, -(float) M_PI * 0.5f);
+        nvgFontFaceId(vg, font->handle); nvgFontSize(vg, size); nvgTextLetterSpacing(vg, spacing);
+        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        if (style == 1) {   // engraved: a dark cut with a lit lower lip
+            nvgFillColor(vg, nvgRGBA(255, 255, 255, 70)); nvgText(vg, 0, 0.8f, t, NULL);
+            nvgFillColor(vg, nvgRGBA(0, 0, 0, 120)); nvgText(vg, 0, -0.6f, t, NULL);
+        }
+        if (style == 2) {   // lit: a soft glow behind
+            nvgFontBlur(vg, 6.f); nvgFillColor(vg, nvgTransRGBA(c, 160)); nvgText(vg, 0, 0, t, NULL); nvgFontBlur(vg, 0.f);
+        }
+        nvgFillColor(vg, c); nvgText(vg, 0, 0, t, NULL);
+        nvgRestore(vg);
+    }
+    void drawNoizeeEar(NVGcontext* vg, int kind, bool name, float px, float pw, int side, float y, float h, float sy0, float sy1, float level) {
+        const NVGcolor orange = nvgRGB(255, 122, 0), teal = nvgRGB(0, 255, 170);
+        float cx = px + pw * 0.5f, top = sy0 + 22.f, bot = sy1 - 22.f, span = bot - top;
+        if (span < 40.f) return;
+        if (kind == kEarNoizee) {   // BIG WORDMARK: the name large and low, the orange rule down the inner edge
+            float rx = side ? px + 8.f : px + pw - 10.f;
+            nvgBeginPath(vg); nvgRect(vg, rx, top, 2.f, span); nvgFillColor(vg, orange); nvgFill(vg);
+            nvgBeginPath(vg); nvgRect(vg, rx - 2.f, top, 6.f, span); nvgFillColor(vg, nvgRGBA(255, 122, 0, 40)); nvgFill(vg);
+            if (name) earText(vg, "NoiZee ToyZ", cx - (side ? -3.f : 3.f), bot, std::min(22.f, span * 0.09f), 1.5f, orange, 0);
+        }
+        else if (kind == kEarNoizee + 1) {   // LOGO BADGE: the hex Z logo as an enamel badge, the name above it
+            float r = std::min(pw * 0.3f, span * 0.12f), by = bot - r;
+            NVGcolor dark = nvgRGB(10, 10, 12);
+            auto hexPath = [&](float dx, float dy) {
+                nvgBeginPath(vg);
+                for (int k = 0; k < 6; k++) { float a = (float) M_PI / 6.f + k * (float) M_PI / 3.f; float hx = cx + dx + r * std::cos(a), hy = by + dy + r * std::sin(a); if (k) nvgLineTo(vg, hx, hy); else nvgMoveTo(vg, hx, hy); }
+                nvgClosePath(vg);
+            };
+            hexPath(1.5f, 2.5f); nvgFillColor(vg, nvgRGBA(0, 0, 0, 120)); nvgFill(vg);   // its shadow
+            hexPath(0.f, 0.f); nvgFillColor(vg, dark); nvgFill(vg);
+            nvgStrokeColor(vg, teal); nvgStrokeWidth(vg, std::max(2.f, r * 0.1f)); nvgStroke(vg);
+            nvgBeginPath(vg); nvgCircle(vg, cx, by - r * 0.39f, r * 0.16f); nvgStrokeWidth(vg, std::max(1.5f, r * 0.07f)); nvgStroke(vg);
+            nvgBeginPath(vg); nvgMoveTo(vg, cx - r * 0.28f, by - r * 0.12f); nvgLineTo(vg, cx + r * 0.28f, by - r * 0.12f);
+            nvgLineTo(vg, cx - r * 0.28f, by + r * 0.2f); nvgLineTo(vg, cx + r * 0.28f, by + r * 0.2f);
+            nvgStrokeColor(vg, orange); nvgStrokeWidth(vg, std::max(1.5f, r * 0.08f)); nvgStroke(vg);
+            nvgBeginPath(vg); nvgCircle(vg, cx, by + r * 0.46f, r * 0.13f); nvgFillColor(vg, teal); nvgFill(vg);
+            nvgBeginPath(vg); nvgRect(vg, cx - r * 0.9f, by - r * 0.95f, r * 0.5f, r * 0.12f); nvgFillColor(vg, nvgRGBA(255, 255, 255, 30)); nvgFill(vg);   // enamel shine
+            if (name) earText(vg, "NOIZEE TOYZ", cx, by - r - 14.f, std::min(13.f, span * 0.06f), 4.f, nvgRGB(205, 205, 210), 0);
+        }
+        else if (kind == kEarNoizee + 2) {   // ENGRAVED: laser-etched into raw aluminium, with a small data line
+            if (name) {
+                earText(vg, "NOIZEE TOYZ", cx - 6.f, bot, std::min(20.f, span * 0.085f), 3.f, nvgRGB(72, 74, 78), 1);
+                earText(vg, "SYNTHBLOK  \xc2\xb7  EURORACK 3U", cx + 18.f, bot, 7.f, 1.f, nvgRGB(84, 86, 90), 1);
+            }
+        }
+        else if (kind == kEarNoizee + 3) {   // BACKLIT: slots and the name cut through, lit orange from behind; the glow
+            // breathes with the audio coming into BACKDROP
+            float lv = clamp(0.55f + 0.45f * std::sqrt(clamp(level, 0.f, 1.f)), 0.f, 1.f);
+            NVGcolor lit = nvgLerpRGBA(nvgRGB(120, 50, 0), nvgRGB(255, 150, 40), lv);
+            float slotsEnd = top + span * 0.42f, sw = pw * 0.46f;
+            for (float yy = top + 4.f; yy + 5.f < slotsEnd; yy += 12.f) {
+                nvgBeginPath(vg); nvgRoundedRect(vg, cx - sw * 0.5f - 4.f, yy - 4.f, sw + 8.f, 13.f, 6.f);
+                nvgFillPaint(vg, nvgBoxGradient(vg, cx - sw * 0.5f, yy, sw, 5.f, 2.5f, 8.f, nvgTransRGBA(lit, (unsigned char) (110 * lv)), nvgRGBA(0, 0, 0, 0))); nvgFill(vg);
+                nvgBeginPath(vg); nvgRoundedRect(vg, cx - sw * 0.5f, yy, sw, 5.f, 2.5f); nvgFillColor(vg, lit); nvgFill(vg);
+            }
+            if (name) earText(vg, "NoiZee ToyZ", cx, bot, std::min(19.f, span * 0.08f), 1.5f, lit, 2);
+        }
+        else {   // CIRCUIT: the logo's line with two nodes and the lightning Z, the name below
+            float ly0 = top, ly1 = top + span * 0.3f;
+            nvgBeginPath(vg); nvgMoveTo(vg, cx, ly0); nvgLineTo(vg, cx, ly1); nvgStrokeColor(vg, teal); nvgStrokeWidth(vg, 2.f); nvgStroke(vg);
+            for (float ny : {ly0 + span * 0.04f, ly0 + span * 0.16f}) { nvgBeginPath(vg); nvgCircle(vg, cx, ny, 5.f); nvgFillColor(vg, nvgRGB(12, 14, 14)); nvgFill(vg); nvgStrokeWidth(vg, 2.f); nvgStroke(vg); }
+            float zy = ly1, zs = 14.f;
+            nvgBeginPath(vg); nvgMoveTo(vg, cx, zy); nvgLineTo(vg, cx - zs, zy + zs * 0.55f); nvgLineTo(vg, cx + zs, zy + zs * 0.55f); nvgLineTo(vg, cx, zy + zs * 1.1f);
+            nvgStrokeColor(vg, orange); nvgStrokeWidth(vg, 3.f); nvgLineJoin(vg, NVG_MITER); nvgStroke(vg);
+            if (name) earText(vg, "NOIZEE TOYZ", cx, bot, std::min(15.f, span * 0.065f), 5.f, nvgRGB(235, 235, 235), 0);
+        }
+    }
     // ---- RACK EARS: on each end of the case (outside the side panels, if there are any)
     // With ears there is no case: an open rack, just Rack's rails, whose ends screw straight onto the ears. So the ears
     // sit right at the ends of the module rows, and their slots line up with each row's rails.
-    void drawEars(NVGcontext* vg, math::Rect in, int kind, bool name, int shape, bool doShadow, const std::vector<float>& rowTops) {
+    void drawEars(NVGcontext* vg, math::Rect in, int kind, bool name, int shape, bool doShadow, const std::vector<float>& rowTops, float level) {
         const EarFin& ef = kEarFin[clamp(kind, 1, kEarFinN - 1)];
         NVGcolor c = nvgRGB(ef.r, ef.g, ef.b);
         float x = in.pos.x, y = in.pos.y, w = in.size.x, h = in.size.y;
         const float lip = 7.f, plate = 92.f;   // twice the first width (Nov 2026)
-        // CONTOURED: the outer edge dips in gently along each row (full width at the rails, 9 px in at the middle),
-        // with softly rounded corners where rows meet; STRAIGHT: a plain edge
-        std::vector<float> segs;
-        for (float rt : rowTops) segs.push_back(rt);
-        if (segs.empty()) segs.push_back(y);
+        // CONTOURED: the top and bottom outer corners are rounded off (a generous radius); STRAIGHT: square corners
         auto platePath = [&](float px, int sd) {
             float in0 = sd ? px : px + plate, out = sd ? px + plate : px, o = sd ? 1.f : -1.f;
+            float rc = shape ? std::min(18.f, h * 0.2f) : 0.f;
             nvgBeginPath(vg);
             nvgMoveTo(vg, in0, y);
-            if (!shape) { nvgLineTo(vg, out, y); nvgLineTo(vg, out, y + h); }
-            else {
-                const float dip = 9.f, rc = 5.f;
-                nvgLineTo(vg, out - o * rc, y); nvgQuadTo(vg, out, y, out, y + rc);
-                for (size_t k = 0; k < segs.size(); k++) {
-                    float a = std::max(y, segs[k]), b = k + 1 < segs.size() ? segs[k + 1] : y + h;
-                    if (b - a < 4.f * rc) { nvgLineTo(vg, out, b); continue; }
-                    nvgLineTo(vg, out, a + rc);
-                    nvgBezierTo(vg, out - o * dip, a + (b - a) * 0.3f, out - o * dip, a + (b - a) * 0.7f, out, b - rc);
-                    if (k + 1 < segs.size()) nvgLineTo(vg, out, b + rc);
-                }
-                nvgLineTo(vg, out, y + h - rc); nvgQuadTo(vg, out, y + h, out - o * rc, y + h);
-            }
+            nvgLineTo(vg, out - o * rc, y);
+            if (rc > 0.f) nvgArcTo(vg, out, y, out, y + rc, rc);
+            nvgLineTo(vg, out, y + h - rc);
+            if (rc > 0.f) nvgArcTo(vg, out, y + h, out - o * rc, y + h, rc);
             nvgLineTo(vg, in0, y + h);
             nvgClosePath(vg);
         };
@@ -1172,7 +1240,7 @@ struct BackdropLayer : widget::TransparentWidget {
             float inX = side ? px : px + plate, outX = side ? px + plate : px;
             nvgFillPaint(vg, nvgLinearGradient(vg, inX, 0, outX, 0, nvgRGBA(0, 0, 0, 38), nvgRGBA(255, 255, 255, 10))); nvgFill(vg);
             nvgFillPaint(vg, nvgLinearGradient(vg, 0, y, 0, y + h, nvgRGBA(255, 255, 255, 8), nvgRGBA(0, 0, 0, 16))); nvgFill(vg);
-            nvgBeginPath(vg); nvgRect(vg, px + (shape && !side ? 5.f : 0.f), y, plate - (shape ? 5.f : 0.f), 1.f); nvgFillColor(vg, nvgRGBA(255, 255, 255, 60)); nvgFill(vg);   // lit top edge
+            nvgBeginPath(vg); nvgRect(vg, px + (shape && !side ? 18.f : 0.f), y, plate - (shape ? 18.f : 0.f), 1.f); nvgFillColor(vg, nvgRGBA(255, 255, 255, 60)); nvgFill(vg);   // lit top edge
             platePath(px, side);   // the outer rim: a dark line round the plate (the bend side is covered by the lip)
             nvgStrokeColor(vg, nvgRGBA(0, 0, 0, 110)); nvgStrokeWidth(vg, 1.f); nvgStroke(vg);
             // lip and bend: a rounded highlight across the fold
@@ -1204,22 +1272,7 @@ struct BackdropLayer : widget::TransparentWidget {
                     nvgBeginPath(vg); nvgCircle(vg, cx, sy, 4.f); nvgFillColor(vg, nvgRGB(8, 8, 10)); nvgFill(vg);   // the bare round hole
                 }
             }
-            if (kind == kEarNoizee) {   // the rig's orange rule down the inner edge
-                float rx = side ? px + 3.f : px + plate - 5.f;
-                nvgBeginPath(vg); nvgRect(vg, rx, y + 4.f, 2.f, h - 8.f); nvgFillColor(vg, nvgRGB(255, 122, 0)); nvgFill(vg);
-                nvgBeginPath(vg); nvgRect(vg, rx - 1.f, y + 4.f, 4.f, h - 8.f); nvgFillColor(vg, nvgRGBA(255, 122, 0, 40)); nvgFill(vg);
-                if (name && h > 120.f) {
-                    std::shared_ptr<window::Font> font = APP->window->uiFont;
-                    if (font) {
-                        nvgSave(vg);
-                        nvgTranslate(vg, cx + 1.f, y + h * 0.5f); nvgRotate(vg, -(float) M_PI * 0.5f);
-                        nvgFontFaceId(vg, font->handle); nvgFontSize(vg, 11.f); nvgTextLetterSpacing(vg, 1.2f);
-                        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-                        nvgFillColor(vg, nvgRGB(255, 170, 60)); nvgText(vg, 0, 0, "NoiZee ToyZ", NULL);
-                        nvgRestore(vg);
-                    }
-                }
-            }
+            if (isNoizee(kind)) drawNoizeeEar(vg, kind, name, px, plate, side, y, h, slots.front(), slots.back(), level);
             (void) dir;
         }
     }
@@ -1586,7 +1639,7 @@ struct BackdropLayer : widget::TransparentWidget {
                 for (const Block& b : bl) {
                     // either side panels on a case, or rack ears on an open rack (no case: the rails screw onto the
                     // ears); never both (ears win in an old patch with both)
-                    if (m->earKind > 0) { drawEars(args.vg, b.r, m->earKind, m->earName, m->earShape, m->shadow, b.rows); continue; }
+                    if (m->earKind > 0) { drawEars(args.vg, b.r, m->earKind, m->earName, m->earShape, m->shadow, b.rows, std::max(m->peak[0], m->peak[1])); continue; }
                     if (m->panelMat > 0) {   // side panels replace the case's own ends (they come back when the panels go)
                         CaseStyle pc = cs; pc.side = 2.f; pc.ends = E_SQUARE;
                         drawCase(args.vg, pc, b.r, m->depthMm, m->shadow, false, b.rows);
@@ -1768,8 +1821,8 @@ static const Theme kThemes[] = {
     {"TIERED SUNSET", 14, 5, "TIERED WALNUT", 100.f},
     {"AMBER LAB", 1, 2, "LAB EXTRUSION", 84.f},
     {"OLED GLOW", 2, 0, "BLACK ANODIZED", 50.f},
-    {"DEEP SPACE", 4, 0, "SMOKED ACRYLIC", 50.f, 0, 0, 2, 1},
-    {"BLUEPRINT", 10, 8, "BRUSHED ALUMINUM", 65.f, 0, 0, 1, 0},
+    {"DEEP SPACE", 4, 0, "SMOKED ACRYLIC", 50.f, 0, 0, 13, 1},
+    {"BLUEPRINT", 10, 8, "BRUSHED ALUMINUM", 65.f, 0, 0, 12, 0},
     {"ROAD WARRIOR", 3, 19, "ROAD CASE", 120.f},
     {"TOUR CASE", 6, 1, "SUITCASE 9U", 120.f},
     {"STUDIO FOAM", 12, 1, "STALKER 6U", 100.f},
@@ -1785,7 +1838,7 @@ static const Theme kThemes[] = {
     {"OXBLOOD", LOOK_GRADIENT, 10, "EBONY SKIFF", 84.f},
     {"FOREST", LOOK_GRADIENT, 6, "OAK SKIFF", 84.f},
     {"CLEAN WHITE", LOOK_GRADIENT, 20, "FLATBOAT WHITE", 40.f},
-    {"CARBON", 6, 0, "CARBON FIBER", 65.f},
+    {"CARBON", 6, 0, "CARBON FIBER", 65.f, 0, 0, 11, 1},
     {"BIRCH STUDIO", LOOK_CASE_GRADIENT, 0, "BIRCH PLY STUDIO", 100.f},
     {"BLACK PLY", LOOK_GRADIENT, 0, "BLACK PLY STUDIO", 100.f},
     {"CHERRY STUDIO", LOOK_CASE_GRADIENT, 0, "CHERRY STUDIO", 100.f},
@@ -1881,7 +1934,7 @@ static const Theme kThemes[] = {
     {"PLASMA TV", LOOK_ART + 63, 0, "ROAD CASE", 84.f, SW_LEOPARD, F_OILED, 0, 0},
     {"WHIRLPOOL", LOOK_ART + 64, 0, "SMOKED VIOLET ACRYLIC", 50.f},
     {"DEEP SEA", LOOK_ART + 65, 0, "BLACKLIGHT POD", 65.f},
-    {"NEON GRID CITY", LOOK_ART + 66, 0, "LAB EXTRUSION", 84.f, 0, 0, 7, 0},
+    {"NEON GRID CITY", LOOK_ART + 66, 0, "LAB EXTRUSION", 84.f, 0, 0, 14, 0},
     {"SEVENTIES", LOOK_ART + 67, 0, "TIERED WALNUT", 120.f},
     {"GOLDEN SPIRAL", LOOK_ART + 68, 0, "CHERRY STUDIO", 100.f},
 };
@@ -2056,7 +2109,7 @@ struct BackdropOled : widget::OpaqueWidget {
             if (mode == 2) {
                 r.push_back({"EAR FINISH", kEarFin[clamp(m->earKind, 1, kEarFinN - 1)].name, [=](int d) { m->earKind = 1 + wrap(m->earKind - 1, d, kEarFinN - 1); lastEar = m->earKind; hand(); }, false});
                 r.push_back(seg("EAR SHAPE", {"STRAIGHT", "CONTOURED"}, clamp(m->earShape, 0, 1), [=](int i) { m->earShape = i; }));
-                if (m->earKind == kEarNoizee) r.push_back(seg("NAME ON EAR", {"ON", "OFF"}, m->earName ? 0 : 1, [=](int i) { m->earName = i == 0; }));
+                if (isNoizee(m->earKind)) r.push_back(seg("NAME ON EAR", {"ON", "OFF"}, m->earName ? 0 : 1, [=](int i) { m->earName = i == 0; }));
             }
         }
         else {
@@ -2163,7 +2216,7 @@ struct BackdropOled : widget::OpaqueWidget {
                 if (ew > 0.f) {
                     const EarFin& ef = kEarFin[m->earKind];
                     nvgBeginPath(vg); nvgRect(vg, sd ? ex : ex - ew, cy, ew, ch); nvgFillColor(vg, nvgRGB(ef.r, ef.g, ef.b)); nvgFill(vg);
-                    if (m->earKind == kEarNoizee) { nvgBeginPath(vg); nvgRect(vg, sd ? ex + 0.8f : ex - 1.6f, cy - 1.f, 0.8f, ch + 2.f); nvgFillColor(vg, nvgRGB(255, 122, 0)); nvgFill(vg); }
+                    if (isNoizee(m->earKind)) { nvgBeginPath(vg); nvgRect(vg, sd ? ex + 0.8f : ex - 1.6f, cy - 1.f, 0.8f, ch + 2.f); nvgFillColor(vg, nvgRGB(255, 122, 0)); nvgFill(vg); }
                 }
             }
         }
@@ -2532,7 +2585,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
             }
             sub->addChild(new MenuSeparator);
             sub->addChild(createIndexSubmenuItem("Shape", {"STRAIGHT", "CONTOURED"}, [=]() { return (size_t) m->earShape; }, [=](size_t i) { m->earShape = (int) i; }));
-            sub->addChild(createBoolPtrMenuItem("Name on the NOIZEE TOYZ ear", "", &m->earName));
+            sub->addChild(createBoolPtrMenuItem("Name on the NOIZEE TOYZ ears", "", &m->earName));
             sub->addChild(createMenuLabel("Ears mean no case: an open rack (turns the side panels off)"));
         }));
         menu->addChild(createSubmenuItem("Case material", m->caseMat > 0 ? kPanelMat[clamp(m->caseMat, 0, kPanelMatN - 1)].name : "its own", [=](Menu* sub) { matMenu(sub, &m->caseMat, "ITS OWN"); }));
