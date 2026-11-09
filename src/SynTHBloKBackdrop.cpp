@@ -154,9 +154,13 @@ static const PanelMat kPanelMat[] = {
     // man-made
     {"DIAMOND PLATE", "mat_diamond_plate", 152, 153, 158}, {"CARBON FIBER", "mat_carbon_fiber", 36, 37, 39}, {"3D PRINTED PLA", "mat_printed_pla", 214, 94, 23},
     {"BRUSHED ALUMINUM", "mat_brushed_alu", 171, 173, 178}, {"NEON ACRYLIC", "mat_neon_acrylic", 216, 36, 146}, {"TOLEX", "mat_tolex", 36, 36, 38},
+    // NoiZee ToyZ side plates (Nov 2026): the BLANK panels' looks (and the matching ears'), on the modules' dark face
+    {"NOIZEE BADGE", NULL, 26, 26, 29}, {"NOIZEE BACKLIT", NULL, 16, 16, 17}, {"NOIZEE CIRCUIT", NULL, 12, 14, 14},
 };
 static const int kPanelMatN = (int) (sizeof(kPanelMat) / sizeof(kPanelMat[0]));
 static const int kPanelManMade = 25;   // the first man-made entry (menus put a heading there)
+static const int kPanelNoizee = 31;     // the first NoiZee ToyZ plate; each draws the art of an ear (kEarNoizee + 1, 3, 4)
+static inline int noizeePanelArt(int mat) { return mat == kPanelNoizee ? 11 : mat == kPanelNoizee + 1 ? 13 : mat == kPanelNoizee + 2 ? 14 : 0; }
 static int woodToPanel(int sw) { return sw >= SW_BLACK_WALNUT && sw <= SW_SHOU_SUGI_BAN ? sw - SW_BLACK_WALNUT + 1 : 0; }
 static const char* const kPanelShape[] = {"SEMI-ROUNDED", "ROUNDED", "SQUARE"};   // shown SQUARE / SEMI / ROUND
 static const float kPanelRadius[] = {6.f, 16.f, 2.f};
@@ -1090,7 +1094,7 @@ struct BackdropLayer : widget::TransparentWidget {
     // (by d = depth * 0.18), so its side and foot follow the case's own side and foot. The order makes the hidden parts
     // hide: pass 0 the shadows, pass 1 the LEFT panel's depth (then the case, which covers what of it lies behind the
     // case), pass 2 the RIGHT panel's depth (over the case's right side, which it stands in front of), pass 3 the faces.
-    void drawPanels(NVGcontext* vg, const CaseStyle& cs, math::Rect in, int mat, int shape, int finish, bool doShadow, float depthMm, int pass) {
+    void drawPanels(NVGcontext* vg, const CaseStyle& cs, math::Rect in, int mat, int shape, int finish, bool doShadow, float depthMm, int pass, bool name = true, float level = 0.f) {
         const PanelMat& pm = kPanelMat[clamp(mat, 1, kPanelMatN - 1)];
         int img = pm.tex ? tex(vg, pm.tex) : -1;
         NVGcolor avg = nvgRGB(pm.r, pm.g, pm.b);
@@ -1143,6 +1147,8 @@ struct BackdropLayer : widget::TransparentWidget {
                 nvgStrokePaint(vg, nvgLinearGradient(vg, px, py, px + pw, py + pw * 1.4f, nvgRGBA(255, 255, 255, (int) (95 * k)), nvgRGBA(0, 0, 0, (int) (120 * k))));
                 nvgStrokeWidth(vg, 1.05f); nvgStroke(vg);
             }
+            if (int art = noizeePanelArt(mat))   // NoiZee ToyZ plates: the matching ear's art (badge, backlit, circuit)
+                drawNoizeeEar(vg, art, name, px, pw, side, py, ph, py + 4.f, py + ph - 4.f, level);
             if (finish >= 1) {   // satin / gloss: a soft vertical highlight and a sheen across the top
                 float kk = finish == 2 ? 1.f : 0.45f, cx = px + pw * 0.36f, bw = std::max(3.f, pw * 0.16f);
                 nvgBeginPath(vg); nvgRoundedRect(vg, px + e * 0.5f, py + e * 0.5f, pw - e, ph - e, std::max(0.f, rad - e * 0.5f));
@@ -1720,7 +1726,7 @@ struct BackdropLayer : widget::TransparentWidget {
                         if (box && m->shadow) caseShadow(args.vg, pc, b.r, m->depthMm);
                         for (int pass = 0; pass < 4; pass++) {
                             if (pass == 2 && !m->noCase) drawCase(args.vg, pc, b.r, m->depthMm, m->shadow && !box, false, b.rows);   // CASE OFF: just the panels
-                            drawPanels(args.vg, pc, b.r, m->panelMat, m->panelShape, m->panelFinish, m->shadow, m->depthMm, pass);
+                            drawPanels(args.vg, pc, b.r, m->panelMat, m->panelShape, m->panelFinish, m->shadow, m->depthMm, pass, m->earName, std::max(m->peak[0], m->peak[1]));
                         }
                     }
                     else drawCase(args.vg, cs, b.r, m->depthMm, m->shadow, false, b.rows);
@@ -2165,7 +2171,7 @@ struct BackdropOled : widget::OpaqueWidget {
             r.push_back({"CASE", ears ? "NONE: RACK EARS ON" : clib[clamp(m->caseIdx, 0, cn - 1)].name,
                 [=](int d) { if (m->earKind > 0) m->earKind = 0; else m->caseIdx = wrap(m->caseIdx, d, cn); hand(); }, false});
             if (!ears) {
-                r.push_back({"MATERIAL", m->caseMat > 0 ? kPanelMat[clamp(m->caseMat, 0, kPanelMatN - 1)].name : "ITS OWN", [=](int d) { m->caseMat = wrap(m->caseMat, d, kPanelMatN); hand(); }, false});
+                r.push_back({"MATERIAL", m->caseMat > 0 ? kPanelMat[clamp(m->caseMat, 0, kPanelMatN - 1)].name : "ITS OWN", [=](int d) { m->caseMat = wrap(m->caseMat, d, kPanelNoizee); hand(); }, false});
                 r.push_back({"DEPTH", m->depthMm < 1.f ? "FLAT" : string::f("%d MM", (int) std::round(m->depthMm)), [=](int d) { m->depthMm = kDepthMm[clamp(di + d, 0, 8)]; hand(); }, false});
             }
             r.push_back(seg("SHADOW", {"ON", "OFF"}, m->shadow ? 0 : 1, [=](int i) { m->shadow = i == 0; }));
@@ -2183,6 +2189,7 @@ struct BackdropOled : widget::OpaqueWidget {
                 int ps = 0; for (int k = 0; k < 3; k++) if (kPanelShapeOrder[k] == m->panelShape) ps = k;
                 r.push_back(seg("SHAPE", {"SQUARE", "SEMI", "ROUND"}, ps, [=](int i) { m->panelShape = kPanelShapeOrder[i]; }));
                 r.push_back(seg("FINISH", {"OILED", "SATIN", "GLOSS"}, clamp(m->panelFinish, 0, 2), [=](int i) { m->panelFinish = i; }));
+                if (noizeePanelArt(m->panelMat)) r.push_back(seg("NAME ON PANEL", {"ON", "OFF"}, m->earName ? 0 : 1, [=](int i) { m->earName = i == 0; }));
                 r.push_back(seg("CASE", {"ON", "OFF: RAILS ONLY"}, m->noCase ? 1 : 0, [=](int i) { m->noCase = i == 1; hand(); }));
                 r.push_back(seg("BACKGROUND", {"ON", "OFF"}, m->showBg ? 0 : 1, [=](int i) { m->showBg = i == 0; hand(); }));
             }
@@ -2642,9 +2649,10 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
                 sub->addChild(createCheckMenuItem(lib[i].name, "", [=]() { return m->caseIdx == (int) i; }, [=]() { m->caseIdx = (int) i; }));
         }));
         auto matMenu = [=](Menu* sub, int* v, const char* none) {
-            for (int i = 0; i < kPanelMatN; i++) {
+            for (int i = 0; i < (v == &m->caseMat ? kPanelNoizee : kPanelMatN); i++) {   // the NoiZee plates are panel-only
                 if (i == 1) { sub->addChild(new MenuSeparator); sub->addChild(createMenuLabel("Woods")); }
                 if (i == kPanelManMade) { sub->addChild(new MenuSeparator); sub->addChild(createMenuLabel("Man-made")); }
+                if (i == kPanelNoizee) { sub->addChild(new MenuSeparator); sub->addChild(createMenuLabel("NoiZee ToyZ")); }
                 sub->addChild(createCheckMenuItem(i ? kPanelMat[i].name : none, "", [=]() { return *v == i; }, [=]() { *v = i; m->themeIdx = -1; if (v == &m->panelMat && i > 0) m->earKind = 0; }));
             }
         };
