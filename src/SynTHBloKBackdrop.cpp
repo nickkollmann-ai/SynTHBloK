@@ -1234,7 +1234,7 @@ struct BackdropLayer : widget::TransparentWidget {
     // ---- RACK EARS: on each end of the case (outside the side panels, if there are any)
     // With ears there is no case: an open rack, just Rack's rails, whose ends screw straight onto the ears. So the ears
     // sit right at the ends of the module rows, and their slots line up with each row's rails.
-    void drawEars(NVGcontext* vg, math::Rect in, int kind, bool name, int shape, bool doShadow, const std::vector<float>& rowTops, float level) {
+    void drawEars(NVGcontext* vg, math::Rect in, int kind, bool name, int shape, bool doShadow, const std::vector<float>& rowTops, float level, float depthMm) {
         const EarFin& ef = kEarFin[clamp(kind, 1, kEarFinN - 1)];
         NVGcolor c = nvgRGB(ef.r, ef.g, ef.b);
         float x = in.pos.x, y = in.pos.y, w = in.size.x, h = in.size.y;
@@ -1262,6 +1262,22 @@ struct BackdropLayer : widget::TransparentWidget {
                 nvgBeginPath(vg); nvgRect(vg, ox - 30.f, y - 30.f, ow + 80.f, h + 80.f);
                 nvgFillPaint(vg, nvgBoxGradient(vg, ox + 6.f, y + 8.f, ow, h, 2.f, 12.f, nvgRGBA(0, 0, 0, 140), nvgRGBA(0, 0, 0, 0)));
                 nvgFill(vg);
+            }
+            // the WING: the side of the L running back along the modules, as deep as the case setting (swept to the lower
+            // right like the case). The left wing goes in behind the modules, so it shows below the bottom row; the
+            // right one runs behind its plate and shows below it.
+            {
+                float d = std::max(6.f, mm2px(depthMm) * 0.18f);
+                int nw = std::max(2, std::min(24, (int) (d / 1.5f)));
+                for (int k = nw; k >= 1; k--) {
+                    float o = d * k / nw;
+                    nvgBeginPath(vg); nvgRect(vg, lx + o, y + o, lip, h);
+                    nvgFillColor(vg, nvgLerpRGBA(c, nvgRGB(0, 0, 0), 0.45f + 0.25f * k / nw)); nvgFill(vg);
+                    if (brushed >= 0 && ef.brushed > 0.f) { nvgFillPaint(vg, nvgImagePattern(vg, lx, y, 300.f, 300.f, (float) M_PI * 0.5f, brushed, ef.brushed * 0.35f)); nvgFill(vg); }
+                }
+                // the plate's own thickness (sheet metal), a dark edge below and to the right
+                nvgSave(vg); nvgTranslate(vg, 1.8f, 1.8f); platePath(px, side); nvgRestore(vg);
+                nvgFillColor(vg, nvgLerpRGBA(c, nvgRGB(0, 0, 0), 0.65f)); nvgFill(vg);
             }
             // plate: the colour, brushed grain, then a subtle shade from the bend (inside, darker) to the outer edge,
             // and a faint fall-off from top to bottom
@@ -1697,7 +1713,7 @@ struct BackdropLayer : widget::TransparentWidget {
                 for (const Block& b : bl) {
                     // either side panels on a case, or rack ears on an open rack (no case: the rails screw onto the
                     // ears); never both (ears win in an old patch with both)
-                    if (m->earKind > 0) { drawEars(args.vg, b.r, m->earKind, m->earName, m->earShape, m->shadow, b.rows, std::max(m->peak[0], m->peak[1])); continue; }
+                    if (m->earKind > 0) { drawEars(args.vg, b.r, m->earKind, m->earName, m->earShape, m->shadow, b.rows, std::max(m->peak[0], m->peak[1]), m->depthMm); continue; }
                     if (m->panelMat > 0) {   // side panels replace the case's own ends (they come back when the panels go)
                         CaseStyle pc = cs; pc.side = 2.f; pc.ends = E_SQUARE;
                         bool box = !m->noCase && !(pc.extras & X_OPEN);

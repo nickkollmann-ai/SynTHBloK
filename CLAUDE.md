@@ -124,7 +124,8 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   Side panels XOR rack ears: picking one turns the other off. With ears there is NO case: an open rack, Rack's rails screwing
   straight onto the ears (ears at the row ends; a round hole + our socket screw, 23 px = 10-32 cap, only at the very top and bottom rails). With side
   panels on, the case's own ends are hidden (drawn 2 px, square); they come back when the panels go. Ears are 92 px wide,
-  STRAIGHT or CONTOURED (earShape: rounded top and bottom outer corners, 18 px). NoiZee ToyZ ears (isNoizee: index >= 10):
+  STRAIGHT or CONTOURED (earShape: rounded top and bottom outer corners, 18 px). Each ear's wing (the L's side) runs
+  back as deep as DEPTH (swept like the case; shows below the rows / plates), and the plate shows a sheet-metal edge. NoiZee ToyZ ears (isNoizee: index >= 10):
   NOIZEE TOYZ = big wordmark + orange rule, then BADGE (hex Z logo), ENGRAVED (etched raw alu), BACKLIT (slots + name lit
   orange, glow follows BACKDROP's audio input), CIRCUIT (the logo's line + lightning Z); earName hides the name only. END SHAPE / END WIDTH are gone: cases keep their ends.
   Man-made textures: `make_wood_textures.py mats` -> res/cases/mat_*.png. RACK EARS (kEarFin): L-shaped brackets, a lip
