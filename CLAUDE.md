@@ -139,7 +139,14 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   BG / COLOUR (swatches) / IMAGE (NONE, LOAD FILE, MY FOLDER, the 50 IMAGE BANK thumbnails, then MY IMAGES) / PRESET. CASE:
   CASE / MATERIAL / DEPTH / SHADOW. SIDES: OFF / PANELS / EARS act at once, then MATERIAL-or-FINISH / SHAPE / (FINISH) / MORE.
   NAME: the field, SHOW / HIDE, USE FILE NAME, COLLAPSE. IMAGE BANK: res/bank/bank_NN.jpg (full size, the background) + thumb_NN.jpg
-  (192 px, the OLED keys): 44 pictures Nick chose (Nov 2026, replacing the first 50; black letterbox bars trimmed), numbered darkest first; bankImg 1..44.
+  (192 px, the OLED keys): 69 pictures (Nov 2026): 44 Nick chose + 25 more from his Midjourney
+  in the same style (3 full pages of the IMAGE grid); letterbox bars trimmed, numbered darkest first; bankImg 1..69.
+  LOOK tabs: BG / COLOUR / IMAGE / THEME / PRESET (grid() maps them to its old numbers). lookOn: the BG look shows;
+  BG > OFF (the first key on every BG page) shows a loaded picture in its place; picking a picture turns the look off,
+  a theme or a look turns it back on (the picture stays loaded). Old patches without lookOn: on unless a picture was loaded.
+  Collapsed, the face fills the gap by itself (growStep): from 7 HP up to its full 12 HP over the free space on its right;
+  while any module is dragged or added it drops to 7 HP so one can go there (foldHp; folded tracks the state, not the width).
+  The four top tabs are square keys with 4 px rounded corners (tabRect/tabSide).
   COLLAPSE: 7 HP, the modules' face with a tall strip of the current background and an EXPAND key (expanding pushes
   neighbours with setModulePosForce); presets keep the module's fold. FILL (blankFill): collapsing makes a 5 HP BLANK in the void,
   right of BACKDROP or left (BACKDROP shifts right); that BLANK has lockedTo = the BACKDROP's id (no resizing; freed if the

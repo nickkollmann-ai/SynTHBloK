@@ -310,6 +310,7 @@ static std::vector<int> showOrder(const int* o, int on, int n) {
 struct SynTHBloKBackdrop : Module {
     // settings (saved with the patch)
     bool showBg = true;
+    bool lookOn = true;       // Nov 2026: the BG look shows; off (BG > OFF), a loaded picture shows in its place
     int look = LOOK_GRADIENT;   // loads as the SynTHBloK black gradient (theme 0), no grid
     int colorIdx = 0;
     std::string imagePath;
@@ -347,6 +348,7 @@ struct SynTHBloKBackdrop : Module {
     json_t* dataToJson() override {
         json_t* r = json_object();
         json_object_set_new(r, "showBg", json_boolean(showBg));
+        json_object_set_new(r, "lookOn", json_boolean(lookOn));
         json_object_set_new(r, "look", json_integer(look));
         json_object_set_new(r, "theme", json_integer(themeIdx));
         json_object_set_new(r, "color", json_integer(colorIdx));
@@ -430,6 +432,9 @@ struct SynTHBloKBackdrop : Module {
         if (json_t* v = json_object_get(r, "rails")) rails = json_boolean_value(v);
         if (json_t* v = json_object_get(r, "showTitle")) showTitle = json_boolean_value(v);
         if (json_t* v = json_object_get(r, "title")) title = json_string_value(v);
+        // before lookOn, a loaded picture covered the look: keep showing it
+        if (json_t* v = json_object_get(r, "lookOn")) lookOn = json_boolean_value(v);
+        else lookOn = imagePath.empty() && bankImg <= 0;
     }
 };
 
@@ -440,7 +445,7 @@ namespace {
 // ---------------------------------------------------------------------------------------------------------
 // IMAGE BANK (Nov 2026): 50 pictures shipped with the plugin (res/bank/bank_NN.jpg + thumb_NN.jpg), from Nick's own
 // abstract artwork; picked on the OLED's IMAGE page. Saved by number (bankImg), so patches move between machines.
-static const int kBankN = 44;
+static const int kBankN = 69;
 static std::string bankPath(int n) { return asset::plugin(pluginInstance, string::f("res/bank/bank_%02d.jpg", clamp(n, 1, kBankN))); }
 static std::string bankThumbPath(int n) { return asset::plugin(pluginInstance, string::f("res/bank/thumb_%02d.jpg", clamp(n, 1, kBankN))); }
 static std::string bgImagePath(SynTHBloKBackdrop* m) { return !m->imagePath.empty() ? m->imagePath : m->bankImg > 0 ? bankPath(m->bankImg) : std::string(); }
@@ -1731,8 +1736,8 @@ struct BackdropLayer : widget::TransparentWidget {
         for (const Block& b : bl) holes.insert(holes.end(), b.rowRects.begin(), b.rowRects.end());
         if (m->showBg)
             outside(args.vg, v, holes, [&]() {
-                drawLook(args.vg, v, m->look, col, cs.material == M_NONE ? col : cs.base);
-                drawImage(args, v);
+                if (m->lookOn) drawLook(args.vg, v, m->look, col, cs.material == M_NONE ? col : cs.base);
+                else drawImage(args, v);   // BG OFF: the loaded picture shows in the look's place
             });
         if (cs.material != M_NONE || m->earKind > 0)
             outside(args.vg, v, holes, [&]() {
@@ -2035,7 +2040,7 @@ static const int kThemeN = (int) (sizeof(kThemes) / sizeof(kThemes[0]));
 static void applyTheme(SynTHBloKBackdrop* m, int i) {
     i = ((i % kThemeN) + kThemeN) % kThemeN;
     const Theme& t = kThemes[i];
-    m->look = t.look; m->colorIdx = t.color; m->depthMm = t.depthMm; m->showBg = true;
+    m->look = t.look; m->colorIdx = t.color; m->depthMm = t.depthMm; m->showBg = true; m->lookOn = true;   // the theme's look shows (a loaded picture waits under BG > OFF)
     m->sideShape = m->sideMat = m->sideWidth = m->openMode = 0;
     m->panelMat = woodToPanel(t.sideMat); m->panelFinish = clamp(t.sideFinish, 0, 2);   // a theme's wood goes on the side panels
     m->earKind = m->panelMat > 0 ? 0 : clamp(t.ear, 0, kEarFinN - 1); m->earShape = clamp(t.earShape, 0, 1);
@@ -2072,11 +2077,11 @@ static const std::vector<std::string>& cachedList(int which) {
 static std::vector<std::string> myImages() { return cachedList(0); }
 static std::vector<std::string> myPresets() { return cachedList(1); }
 static void useImage(SynTHBloKBackdrop* m, const std::string& path) {
-    m->imagePath = path; m->bankImg = 0; m->showBg = true;
+    m->imagePath = path; m->bankImg = 0; m->showBg = true; m->lookOn = false;   // a picture shows in the look's place
     m->fit = 1; m->imgScale = 1.f; m->imgW = m->imgH = 1.f; m->imgX = m->imgY = 0.f;   // snap it in, every time
 }
 static void useBank(SynTHBloKBackdrop* m, int n) {
-    m->imagePath.clear(); m->bankImg = clamp(n, 1, kBankN); m->showBg = true;
+    m->imagePath.clear(); m->bankImg = clamp(n, 1, kBankN); m->showBg = true; m->lookOn = false;
     m->fit = 1; m->imgScale = 1.f; m->imgW = m->imgH = 1.f; m->imgX = m->imgY = 0.f;
 }
 static void loadPreset(SynTHBloKBackdrop* m, const std::string& path) {
@@ -2122,7 +2127,7 @@ struct BackdropOled : widget::OpaqueWidget {
     void* owner = NULL;   // the module widget: for the status light in the NAME tab
     // OLED v3 (Nov 2026): tabs, the live preview, a row of CATEGORY keys, and the chosen category's choices below as a
     // grid of square keys, in numbered pages (no stepping or scrolling through lists)
-    static constexpr float kTabH = 14.f, kPad = 3.f, kPrevH = 34.f, kCatH = 13.f, kPageH = 12.f, kGap = 1.f;
+    static constexpr float kPad = 3.f, kPrevH = 34.f, kCatH = 13.f, kPageH = 12.f, kGap = 1.f;
     static const int kPages = 4;   // LOOK, CASE, SIDES, NAME
     static const int kNamePage = 3;
     int page = 0, cat[kPages] = {0, 0, 0, 0}, pg = 0, hoverKey = -1, hoverCat = -1, hoverPg = -1, hoverTab = -1;
@@ -2131,7 +2136,7 @@ struct BackdropOled : widget::OpaqueWidget {
     struct Grid { std::vector<Item> items; int cols; float keyH; };
     std::vector<std::string> cats() {
         SynTHBloKBackdrop* m = module;
-        if (page == 0) return {"THEME", "BG", "COLOUR", "IMAGE", "PRESET"};
+        if (page == 0) return {"BG", "COLOUR", "IMAGE", "THEME", "PRESET"};
         if (page == 1) return {"CASE", "MATERIAL", "DEPTH", "SHADOW"};
         if (page == 2) {
             if (m && m->earKind > 0) return {"OFF", "PANELS", "EARS", "FINISH", "SHAPE", "MORE"};
@@ -2160,17 +2165,24 @@ struct BackdropOled : widget::OpaqueWidget {
         auto addSw = [&](NVGcolor c, bool on, std::function<void()> f) { Item it; it.sw = c; it.hasSw = true; it.on = on; it.act = f; g.items.push_back(it); };
         auto addThumb = [&](const std::string& t, bool on, std::function<void()> f) { Item it; it.thumb = t; it.hasSw = false; it.on = on; it.act = f; g.items.push_back(it); };
         int c = cat[page];
+        if (page == 0) { static const int kLookCat[5] = {1, 2, 3, 0, 4}; c = kLookCat[clamp(c, 0, 4)]; }
         if (page == 0) {
             if (c == 0) { for (int i : SHOW_ORDER(kOrderTheme, kThemeN)) add(kThemes[i].name, m->themeIdx == i, [=]() { applyTheme(m, i); }); }
             else if (c == 1) {
-                add("OFF", !m->showBg, [=]() { m->showBg = false; hand(); });
-                for (int i : SHOW_ORDER(kOrderLook, kLookN)) add(kLookShort[i], m->showBg && m->look == i, [=]() { m->look = i; m->showBg = true; hand(); });
+                // OFF leads every page: the look goes, and a loaded picture (IMAGE) shows in its place
+                std::vector<int> ord = SHOW_ORDER(kOrderLook, kLookN);
+                int pp = std::max(2, perPage(g));
+                for (size_t q = 0; q < ord.size(); q++) {
+                    if ((int) (g.items.size() % pp) == 0) add("OFF", !m->lookOn || !m->showBg, [=]() { m->lookOn = false; m->showBg = true; hand(); });
+                    int i = ord[q];
+                    add(kLookShort[i], m->showBg && m->lookOn && m->look == i, [=]() { m->look = i; m->showBg = true; m->lookOn = true; hand(); });
+                }
             }
             else if (c == 2) { g.cols = 4; g.keyH = 20.f; for (int i : SHOW_ORDER(kOrderColor, kColorN)) addSw(kColor[i], m->colorIdx == i, [=]() { m->colorIdx = i; hand(); }); }
             else if (c == 3) {   // IMAGE: the bank of built-in pictures, then the person's own (MY IMAGES), and loading one
                 g.cols = 3; g.keyH = 22.f;
                 bool none = m->imagePath.empty() && m->bankImg <= 0;
-                add("NONE", none, [=]() { m->imagePath.clear(); m->bankImg = 0; });
+                add("NONE", none, [=]() { m->imagePath.clear(); m->bankImg = 0; m->lookOn = true; });
                 add("LOAD FILE", false, [=]() {
                     osdialog_filters* f = osdialog_filters_parse("Images:png,jpg,jpeg,bmp,gif");
                     char* path = osdialog_file(OSDIALOG_OPEN, myImagesDir().c_str(), NULL, f);
@@ -2236,7 +2248,12 @@ struct BackdropOled : widget::OpaqueWidget {
     }
     std::function<void()> onCollapse;
     // geometry
-    float catY() { return kTabH + 3.f + kPrevH + 3.f; }
+    // the four tabs (Nov 2026): square keys with contoured (rounded) corners, in a row across the top
+    static constexpr float kTabGap = 2.f, kTabR = 4.f;
+    float tabSide() { return (box.size.x - 2.f * kPad - 3.f * kTabGap) / kPages; }
+    math::Rect tabRect(int k) { float s = tabSide(); return math::Rect(Vec(kPad + k * (s + kTabGap), 1.f), Vec(s, s)); }
+    float tabH() { return tabSide() + 1.f; }
+    float catY() { return tabH() + 3.f + kPrevH + 3.f; }
     float gridY() { return page == kNamePage ? catY() + 16.f : catY() + kCatH + 9.f; }
     float pagerY() { return box.size.y - kPageH - 2.f; }
     int perPage(const Grid& g) { int rows = std::max(1, (int) ((pagerY() - 3.f - gridY() + kGap) / (g.keyH + kGap))); return rows * g.cols; }
@@ -2276,7 +2293,7 @@ struct BackdropOled : widget::OpaqueWidget {
     }
     void hit(Vec p, int& tab, int& c, int& key, int& pgk) {
         tab = c = key = pgk = -1;
-        if (p.y < kTabH) { tab = clamp((int) (p.x / tabW()), 0, kPages - 1); return; }
+        if (p.y < tabH()) { for (int k = 0; k < kPages; k++) if (tabRect(k).contains(p)) tab = k; return; }
         std::vector<math::Rect> cr = catRects();
         for (size_t i = 0; i < cr.size(); i++) if (cr[i].contains(p)) { c = (int) i; return; }
         Grid g = grid(); int n = pageCount(g), cp = curPage(g), pp = perPage(g);
@@ -2334,7 +2351,7 @@ struct BackdropOled : widget::OpaqueWidget {
         nvgBeginPath(vg); nvgRect(vg, x, y, w, h);
         NVGcolor bg = m ? kColor[clamp(m->colorIdx, 0, kColorN - 1)] : nvgRGB(10, 10, 12);
         nvgFillColor(vg, nvgLerpRGBA(bg, nvgRGB(0, 0, 0), 0.2f)); nvgFill(vg);
-        if (m && m->showBg && m->look >= LOOK_ART) {
+        if (m && m->showBg && m->lookOn && m->look >= LOOK_ART) {
             int k = clamp(m->look - LOOK_ART, 0, kArtN - 1);
             if (prevVg != vg || prevLook != k) {
                 if (prevImg >= 0 && prevVg == vg) nvgDeleteImage(vg, prevImg);
@@ -2343,7 +2360,7 @@ struct BackdropOled : widget::OpaqueWidget {
             }
             if (prevImg >= 0) { nvgFillPaint(vg, nvgImagePattern(vg, x, y - (w * 0.625f - h) * 0.5f, w, w * 0.625f, 0.f, prevImg, 1.f)); nvgFill(vg); }
         }
-        if (m && m->showBg) {   // a picture (the bank's or the person's own) over the look, as in the rack
+        if (m && m->showBg && !m->lookOn) {   // BG OFF: the picture (the bank's or the person's own), as in the rack
             std::string ip = m->imagePath.empty() && m->bankImg > 0 ? bankThumbPath(m->bankImg) : m->imagePath;
             int img = ip.empty() ? -1 : thumbImg(vg, ip);
             if (img >= 0) {
@@ -2408,8 +2425,9 @@ struct BackdropOled : widget::OpaqueWidget {
         nvgStroke(args.vg);
     }
     // a square key: softly backlit, brighter when hovered, brightest (with a lit rim) when on
-    void keyBox(NVGcontext* vg, math::Rect r, bool on, bool hot) {
-        nvgBeginPath(vg); nvgRect(vg, r.pos.x, r.pos.y, r.size.x, r.size.y);
+    void keyBox(NVGcontext* vg, math::Rect r, bool on, bool hot, float radius = 0.f) {
+        nvgBeginPath(vg);
+        if (radius > 0.f) nvgRoundedRect(vg, r.pos.x, r.pos.y, r.size.x, r.size.y, radius); else nvgRect(vg, r.pos.x, r.pos.y, r.size.x, r.size.y);
         nvgFillColor(vg, oled::amber(on ? 150 : hot ? 52 : 30)); nvgFill(vg);
         nvgStrokeColor(vg, oled::amber(on ? 235 : hot ? 150 : 90)); nvgStrokeWidth(vg, 0.6f); nvgStroke(vg);
     }
@@ -2433,20 +2451,20 @@ struct BackdropOled : widget::OpaqueWidget {
         // tabs
         static const char* const tabs[kPages] = {"LOOK", "CASE", "SIDES", "NAME"};
         for (int k = 0; k < kPages; k++) {
-            math::Rect r(Vec(k * tabW() + 0.3f, 0.6f), Vec(tabW() - 0.6f, kTabH - 1.2f));
-            keyBox(vg, r, k == page, k == hoverTab);
+            math::Rect r = tabRect(k);
+            keyBox(vg, r, k == page, k == hoverTab, kTabR);
             if (k == kNamePage) {   // the status light: amber while this BACKDROP dresses the rack, red if another one does
                 bool mine = !module || gOwner == owner;
-                float cx = r.pos.x + 6.f, cy = kTabH * 0.5f;
+                float cx = r.pos.x + r.size.x * 0.5f, cy = r.pos.y + r.size.y * 0.3f;
                 NVGcolor lc = mine ? nvgRGB(255, 190, 90) : nvgRGB(220, 50, 35);
                 nvgBeginPath(vg); nvgCircle(vg, cx, cy, 4.f);
                 nvgFillPaint(vg, nvgRadialGradient(vg, cx, cy, 0.8f, 4.f, nvgTransRGBA(lc, 150), nvgRGBA(0, 0, 0, 0))); nvgFill(vg);
                 nvgBeginPath(vg); nvgCircle(vg, cx, cy, 1.5f); nvgFillColor(vg, lc); nvgFill(vg);
-                r.pos.x += 5.f; r.size.x -= 5.f;
+                r.pos.y += r.size.y * 0.25f;
             }
             keyText(vg, r, tabs[k], k == page, 6.6f);
         }
-        drawPreview(vg, kPad, kTabH + 3.f, W - 2.f * kPad, kPrevH);
+        drawPreview(vg, kPad, tabH() + 3.f, W - 2.f * kPad, kPrevH);
         // categories
         std::vector<std::string> cs = cats(); std::vector<math::Rect> cr = catRects();
         int mc = modeCat();
@@ -2601,8 +2619,8 @@ struct BackdropFace : widget::TransparentWidget {
         nvgFillPaint(vg, nvgLinearGradient(vg, 0, sy, 0, sy + sh, nvgLerpRGBA(col, nvgRGB(255, 255, 255), 0.1f), nvgLerpRGBA(col, nvgRGB(0, 0, 0), 0.5f))); nvgFill(vg);
         std::string p;
         if (m && m->showBg) {
-            p = bgImagePath(m);
-            if (p.empty() && m->look >= LOOK_ART) p = asset::plugin(pluginInstance, string::f("res/backdrops/%s.jpg", kArtFile[clamp(m->look - LOOK_ART, 0, kArtN - 1)]));
+            if (!m->lookOn) p = bgImagePath(m);
+            else if (m->look >= LOOK_ART) p = asset::plugin(pluginInstance, string::f("res/backdrops/%s.jpg", kArtFile[clamp(m->look - LOOK_ART, 0, kArtN - 1)]));
         }
         if (!p.empty()) {
             if (imgVg != vg || imgPath != p) { if (img >= 0 && imgVg == vg) nvgDeleteImage(vg, img); img = nvgCreateImage(vg, p.c_str(), 0); imgPath = p; imgVg = vg; }
@@ -2701,6 +2719,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         if (c) {
             Vec p = box.pos;
             m->collapsed = true;
+            foldHp = 7; growTick = 0;
             if (m->blankFill == 2) box.pos.x += gap;   // the blank goes on the left: BACKDROP shifts right into place
             fold(false);
             m->blankId = -1;
@@ -2727,10 +2746,31 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
             fold(true);
         }
     }
+    // COLLAPSED, IT FILLS THE GAP (Nov 2026): the folded face stretches by itself over the free space to its right, from
+    // 7 HP up to its full 12 HP; while any module is being dragged (or added from the browser) it drops back to 7 HP so
+    // there is room to put one there, then fills whatever is left
+    bool folded = false;
+    int foldHp = 7, growTick = 0;
+    void growStep() {
+        if (!APP->scene || !APP->scene->rack || ++growTick < 6) return;
+        growTick = 0;
+        int want = 7;
+        bool dragging = APP->event && dynamic_cast<app::ModuleWidget*>(APP->event->draggedWidget) != NULL;
+        if (!dragging) {
+            float nx = box.pos.x + RACK_GRID_WIDTH * 12.f;   // never wider than the full module
+            for (app::ModuleWidget* mw : APP->scene->rack->getModules()) {
+                if (mw == this || std::fabs(mw->box.pos.y - box.pos.y) > 1.f) continue;
+                if (mw->box.pos.x > box.pos.x + 1.f) nx = std::min(nx, mw->box.pos.x);
+            }
+            want = clamp((int) std::floor((nx - box.pos.x) / RACK_GRID_WIDTH + 0.01f), 7, 12);
+        }
+        if (want != foldHp) { foldHp = want; fold(false); }
+    }
     void fold(bool push) {
         SynTHBloKBackdrop* m = dynamic_cast<SynTHBloKBackdrop*>(module);
         bool c = m && m->collapsed;
-        float w = RACK_GRID_WIDTH * (c ? 7.f : 12.f);
+        folded = c;
+        float w = RACK_GRID_WIDTH * (c ? (float) foldHp : 12.f);
         if (box.size.x != w) {
             box.size.x = w;
             if (push && APP->scene && APP->scene->rack) APP->scene->rack->setModulePosForce(this, box.pos);
@@ -2739,7 +2779,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         if (oled) oled->visible = !c;
         if (nameField && c) nameField->visible = false;
         if (face) { face->visible = c; face->box.size = box.size; }
-        if (expand) expand->visible = c;
+        if (expand) { expand->visible = c; expand->box.pos.x = (w - expand->box.size.x) * 0.5f; }
         for (int k = 0; k < 4; k++) if (screws[k]) screws[k]->box.pos.x = ((k & 1) ? w - mm2px(3.5f) : mm2px(3.5f)) - screws[k]->box.size.x * 0.5f;
     }
     // CASE SNAPSHOTS (a dev aid): if Rack's user folder holds SynTHBloK/snap_cases.txt when this BACKDROP opens, it
@@ -2792,7 +2832,8 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         ModuleWidget::step();
         SynTHBloKBackdrop* m = getModule<SynTHBloKBackdrop>();
         if (!m) return;
-        if ((box.size.x < RACK_GRID_WIDTH * 9.f) != m->collapsed) fold(false);   // a patch or preset changed it
+        if (folded != m->collapsed) fold(false);   // a patch or preset changed it
+        if (m->collapsed) growStep();
         // take the rack if no BACKDROP has it: the layer goes just above Rack's rails (its first child)
         if (!gOwner && APP->scene && APP->scene->rack && !APP->scene->rack->children.empty()) {
             gLayer = new BackdropLayer;
@@ -2819,8 +2860,9 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         menu->addChild(createMenuLabel("BACKGROUND"));
         menu->addChild(createBoolPtrMenuItem("Draw the background", "", &m->showBg));
         menu->addChild(createSubmenuItem("Look", kLookName[clamp(m->look, 0, kLookN - 1)], [=](Menu* sub) {   // darkest first
+            sub->addChild(createCheckMenuItem("Off (a loaded picture shows instead)", "", [=]() { return !m->lookOn; }, [=]() { m->lookOn = false; m->themeIdx = -1; }));
             for (int i : SHOW_ORDER(kOrderLook, kLookN))
-                sub->addChild(createCheckMenuItem(kLookName[i], "", [=]() { return m->look == i; }, [=]() { m->look = i; m->themeIdx = -1; }));
+                sub->addChild(createCheckMenuItem(kLookName[i], "", [=]() { return m->lookOn && m->look == i; }, [=]() { m->look = i; m->lookOn = true; m->themeIdx = -1; }));
         }));
         menu->addChild(createSubmenuItem("Colour", kColorName[clamp(m->colorIdx, 0, kColorN - 1)], [=](Menu* sub) {
             for (int i : SHOW_ORDER(kOrderColor, kColorN))
@@ -2854,7 +2896,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
             char* path = osdialog_file(OSDIALOG_OPEN, NULL, NULL, f);
             osdialog_filters_free(f);
             if (path) {
-                m->imagePath = path; std::free(path);
+                m->imagePath = path; std::free(path); m->bankImg = 0; m->lookOn = false;
                 m->fit = 1; m->imgScale = 1.f; m->imgW = m->imgH = 1.f; m->imgX = m->imgY = 0.f;   // snap it in, every time
             }
         }));
@@ -2871,7 +2913,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
                 sub->addChild(pctSlider("X offset", &m->imgX, -1.f, 1.f, 0.f));
                 sub->addChild(pctSlider("Y offset", &m->imgY, -1.f, 1.f, 0.f));
             }));
-            menu->addChild(createMenuItem("Clear the image", "", [=]() { m->imagePath.clear(); m->bankImg = 0; }));
+            menu->addChild(createMenuItem("Clear the image", "", [=]() { m->imagePath.clear(); m->bankImg = 0; m->lookOn = true; }));
         }
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("CASE"));
