@@ -683,6 +683,7 @@ footer .nav:hover{border-color:var(--cy)}
 #cm-svg .dial .arcs{fill:none;stroke:#00e5ff;stroke-width:1.6;opacity:.75}
 #cm-svg .dial .load{fill:none;stroke-width:2;stroke-linecap:round;transition:stroke .6s;filter:drop-shadow(0 0 2px currentColor)}
 #cm-svg .dial .core{fill:#00e5ff;opacity:.8}
+#cm-svg .dial .ring2{fill:none;stroke:#3dff9a;stroke-width:1;stroke-dasharray:1.5 3;opacity:.5}
 #cm-svg .node .glow{transition:opacity .6s}
 #cm-svg .node text{font:600 8px var(--mono,monospace);letter-spacing:.12em;fill:#8fb3bf}
 #cm-svg .node .v{font:600 9.5px var(--mono,monospace);fill:#e6f4f8;letter-spacing:.02em}
@@ -719,7 +720,7 @@ footer .nav:hover{border-color:var(--cy)}
 #think-body .card{padding:8px 10px!important;font-size:10.5px}
 #core-deck{grid-template-columns:minmax(330px,1fr) minmax(0,2.1fr) minmax(250px,.75fr)!important}
 #core-deck .cd{padding:6px 10px 6px!important}
-#cm-svg{height:150px!important}
+#cm-svg{height:172px!important}
 #core-gg{grid-template-columns:repeat(8,minmax(0,1fr))!important;gap:4px!important}
 .gk{text-align:center}.gk svg{width:100%;max-width:118px;height:auto;display:block;margin:0 auto;overflow:visible}
 .gk .va{transition:stroke-dasharray .9s cubic-bezier(.2,.8,.2,1),stroke .6s}
@@ -4070,9 +4071,10 @@ function gkSet(id, frac, val, unit, sub, hot) {
   // living map: each part of the PC is a small THINKING dial (tick ring, load arc, a dashed ring and inner arcs that
   // spin with its load, a radar sweep) with one dot per data flow orbiting it, each at that flow's speed; the dots
   // travelling the links between the dials still show the traffic
-  const N = { cpu: [260, 100, 'CPU'], ram: [130, 38, 'MEMORY'], gpu: [390, 38, 'GPU'], c: [130, 162, 'C: DRIVE'], f: [390, 162, 'F: DRIVE'], net: [470, 100, 'NETWORK'], scr: [50, 100, 'SCREEN'] };
+  // two rows, bigger dials (R 27), the links short and straight between neighbours so the traffic still shows
+  const N = { scr: [65, 50, 'SCREEN'], gpu: [195, 50, 'GPU'], cpu: [325, 50, 'CPU'], net: [455, 50, 'NETWORK'], f: [130, 146, 'F: DRIVE'], c: [260, 146, 'C: DRIVE'], ram: [390, 146, 'MEMORY'] };
   const L = [['cpu', 'ram'], ['cpu', 'gpu'], ['ram', 'c'], ['c', 'f'], ['cpu', 'net'], ['gpu', 'scr'], ['cpu', 'c']];
-  const svg = document.getElementById('cm-svg'), R = 17;
+  const svg = document.getElementById('cm-svg'), R = 27;
   const arc = (x, y, r, a0, a1) => { const p = a => [x + r * Math.cos(a), y + r * Math.sin(a)], [x0, y0] = p(a0), [x1, y1] = p(a1);
     return `M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`; };
   let s = '<defs><radialGradient id="cmglow"><stop offset="0" stop-color="#00e5ff" stop-opacity=".55"/><stop offset="1" stop-color="#00e5ff" stop-opacity="0"/></radialGradient>' +
@@ -4080,21 +4082,22 @@ function gkSet(id, frac, val, unit, sub, hot) {
   L.forEach(([a, b]) => { const p = N[a], q = N[b]; s += `<path class="link" d="M${p[0]} ${p[1]} L${q[0]} ${q[1]}"/>`; });
   s += '<g id="cm-dots"></g>';
   for (const k in N) { const [x, y, t] = N[k];
-    let ticks = ''; for (let i = 0; i < 36; i++) { const a = i / 36 * 2 * Math.PI, r0 = i % 9 ? R + 2.5 : R + 1.5, r1 = R + 4;
+    let ticks = ''; for (let i = 0; i < 48; i++) { const a = i / 48 * 2 * Math.PI, r0 = i % 12 ? R + 3 : R + 1.5, r1 = R + 5;
       ticks += `M${(x + r0 * Math.cos(a)).toFixed(1)} ${(y + r0 * Math.sin(a)).toFixed(1)}L${(x + r1 * Math.cos(a)).toFixed(1)} ${(y + r1 * Math.sin(a)).toFixed(1)}`; }
-    s += `<g class="node dial" id="cmn-${k}"><circle class="glow" cx="${x}" cy="${y}" r="30" fill="url(#cmglow)" opacity=".2"/>
+    s += `<g class="node dial" id="cmn-${k}"><circle class="glow" cx="${x}" cy="${y}" r="${R + 12}" fill="url(#cmglow)" opacity=".2"/>
       <circle class="disc" cx="${x}" cy="${y}" r="${R}"/><path class="ticks" d="${ticks}"/>
       <path class="sweep" d="M${x} ${y} L${x + R - 2} ${y} A${R - 2} ${R - 2} 0 0 1 ${(x + (R - 2) * Math.cos(.7)).toFixed(1)} ${(y + (R - 2) * Math.sin(.7)).toFixed(1)} Z" fill="url(#cmsweep)"/>
-      <circle class="ring" cx="${x}" cy="${y}" r="${R - 5}"/>
-      <path class="arcs" d="${arc(x, y, R - 9, 0, 1.6)} ${arc(x, y, R - 9, Math.PI, Math.PI + 1.6)}"/>
-      <path class="load" d=""/><g class="orb"></g><circle class="core" cx="${x}" cy="${y}" r="2"/>
-      <text x="${x}" y="${y - R - 6}" text-anchor="middle">${t}</text><text class="v" id="cmv-${k}" x="${x}" y="${y + R + 12}" text-anchor="middle">-</text></g>`; }
+      <circle class="ring" cx="${x}" cy="${y}" r="${R - 7}"/>
+      <path class="arcs" d="${arc(x, y, R - 13, 0, 1.6)} ${arc(x, y, R - 13, Math.PI, Math.PI + 1.6)}"/>
+      <circle class="ring2" cx="${x}" cy="${y}" r="${R - 18}"/>
+      <path class="load" d=""/><g class="orb"></g><circle class="core" cx="${x}" cy="${y}" r="3"/>
+      <text x="${x}" y="${y - R - 8}" text-anchor="middle">${t}</text><text class="v" id="cmv-${k}" x="${x}" y="${y + R + 15}" text-anchor="middle">-</text></g>`; }
   svg.innerHTML = s;
   const dotsG = document.getElementById('cm-dots');
   const flows = L.map(([a, b]) => ({ a: N[a], b: N[b], ka: a, kb: b, rate: 0, dots: [], key: a + '-' + b }));
   const flowOf = k => flows.find(f => f.key === k);
   // each dial: its load (set by coreLive), spin angles, and one orbiting dot per flow it takes part in
-  const D = {}; for (const k in N) D[k] = { load: 0, rot: Math.random() * 6, arcs: 0, sweep: Math.random() * 6, orbs: flows.filter(f => f.ka === k || f.kb === k).map((f, i, all) => ({ f, a: i / all.length * 2 * Math.PI, r: R - 1 - (i % 2) * 4 })) };
+  const D = {}; for (const k in N) D[k] = { load: 0, rot: Math.random() * 6, arcs: 0, sweep: Math.random() * 6, orbs: flows.filter(f => f.ka === k || f.kb === k).map((f, i, all) => ({ f, a: i / all.length * 2 * Math.PI, r: R - 2 - (i % 3) * 4.5 })) };
   const tone = v => v > .85 ? '#ff3b5c' : v > .7 ? '#ffbe5a' : v > .02 ? '#3dff9a' : '#0f6b7a';
   let last = performance.now(), acc = 0;
   function frame(now) {
@@ -4119,12 +4122,13 @@ function gkSet(id, frac, val, unit, sub, hot) {
       g.querySelector('.ring').setAttribute('transform', `rotate(${deg(st.rot)} ${x} ${y})`);
       g.querySelector('.arcs').setAttribute('transform', `rotate(${deg(st.arcs)} ${x} ${y})`);
       g.querySelector('.sweep').setAttribute('transform', `rotate(${deg(st.sweep)} ${x} ${y})`);
+      g.querySelector('.ring2').setAttribute('transform', `rotate(${deg(-st.rot * 1.7)} ${x} ${y})`);
       const lv = Math.max(.02, Math.min(1, st.load)), la = g.querySelector('.load');
       la.setAttribute('d', arc(x, y, R + .5, -Math.PI / 2, -Math.PI / 2 + lv * 2 * Math.PI * .999)); la.style.stroke = tone(st.load);
       let o = '';
       st.orbs.forEach(b => { b.a += step * (.3 + 4 * b.f.rate) * (b.r < R - 2 ? -1 : 1);
         const c = b.f.rate > .75 ? '#ffbe5a' : '#00e5ff';
-        o += `<circle cx="${(x + b.r * Math.cos(b.a)).toFixed(1)}" cy="${(y + b.r * Math.sin(b.a)).toFixed(1)}" r="${(1.1 + 1.3 * b.f.rate).toFixed(1)}" fill="${c}" opacity="${(.45 + .5 * b.f.rate).toFixed(2)}"/>`;
+        o += `<circle cx="${(x + b.r * Math.cos(b.a)).toFixed(1)}" cy="${(y + b.r * Math.sin(b.a)).toFixed(1)}" r="${(1.5 + 1.6 * b.f.rate).toFixed(1)}" fill="${c}" opacity="${(.45 + .5 * b.f.rate).toFixed(2)}"/>`;
         o += `<path d="${arc(x, y, b.r, b.a - .5 - b.f.rate, b.a)}" stroke="${c}" stroke-opacity="${(.15 + .35 * b.f.rate).toFixed(2)}" stroke-width="1" fill="none"/>`; });
       g.querySelector('.orb').innerHTML = o; }
   }
