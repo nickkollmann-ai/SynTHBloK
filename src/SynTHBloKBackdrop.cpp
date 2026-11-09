@@ -2808,7 +2808,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         if (oled) oled->visible = !c;
         if (nameField && c) nameField->visible = false;
         if (face) { face->visible = c; face->box.size = box.size; }
-        if (expand) { expand->visible = c; expand->box.pos.x = (w - expand->box.size.x) * 0.5f; }
+        if (expand) { expand->visible = c; expand->box.pos.x = w - expand->box.size.x - mm2px(4.2f); }   // the right side, in line with the strip's edge
         for (int k = 0; k < 4; k++) if (screws[k]) screws[k]->box.pos.x = ((k & 1) ? w - mm2px(3.5f) : mm2px(3.5f)) - screws[k]->box.size.x * 0.5f;
     }
     // CASE SNAPSHOTS (a dev aid): if Rack's user folder holds SynTHBloK/snap_cases.txt when this BACKDROP opens, it

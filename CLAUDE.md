@@ -146,7 +146,7 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   a theme or a look turns it back on (the picture stays loaded). Old patches without lookOn: on unless a picture was loaded.
   Folded stays 7 HP (the gap-filling growStep was tried and turned off again; the code is still there, not called).
   Top row: four square keys (4 px rounded corners): LOOK / CASE / SIDES and COLLAPSE (tabRect(kPages)). Folded, the face
-  shows that key at the top as EXPAND (no arrows) lit NoiZee orange (BackdropExpand, 11.4 mm), the picture strip below.
+  shows that key at the top right as EXPAND (no arrows) lit NoiZee orange (BackdropExpand, 11.4 mm), the picture strip below.
   The fill choice stays in the OLED's bottom row on every page, under the page numbers (COLLAPSE FILL: BLANK RIGHT /
   BLANK LEFT / LEAVE EMPTY). NAME came off (Nov 2026): no NAME tab, no title on the rack, no title menu, no name field
   (kNamePage = 99 keeps the old paths dormant).
