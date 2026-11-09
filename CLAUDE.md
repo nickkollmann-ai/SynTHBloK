@@ -138,7 +138,7 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   Themes (remade): mostly case only; 6 wear side panels, 6 wear rack ears (Theme.ear / earShape). a LIVE PREVIEW strip (art, case colour, panels, ears), label-over-value rows with arrows, a hint line.
   No NAME key on the panel: the NAME tab starts typing and carries the status LED (amber = this one dresses the rack, red =
   another does). No inputs since Nov 2026 (the L/R jacks and the meter came off;
-  the OLED runs down to just above the bottom screws); the tabs are squared keys, all softly backlit, the chosen one brighter.
+  the OLED runs down to just above the bottom screws); the tabs and option boxes are square keys packed tight, all softly backlit, the chosen one brighter.
   Four screws at 3.5 mm like every module.
   Screws: since Nov 2026 every module has four SocketScrews, 3.5 mm in from each corner (y 3.5 and 125 mm). Before that
   15 modules had only the two top ones (since before v2.1.0); the bottom pair sits over the cards' corners, as it always

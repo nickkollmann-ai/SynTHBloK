@@ -2320,7 +2320,7 @@ struct BackdropOled : widget::OpaqueWidget {
         for (int k = 0; k < kPages; k++) {
             float tw = tabW(k);
             // squared tab keys: every one softly backlit, the chosen one brighter (less translucent) with a lit rim
-            nvgBeginPath(vg); nvgRect(vg, tx0 + 0.8f, 1.f, tw - 1.6f, kTabH - 2.f);
+            nvgBeginPath(vg); nvgRect(vg, tx0 + 0.3f, 0.6f, tw - 0.6f, kTabH - 1.2f);   // square keys, packed tight
             nvgFillColor(vg, oled::amber(k == page ? 150 : 34)); nvgFill(vg);
             nvgStrokeColor(vg, oled::amber(k == page ? 235 : 90)); nvgStrokeWidth(vg, 0.7f); nvgStroke(vg);
             nvgFillColor(vg, k == page ? nvgRGB(255, 246, 225) : oled::amber());
@@ -2371,11 +2371,12 @@ struct BackdropOled : widget::OpaqueWidget {
                 nvgFontSize(vg, 6.2f); nvgTextLetterSpacing(vg, 0.2f); nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
                 for (int k = 0; k < n; k++) {
                     float bx = kPad + k * bw;
-                    nvgBeginPath(vg); nvgRoundedRect(vg, bx + 0.5f, y + 7.4f, bw - 1.5f, 8.2f, 1.2f);
-                    if (k == r[i].sel) { nvgFillColor(vg, oled::amber()); nvgFill(vg); }
-                    else { nvgStrokeColor(vg, oled::outline(hot ? 160 : 100)); nvgStrokeWidth(vg, 0.6f); nvgStroke(vg); }
-                    nvgFillColor(vg, k == r[i].sel ? oled::ink() : oled::amber());
-                    nvgText(vg, bx + bw * 0.5f - 0.25f, y + 11.6f, r[i].opts[k].c_str(), NULL);
+                    nvgBeginPath(vg); nvgRect(vg, bx + 0.3f, y + 6.4f, bw - 0.6f, 9.8f);   // square keys, packed tight
+                    bool on = k == r[i].sel;   // backlit like the tabs: all softly, the chosen one brighter with a lit rim
+                    nvgFillColor(vg, oled::amber(on ? 150 : hot ? 46 : 30)); nvgFill(vg);
+                    nvgStrokeColor(vg, oled::amber(on ? 235 : 90)); nvgStrokeWidth(vg, 0.6f); nvgStroke(vg);
+                    nvgFillColor(vg, on ? nvgRGB(255, 246, 225) : oled::amber());
+                    nvgText(vg, bx + bw * 0.5f, y + 11.4f, r[i].opts[k].c_str(), NULL);
                 }
                 continue;
             }
