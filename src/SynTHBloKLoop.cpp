@@ -2597,6 +2597,9 @@ struct SynTHBloKLoopWidget : ModuleWidget {
         const float DX = 20.32f;   // everything right of the input column (the inputs and their gain knobs)
         addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
         addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(PW - 3.5f, 3.5f))));
+        // bottom screws (Nov 2026: every module has four, like the hardware)
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(PW - 3.5f, 125.f))));
         LTitle* title = createWidget<LTitle>(mm2px(Vec(8.5f, 0.f)));
         title->box.size = mm2px(Vec(60.f, 7.f));
         addChild(title);

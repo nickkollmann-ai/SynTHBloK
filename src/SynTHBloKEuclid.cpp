@@ -131,6 +131,9 @@ struct SynTHBloKEuclidWidget : ModuleWidget {
 
         addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
         addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(EUL::PANEL_W - 3.5f, 3.5f))));
+        // bottom screws (Nov 2026: every module has four, like the hardware)
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(EUL::PANEL_W - 3.5f, 125.f))));
 
         for (int r = 0; r < 4; r++)
             for (int c = 0; c < 3; c++) {

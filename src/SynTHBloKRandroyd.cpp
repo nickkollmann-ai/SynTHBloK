@@ -1217,6 +1217,9 @@ struct SynTHBloKRandroydWidget : ModuleWidget {
         using namespace rack::componentlibrary;
         addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
         addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(RDL::PANEL_W - 3.5f, 3.5f))));
+        // bottom screws (Nov 2026: every module has four, like the hardware)
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(RDL::PANEL_W - 3.5f, 125.f))));
 
         // left: the saved tracks (SAVE / CLEAR inside), GENRE, MIDI
         RdList* li = place(new RdList, RDL::LIST_X, RDL::LIST_Y, RDL::LIST_W, RDL::LIST_H);

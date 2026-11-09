@@ -1929,14 +1929,6 @@ static void useImage(SynTHBloKBackdrop* m, const std::string& path) {
     m->imagePath = path; m->showBg = true;
     m->fit = 1; m->imgScale = 1.f; m->imgW = m->imgH = 1.f; m->imgX = m->imgY = 0.f;   // snap it in, every time
 }
-static void stepIn(const std::vector<std::string>& L, const std::string& cur, int d, std::function<void(const std::string&)> use) {
-    if (L.empty()) return;
-    int i = -1;
-    for (size_t k = 0; k < L.size(); k++) if (L[k] == cur) i = (int) k;
-    int n = (int) L.size();
-    i = i < 0 ? (d < 0 ? n - 1 : 0) : ((i + d) % n + n) % n;
-    use(L[i]);
-}
 static void loadPreset(SynTHBloKBackdrop* m, const std::string& path) {
     json_error_t err;
     json_t* j = json_load_file(path.c_str(), 0, &err);
@@ -2385,9 +2377,11 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         nf->visible = false;
         om->name = nf;
         addChild(nf);   // after the menu, so it gets the clicks in its row
-        // two top screws, placed as on every MTX module (3.5 mm in from each top corner)
+        // four screws, 3.5 mm in from each corner, as on every module
         addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
         addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(60.96f - 3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(60.96f - 3.5f, 125.f))));
     }
     // CASE SNAPSHOTS (a dev aid): if Rack's user folder holds SynTHBloK/snap_cases.txt when this BACKDROP opens, it
     // steps through every case and saves a picture of the Rack window for each to SynTHBloK/case_shots/

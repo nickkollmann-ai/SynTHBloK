@@ -122,9 +122,10 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   IMAGE steps NONE / MY IMAGES / LOAD FILE, MY PRESET steps the presets / SAVE AS (the wheel skips the dialog slots).
   Themes (remade): mostly case only; 6 wear side panels, 5 wear rack ears (Theme.ear / earShape). a LIVE PREVIEW strip (art, case colour, panels, ears), label-over-value rows with arrows, a hint line.
   No NAME key on the panel: the NAME tab starts typing and carries the status LED (amber = this one dresses the rack, red =
-  another does). Small jacks (SmallJack) for L/R, a 10-segment meter between them; two top screws at 3.5 mm like the MTX modules.
-  Screws: the MTX / drum / singles modules have had two top screws since before v2.1.0 (checked against the tag); the
-  SocketScrew change only swapped the look (silver -> black socket head), no positions moved.
+  another does). Small jacks (SmallJack) for L/R, a 10-segment meter between them; four screws at 3.5 mm like every module.
+  Screws: since Nov 2026 every module has four SocketScrews, 3.5 mm in from each corner (y 3.5 and 125 mm). Before that
+  15 modules had only the two top ones (since before v2.1.0); the bottom pair sits over the cards' corners, as it always
+  did on the four-screw modules (Quad, filters, Player...).
   Rails: BACKDROP never draws rails. Each case row is left open edge to edge (a shorter row's empty end too), so Rack's own
   rails show across the whole case between the side panels; the LAB ASSEMBLY copies Rack's rail look.
 - `tools/build_and_reload.ps1`: build, close Rack cleanly, devinstall, screenshots, reopen Rack.

@@ -430,6 +430,9 @@ struct SynTHBloKJamProbeWidget : ModuleWidget {
 
         addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
         addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(96.52f - 3.5f, 3.5f))));
+        // bottom screws (Nov 2026: every module has four, like the hardware)
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(96.52f - 3.5f, 125.f))));
 
         ProbePortDisplay* di = createWidget<ProbePortDisplay>(mm2px(Vec(4.f, 14.f)));
         di->box.size = mm2px(Vec(43.52f, 8.f)); di->port = module ? &module->midiIn : NULL;
