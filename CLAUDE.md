@@ -114,7 +114,9 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   SIDE PANELS (attachments, Nick's meaning of "side panels"): separate solid slabs on the outside of each case end
   (kPanelMat: NONE, 24 woods, 6 man-made: diamond plate, carbon fiber, 3D printed PLA, brushed alu, neon acrylic, tolex;
   shapes SQUARE 2 / SEMI-ROUNDED 6 / ROUNDED 16 px (kPanelShape, SQUARE appended at index 2); one width, SLIM 36 px; OILED/SATIN/GLOSS). Flush with the case top and
-  the full case height (they follow the case size); thickness shows on the outer side only; own shadow, NO screws on the face
+  the full case height (they follow the case size); as deep as the case (swept to the lower right by depth*0.18 like
+  drawCase; pass 0 shadow before the case, pass 1 depth + face after it; the left panel's depth clipped behind the case
+  front); the material's texture on every face, shaded toward the back. CASE MATERIAL textures the case's sides too; own shadow, NO screws on the face
   (real panels screw on from the inside). CASE MATERIAL builds the frame itself in any kPanelMat material. The old CASE ENDS
   material/finish option is removed (Nov 2026; saved sideMat/sideFinish are ignored). Themes put their wood on the panels.
   Side panels XOR rack ears: picking one turns the other off. With ears there is NO case: an open rack, Rack's rails screwing

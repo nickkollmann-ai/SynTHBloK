@@ -1063,6 +1063,13 @@ struct BackdropLayer : widget::TransparentWidget {
                 nvgFillPaint(vg, nvgImagePattern(vg, xin, in.pos.y, 240.f, 240.f, (float) M_PI * 0.5f, img, 0.85f));
                 nvgFill(vg);
             }
+            if (cs.bodyTex) {   // CASE MATERIAL on an open frame: the panels in that material, lit from above
+                int bi = tex(vg, cs.bodyTex);
+                if (bi >= 0) {
+                    nvgFillPaint(vg, nvgImagePattern(vg, xin, in.pos.y, 260.f, 260.f, (float) M_PI * 0.5f, bi, 1.f)); nvgFill(vg);
+                    nvgFillPaint(vg, nvgLinearGradient(vg, 0, in.pos.y, 0, in.pos.y + in.size.y, nvgRGBA(255, 255, 255, 18), nvgRGBA(0, 0, 0, 60))); nvgFill(vg);
+                }
+            }
             nvgStrokeColor(vg, nvgRGBA(0, 0, 0, 120)); nvgStrokeWidth(vg, 0.8f); nvgStroke(vg);
             for (float rt : rowTops)   // the black steel bolts holding the rails
                 for (int k = 0; k < 2; k++) {
@@ -1072,11 +1079,15 @@ struct BackdropLayer : widget::TransparentWidget {
                 }
         }
     }
-    // ---- SIDE PANELS (attachments): a solid slab on each end of the case, standing a little taller than it.
-    // Its face has a round-over on every edge (the light from the top left rolls onto the sides), its thickness shows
-    // on the outer side and foot in the same material, darker, and it throws its own shadow. No screws on the face:
+    // ---- SIDE PANELS (attachments): a solid slab on each end of the case, flush with its top and its full height.
+    // Its face has a round-over on every edge (the light from the top left rolls onto the sides), its depth shows
+    // in the same material, darker, and it throws its own shadow. No screws on the face:
     // real panels are screwed on from the inside.
-    void drawPanels(NVGcontext* vg, const CaseStyle& cs, math::Rect in, int mat, int shape, int width, int finish, bool doShadow) {
+    // DEPTH: the panel is as deep as the case. It is swept back toward the lower right exactly as drawCase sweeps the case
+    // (by d = depth * 0.18), so its side and foot follow the case's own side and foot. pass 0 draws the shadow (before
+    // the case), pass 1 the depth and the face (after it); the left panel's depth is clipped where the case front
+    // stands in front of it.
+    void drawPanels(NVGcontext* vg, const CaseStyle& cs, math::Rect in, int mat, int shape, int finish, bool doShadow, float depthMm, int pass) {
         const PanelMat& pm = kPanelMat[clamp(mat, 1, kPanelMatN - 1)];
         int img = pm.tex ? tex(vg, pm.tex) : -1;
         NVGcolor avg = nvgRGB(pm.r, pm.g, pm.b);
@@ -1084,19 +1095,36 @@ struct BackdropLayer : widget::TransparentWidget {
         float x = in.pos.x - s, y = in.pos.y - tt, w = in.size.x + 2.f * s, h = in.size.y + 6.f + tt;
         float pw = kPanelWidthPx[0], rad = kPanelRadius[clamp(shape, 0, 2)];
         // flush with the top of the case and running its full height, so it follows the case's size
-        float py = y, ph = h, th = 5.f, e = std::min(7.f, pw * 0.2f);
+        float py = y, ph = h, e = std::min(7.f, pw * 0.2f);
+        float d = std::max(4.f, mm2px(depthMm) * 0.18f);   // as deep as the case (a little depth even on a flat case)
         for (int side = 0; side < 2; side++) {
-            float px = side ? x + w : x - pw, dir = side ? 1.f : -1.f;   // the thickness shows on the outer side only
-            if (doShadow) {
-                nvgBeginPath(vg); nvgRect(vg, px - 40.f, py - 30.f, pw + 80.f, ph + 80.f);
-                nvgFillPaint(vg, nvgBoxGradient(vg, px + dir * (th + 4.f), py + 8.f, pw, ph, rad + 6.f, 16.f, nvgRGBA(0, 0, 0, 150), nvgRGBA(0, 0, 0, 0)));
-                nvgFill(vg);
+            float px = side ? x + w : x - pw;
+            if (pass == 0) {
+                if (doShadow) {
+                    nvgBeginPath(vg); nvgRect(vg, px - 40.f, py - 30.f, pw + d + 90.f, ph + d + 90.f);
+                    nvgFillPaint(vg, nvgBoxGradient(vg, px + d * 0.8f + 4.f, py + d * 0.9f + 8.f, pw, ph, rad + 6.f, 16.f, nvgRGBA(0, 0, 0, 150), nvgRGBA(0, 0, 0, 0)));
+                    nvgFill(vg);
+                }
+                continue;
             }
-            // the thickness: the outline swept outward, one solid colour band (layers of the same fill)
-            for (int k = (int) th; k >= 1; k--) {
-                nvgBeginPath(vg); nvgRoundedRect(vg, px + dir * k, py, pw, ph, rad);
-                nvgFillColor(vg, nvgLerpRGBA(avg, nvgRGB(0, 0, 0), 0.62f - 0.1f * k / th));
-                nvgFill(vg);
+            // the depth: the outline swept back to the lower right, darker toward the back
+            int n = std::max(2, std::min(24, (int) (d / 1.5f)));
+            for (int clip = 0; clip < (side ? 1 : 2); clip++) {
+                nvgSave(vg);
+                if (!side) {   // the left panel's depth runs behind the case: show it only left of, and below, the case front
+                    if (clip == 0) nvgIntersectScissor(vg, px - 4.f, py - 4.f, x - px + 4.f, ph + d + 8.f);
+                    else nvgIntersectScissor(vg, x, py + ph, pw + d + 4.f, d + 4.f);
+                }
+                // every face carries the material: each layer is the texture (one continuous pattern), then a shade
+                // that deepens toward the back, so the side and foot read as the same piece turned away from the light
+                for (int k = n; k >= 1; k--) {
+                    float o = d * k / n;
+                    nvgBeginPath(vg); nvgRoundedRect(vg, px + o, py + o, pw, ph, rad);
+                    nvgFillColor(vg, avg); nvgFill(vg);
+                    if (img >= 0) { nvgFillPaint(vg, nvgImagePattern(vg, px, py, 260.f, 260.f, (float) M_PI * 0.5f, img, 1.f)); nvgFill(vg); }
+                    nvgFillColor(vg, nvgRGBA(0, 0, 0, (int) (110 + 60.f * k / n))); nvgFill(vg);
+                }
+                nvgRestore(vg);
             }
             // the face
             nvgBeginPath(vg); nvgRoundedRect(vg, px, py, pw, ph, rad);
@@ -1296,25 +1324,45 @@ struct BackdropLayer : widget::TransparentWidget {
         float rr = caseRadius(cs);
         if (d > 0.5f && rr > 0.f) {   // a rounded case: its rounded outline swept back for the depth
             int n = std::max(2, std::min(24, (int) (d / 1.5f)));
+            int bimg = cs.bodyTex ? tex(vg, cs.bodyTex) : -1;   // CASE MATERIAL: its texture on the sides too, shaded
             for (int k = n; k >= 1; k--) {
                 float o = d * k / n;
                 nvgBeginPath(vg);
                 nvgRoundedRect(vg, x + o, y + o, w, h, rr);
-                nvgFillColor(vg, nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.45f + 0.15f * k / n));
-                nvgFill(vg);
+                if (bimg >= 0) {
+                    nvgFillColor(vg, cs.base); nvgFill(vg);
+                    nvgFillPaint(vg, nvgImagePattern(vg, x, y, 260.f, 260.f, 0.f, bimg, 1.f)); nvgFill(vg);
+                    nvgFillColor(vg, nvgRGBA(0, 0, 0, (int) (115 + 40.f * k / n))); nvgFill(vg);
+                }
+                else { nvgFillColor(vg, nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.45f + 0.15f * k / n)); nvgFill(vg); }
             }
         }
         else if (d > 0.5f) {   // the 3D sides: right and bottom faces, darker
             nvgBeginPath(vg);
             nvgMoveTo(vg, x + w, y); nvgLineTo(vg, x + w + d, y + d); nvgLineTo(vg, x + w + d, y + h + d); nvgLineTo(vg, x + w, y + h);
             nvgClosePath(vg);
-            nvgFillPaint(vg, nvgLinearGradient(vg, x + w, 0, x + w + d, 0, nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.62f), nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.82f)));
-            nvgFill(vg);
+            int bimg = cs.bodyTex ? tex(vg, cs.bodyTex) : -1;   // CASE MATERIAL: its texture on the sides too, shaded
+            if (bimg >= 0) {
+                nvgFillColor(vg, cs.base); nvgFill(vg);
+                nvgFillPaint(vg, nvgImagePattern(vg, x, y, 260.f, 260.f, (float) M_PI * 0.5f, bimg, 1.f)); nvgFill(vg);
+                nvgFillPaint(vg, nvgLinearGradient(vg, x + w, 0, x + w + d, 0, nvgRGBA(0, 0, 0, 150), nvgRGBA(0, 0, 0, 200))); nvgFill(vg);
+            }
+            else {
+                nvgFillPaint(vg, nvgLinearGradient(vg, x + w, 0, x + w + d, 0, nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.62f), nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.82f)));
+                nvgFill(vg);
+            }
             nvgBeginPath(vg);
             nvgMoveTo(vg, x, y + h); nvgLineTo(vg, x + w, y + h); nvgLineTo(vg, x + w + d, y + h + d); nvgLineTo(vg, x + d, y + h + d);
             nvgClosePath(vg);
-            nvgFillPaint(vg, nvgLinearGradient(vg, 0, y + h, 0, y + h + d, nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.55f), nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.8f)));
-            nvgFill(vg);
+            if (bimg >= 0) {
+                nvgFillColor(vg, cs.base); nvgFill(vg);
+                nvgFillPaint(vg, nvgImagePattern(vg, x, y, 260.f, 260.f, 0.f, bimg, 1.f)); nvgFill(vg);
+                nvgFillPaint(vg, nvgLinearGradient(vg, 0, y + h, 0, y + h + d, nvgRGBA(0, 0, 0, 130), nvgRGBA(0, 0, 0, 190))); nvgFill(vg);
+            }
+            else {
+                nvgFillPaint(vg, nvgLinearGradient(vg, 0, y + h, 0, y + h + d, nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.55f), nvgLerpRGBA(cs.base, nvgRGB(0, 0, 0), 0.8f)));
+                nvgFill(vg);
+            }
         }
         // the frame: the ends and lips, then the dark well the modules sit in
         drawFrameFill(vg, cs, x, y, w, h);
@@ -1642,8 +1690,9 @@ struct BackdropLayer : widget::TransparentWidget {
                     if (m->earKind > 0) { drawEars(args.vg, b.r, m->earKind, m->earName, m->earShape, m->shadow, b.rows, std::max(m->peak[0], m->peak[1])); continue; }
                     if (m->panelMat > 0) {   // side panels replace the case's own ends (they come back when the panels go)
                         CaseStyle pc = cs; pc.side = 2.f; pc.ends = E_SQUARE;
+                        drawPanels(args.vg, pc, b.r, m->panelMat, m->panelShape, m->panelFinish, m->shadow, m->depthMm, 0);
                         drawCase(args.vg, pc, b.r, m->depthMm, m->shadow, false, b.rows);
-                        drawPanels(args.vg, pc, b.r, m->panelMat, m->panelShape, 0, m->panelFinish, m->shadow);
+                        drawPanels(args.vg, pc, b.r, m->panelMat, m->panelShape, m->panelFinish, m->shadow, m->depthMm, 1);
                     }
                     else drawCase(args.vg, cs, b.r, m->depthMm, m->shadow, false, b.rows);
                 }
