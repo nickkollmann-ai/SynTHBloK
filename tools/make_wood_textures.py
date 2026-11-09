@@ -2,7 +2,7 @@
 (BACKDROP turns them upright on the side panels). Unlike the neutral overlays in make_case_textures.py these carry
 their own colour, so each species has its own grain AND figure: curly, quilted, birdseye, spalted, ribbon, burl...
 
-Run: python tools/make_wood_textures.py [slug ...]   (needs numpy, Pillow)
+Run: python tools/make_wood_textures.py [slug ... | mats]   (also the man-made panel materials, mat_*.png)   (needs numpy, Pillow)
 The order of WOODS matches the new SIDE MATERIAL entries in src/SynTHBloKBackdrop.cpp; add new woods at the END.
 """
 import os
@@ -266,8 +266,73 @@ WOODS = [
     ('amboyna_burl', amboyna_burl), ('shou_sugi_ban', shou_sugi_ban),
 ]
 
+
+# ---- man-made panel / case materials (res/cases/mat_*.png), full colour, seamless; x runs UP the panel ----
+def mat_diamond(s=401):
+    # tread plate: raised lozenges alternating direction on a 32 px grid (tiles), lit from the top left
+    cx = np.mod(X, 32) - 16; cy = np.mod(Y, 32) - 16
+    flip = ((np.floor(X / 32) + np.floor(Y / 32)) % 2) * 2 - 1
+    u = (cx + flip * cy) / np.sqrt(2); v = (cx - flip * cy) / np.sqrt(2)
+    d = np.abs(u) / 13 + np.abs(v) / 3.2                     # a long thin diamond
+    loz = np.clip((1 - d) * 4, 0, 1)
+    gy, gx = np.gradient(ndimage_blur(loz, 0.8))
+    lit = np.clip(-(gx + gy) * 3, -1, 1)
+    base = 150 + pnoise(s, 2) * 4 + pnoise(s + 1, 0.6, (1, 30)) * 3
+    v_ = base + 30 * loz + 60 * lit
+    return v_[..., None] * np.array([1, 1.01, 1.04])
+
+
+def ndimage_blur(a, sg):
+    from scipy import ndimage
+    return ndimage.gaussian_filter(a, sg, mode='wrap')
+
+
+def mat_carbon(s=411):
+    # tight 2x2 twill: 4 px tows, over two / under two, stepping one per row; a soft sheen across each tow
+    t = 4
+    cx = np.floor(X / t); cy = np.floor(Y / t)
+    over = np.mod(cx + cy, 4) < 2
+    fx = np.mod(X, t) / t; fy = np.mod(Y, t) / t
+    sheen = np.where(over, np.sin(fy * np.pi), np.sin(fx * np.pi)) ** 1.2
+    v_ = 16 + 30 * sheen + pnoise(s, 0.5) * 1.5
+    return v_[..., None] * np.array([1, 1.02, 1.07])
+
+
+def mat_pla(s=421):
+    # printed layers across the panel (x runs up the panel, so the lines vary with x), 4 px per layer
+    lines = 0.82 + 0.18 * np.sin(X / 4 * TAU) ** 2
+    return np.array([236, 104, 26])[None, None, :] * (lines * (1 + pnoise(s, 6) * 0.02))[..., None]
+
+
+def mat_alu(s=431):
+    b = 172 + pnoise(s, 0.6, (1, 120)) * 10 + pnoise(s + 1, 4, (1, 40)) * 6
+    return b[..., None] * np.array([1, 1.012, 1.04])
+
+
+def mat_acrylic(s=441):
+    return np.array([236, 40, 160])[None, None, :] * (0.99 + 0.01 * pnoise(s, 60))[..., None]
+
+
+def mat_tolex(s=451):
+    v_ = pnoise(s, 3.2); crease = -np.exp(-(v_ * 3) ** 2) * 0.5
+    b = 42 * (1 + v_ * 0.08 + crease) + pnoise(s + 1, 0.8) * 2
+    return b[..., None] * np.array([1, 1, 1.05])
+
+
+MATERIALS = [('diamond_plate', mat_diamond), ('carbon_fiber', mat_carbon), ('printed_pla', mat_pla),
+             ('brushed_alu', mat_alu), ('neon_acrylic', mat_acrylic), ('tolex', mat_tolex)]
+
+
+def save_mat(slug, rgb):
+    Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8), 'RGB').save(os.path.join(OUT, 'mat_' + slug + '.png'), optimize=True)
+    print('wrote mat_' + slug)
+
+
 if __name__ == '__main__':
     want = set(sys.argv[1:])
     for slug, fn in WOODS:
         if not want or slug in want:
             save(slug, fn())
+    for slug, fn in MATERIALS:
+        if not want or slug in want or 'mats' in want:
+            save_mat(slug, fn())

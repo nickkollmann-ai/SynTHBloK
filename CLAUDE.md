@@ -102,7 +102,16 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   module's JSON minus the title), stepped on the OLED (BG page: MY IMAGES; THEME page: MY PRESET, SAVE PRESET) and in the menu.
   Round 6 art (`make_backdrop_art.py r6`): 25 "Dream" pieces drawn from Nick's 50 approved Midjourney picks; themes can now
   set a side material + wood finish (Theme.sideMat / sideFinish, SW_* names for the species woods).
-  Rails: BACKDROP never draws over the module rows, so Rack's own rails always show there; the LAB ASSEMBLY copies Rack's rail.
+  SIDE PANELS (attachments, Nick's meaning of "side panels"): separate solid slabs on the outside of each case end
+  (kPanelMat: NONE, 24 woods, 6 man-made: diamond plate, carbon fiber, 3D printed PLA, brushed alu, neon acrylic, tolex;
+  shapes SUBTLE ROUNDED 6 px / SOFT RECTANGLE 16 px; widths; OILED/SATIN/GLOSS). Round-over edges, visible thickness,
+  own shadow, NO screws on the face (real panels screw on from the inside). CASE MATERIAL builds the frame itself in any
+  kPanelMat material. The old per-case "side material" is now labelled CASE ENDS. Themes put their wood on the panels.
+  Man-made textures: `make_wood_textures.py mats` -> res/cases/mat_*.png. RACK EARS (kEarFin): L-shaped brackets, a lip
+  down each case end (outside any side panels), a plate bent out with two oval slots; 9 plain finishes (aluminium, black,
+  gold, copper, bronze, green, primary red/blue/yellow) + NOIZEE TOYZ (black, orange rule, name optional: earName).
+  Rails: BACKDROP never draws rails. Each case row is left open edge to edge (a shorter row's empty end too), so Rack's own
+  rails show across the whole case between the side panels; the LAB ASSEMBLY copies Rack's rail look.
 - `tools/build_and_reload.ps1`: build, close Rack cleanly, devinstall, screenshots, reopen Rack.
 - `tools/rack_shots.ps1`: module screenshots into `web-images/screenshots`. Its default Rack path is Rack2Pro; on a
   PC with Rack Free pass `-Rack 'C:\Program Files\VCV\Rack2Free\Rack.exe'`.
