@@ -134,7 +134,14 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   gold, copper, bronze, green, primary red/blue/yellow) + NOIZEE TOYZ (black, orange rule, name optional: earName).
   BACKDROP is 12 HP since Nov 2026 (was 6; `tools/make_backdrop_panel.py`). OLED (simplified): 4 tabs LOOK / CASE / SIDES /
   NAME (kNamePage = 3), 3-5 rows each; SIDES is one NONE/PANELS/EARS switch; rows are < > steppers or option boxes (Row.opts);
-  IMAGE steps NONE / MY IMAGES / LOAD FILE, MY PRESET steps the presets / SAVE AS (the wheel skips the dialog slots).
+  OLED v3 (Nov 2026): tabs, the live preview, a row of CATEGORY keys, and the chosen category's
+  choices below as a grid of square keys in numbered pages (‹ 1 2 .. ›; the wheel turns pages; no list stepping). LOOK: THEME /
+  BG / COLOUR (swatches) / IMAGE (NONE, LOAD FILE, MY FOLDER, the 50 IMAGE BANK thumbnails, then MY IMAGES) / PRESET. CASE:
+  CASE / MATERIAL / DEPTH / SHADOW. SIDES: OFF / PANELS / EARS act at once, then MATERIAL-or-FINISH / SHAPE / (FINISH) / MORE.
+  NAME: the field, SHOW / HIDE, USE FILE NAME, COLLAPSE. IMAGE BANK: res/bank/bank_NN.jpg (+thumb_NN.jpg), 50 of Nick's own
+  Midjourney picks (fetched via the built-in browser into tools/mj_art/, which curl can't: 403), saved as bankImg (1..50).
+  COLLAPSE: 7 HP, the modules' face with a tall strip of the current background and an EXPAND key (expanding pushes
+  neighbours with setModulePosForce); presets keep the module's fold.
   Themes (remade): mostly case only; 6 wear side panels, 6 wear rack ears (Theme.ear / earShape). a LIVE PREVIEW strip (art, case colour, panels, ears), label-over-value rows with arrows, a hint line.
   No NAME key on the panel: the NAME tab starts typing and carries the status LED (amber = this one dresses the rack, red =
   another does). No inputs since Nov 2026 (the L/R jacks and the meter came off;

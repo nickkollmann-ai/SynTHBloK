@@ -301,6 +301,8 @@ struct SynTHBloKBackdrop : Module {
     int look = LOOK_GRADIENT;   // loads as the SynTHBloK black gradient (theme 0), no grid
     int colorIdx = 0;
     std::string imagePath;
+    int bankImg = 0;          // the IMAGE BANK picture (1..kBankN, res/bank), used when imagePath is empty; 0: none
+    bool collapsed = false;   // COLLAPSE: the module folds to 7 HP, showing a strip of the background
     int fit = 1;   // fill the screen: the image always snaps to cover the whole background
     float imgScale = 1.f, imgDim = 0.f;
     float imgW = 1.f, imgH = 1.f, imgX = 0.f, imgY = 0.f;   // fine-tuning: width / height stretch, X / Y offset (of the image's size)
@@ -335,6 +337,8 @@ struct SynTHBloKBackdrop : Module {
         json_object_set_new(r, "theme", json_integer(themeIdx));
         json_object_set_new(r, "color", json_integer(colorIdx));
         json_object_set_new(r, "image", json_string(imagePath.c_str()));
+        json_object_set_new(r, "bankImg", json_integer(bankImg));
+        json_object_set_new(r, "collapsed", json_boolean(collapsed));
         json_object_set_new(r, "fit", json_integer(fit));
         json_object_set_new(r, "imgScale", json_real(imgScale));
         json_object_set_new(r, "imgDim", json_real(imgDim));
@@ -374,6 +378,8 @@ struct SynTHBloKBackdrop : Module {
         if (json_t* v = json_object_get(r, "theme")) themeIdx = (int) json_integer_value(v);
         if (json_t* v = json_object_get(r, "color")) colorIdx = clamp((int) json_integer_value(v), 0, kColorN - 1);
         if (json_t* v = json_object_get(r, "image")) imagePath = json_string_value(v);
+        if (json_t* v = json_object_get(r, "bankImg")) bankImg = (int) json_integer_value(v);
+        if (json_t* v = json_object_get(r, "collapsed")) collapsed = json_boolean_value(v);
         if (json_t* v = json_object_get(r, "fit")) fit = clamp((int) json_integer_value(v), 0, 3);
         if (json_t* v = json_object_get(r, "imgScale")) imgScale = clamp((float) json_number_value(v), 0.1f, 8.f);
         if (json_t* v = json_object_get(r, "imgDim")) imgDim = clamp((float) json_number_value(v), 0.f, 0.9f);
@@ -414,6 +420,13 @@ namespace {
 // ---------------------------------------------------------------------------------------------------------
 // THE LAYER: one widget in the rack, just above Rack's rails and below the modules and cables.
 // ---------------------------------------------------------------------------------------------------------
+// IMAGE BANK (Nov 2026): 50 pictures shipped with the plugin (res/bank/bank_NN.jpg + thumb_NN.jpg), from Nick's own
+// abstract artwork; picked on the OLED's IMAGE page. Saved by number (bankImg), so patches move between machines.
+static const int kBankN = 50;
+static std::string bankPath(int n) { return asset::plugin(pluginInstance, string::f("res/bank/bank_%02d.jpg", clamp(n, 1, kBankN))); }
+static std::string bankThumbPath(int n) { return asset::plugin(pluginInstance, string::f("res/bank/thumb_%02d.jpg", clamp(n, 1, kBankN))); }
+static std::string bgImagePath(SynTHBloKBackdrop* m) { return !m->imagePath.empty() ? m->imagePath : m->bankImg > 0 ? bankPath(m->bankImg) : std::string(); }
+
 struct BackdropLayer : widget::TransparentWidget {
     SynTHBloKBackdrop* module = NULL;
     int image = -1;
@@ -701,12 +714,13 @@ struct BackdropLayer : widget::TransparentWidget {
     }
     void drawImage(const DrawArgs& args, math::Rect v) {
         SynTHBloKBackdrop* m = module;
-        if (m->imagePath.empty()) { if (image >= 0) freeImage(); return; }
-        if (image < 0 || imageLoaded != m->imagePath || imageVg != args.vg) {
+        std::string ip = bgImagePath(m);   // the person's picture, else the bank's
+        if (ip.empty()) { if (image >= 0) freeImage(); return; }
+        if (image < 0 || imageLoaded != ip || imageVg != args.vg) {
             freeImage();
-            image = nvgCreateImage(args.vg, m->imagePath.c_str(), NVG_IMAGE_REPEATX | NVG_IMAGE_REPEATY);
+            image = nvgCreateImage(args.vg, ip.c_str(), NVG_IMAGE_REPEATX | NVG_IMAGE_REPEATY);
             imageVg = args.vg;
-            imageLoaded = m->imagePath;
+            imageLoaded = ip;
             if (image >= 0) nvgImageSize(args.vg, image, &imgW, &imgH);
         }
         if (image < 0 || imgW <= 0 || imgH <= 0) return;
@@ -2040,16 +2054,20 @@ static const std::vector<std::string>& cachedList(int which) {
 static std::vector<std::string> myImages() { return cachedList(0); }
 static std::vector<std::string> myPresets() { return cachedList(1); }
 static void useImage(SynTHBloKBackdrop* m, const std::string& path) {
-    m->imagePath = path; m->showBg = true;
+    m->imagePath = path; m->bankImg = 0; m->showBg = true;
     m->fit = 1; m->imgScale = 1.f; m->imgW = m->imgH = 1.f; m->imgX = m->imgY = 0.f;   // snap it in, every time
+}
+static void useBank(SynTHBloKBackdrop* m, int n) {
+    m->imagePath.clear(); m->bankImg = clamp(n, 1, kBankN); m->showBg = true;
+    m->fit = 1; m->imgScale = 1.f; m->imgW = m->imgH = 1.f; m->imgX = m->imgY = 0.f;
 }
 static void loadPreset(SynTHBloKBackdrop* m, const std::string& path) {
     json_error_t err;
     json_t* j = json_load_file(path.c_str(), 0, &err);
     if (!j) return;
-    std::string keepTitle = m->title; bool keepShow = m->showTitle;   // the patch's own name stays
+    std::string keepTitle = m->title; bool keepShow = m->showTitle, keepFold = m->collapsed;   // the patch's own name (and fold) stay
     m->dataFromJson(j);
-    m->title = keepTitle; m->showTitle = keepShow; m->presetPath = path;
+    m->title = keepTitle; m->showTitle = keepShow; m->collapsed = keepFold; m->presetPath = path;
     json_decref(j);
 }
 static void savePresetAs(SynTHBloKBackdrop* m) {
@@ -2083,154 +2101,208 @@ static const float kDepthMm[9] = {0.f, 25.f, 40.f, 50.f, 65.f, 84.f, 100.f, 120.
 struct BackdropOled : widget::OpaqueWidget {
     SynTHBloKBackdrop* module = NULL;
     NameOled* name = NULL;
-    int page = 0, hover = -1;
-    static constexpr float kTabH = 14.f, kRowH = 17.f, kPad = 4.f, kPrevH = 34.f, kHintH = 11.f;
-    static const int kPages = 4;   // LOOK, CASE, SIDES, NAME (simplified Nov 2026)
-    static const int kNamePage = 3;
     void* owner = NULL;   // the module widget: for the status light in the NAME tab
-    // a row: a label over a value stepped with < > (step), or over a row of option boxes (opts / sel / pick)
-    struct Row { std::string label, value; std::function<void(int)> step; bool flip; std::vector<std::string> opts; int sel; std::function<void(int)> pick; };
-    bool scrolling = false;   // set while a scroll wheel steps a row: no file dialogs then
-    std::vector<Row> rows() {
-        std::vector<Row> r;
+    // OLED v3 (Nov 2026): tabs, the live preview, a row of CATEGORY keys, and the chosen category's choices below as a
+    // grid of square keys, in numbered pages (no stepping or scrolling through lists)
+    static constexpr float kTabH = 14.f, kPad = 3.f, kPrevH = 34.f, kCatH = 13.f, kPageH = 12.f, kGap = 1.f;
+    static const int kPages = 4;   // LOOK, CASE, SIDES, NAME
+    static const int kNamePage = 3;
+    int page = 0, cat[kPages] = {0, 0, 0, 0}, pg = 0, hoverKey = -1, hoverCat = -1, hoverPg = -1, hoverTab = -1;
+    bool pgPicked = false;   // set when the person turns pages; until then the page follows the current choice
+    struct Item { std::string label; NVGcolor sw; bool hasSw; std::string thumb; bool on; std::function<void()> act; };
+    struct Grid { std::vector<Item> items; int cols; float keyH; };
+    std::vector<std::string> cats() {
         SynTHBloKBackdrop* m = module;
-        if (!m) return r;
-        auto wrap = [](int v, int d, int n) { return ((v + d) % n + n) % n; };
-        auto hand = [=]() { m->themeIdx = -1; };   // changed by hand: the theme shows CUSTOM
-        auto seg = [=](const char* label, std::vector<std::string> opts, int sel, std::function<void(int)> pick) {
-            int n = (int) opts.size();
-            Row w = {label, "", [=](int d) { pick(((sel + d) % n + n) % n); }, false, opts, sel, pick};
-            return w;
-        };
-        const std::vector<CaseStyle>& clib = caseLibrary();
-        int cn = (int) clib.size();
-        int di = 0; for (int k = 0; k < 9; k++) if (std::fabs(kDepthMm[k] - m->depthMm) < std::fabs(kDepthMm[di] - m->depthMm)) di = k;
-        bool scr = scrolling;
-        if (page == 0) {   // LOOK: a theme, then fine-tune its background
-            r.push_back({"THEME", m->themeIdx >= 0 && m->themeIdx < kThemeN ? kThemes[m->themeIdx].name : "CUSTOM",
-                [=](int d) { applyTheme(m, (m->themeIdx >= 0 ? m->themeIdx : -1 + (d < 0 ? 1 : 0)) + d); }, false});
-            r.push_back({"BACKGROUND", m->showBg ? kLookShort[clamp(m->look, 0, kLookN - 1)] : "OFF",
-                [=](int d) { if (m->showBg) m->look = wrap(m->look, d, kLookN); m->showBg = true; hand(); }, false});
-            r.push_back({"COLOUR", string::uppercase(kColorName[clamp(m->colorIdx, 0, kColorN - 1)]), [=](int d) { m->colorIdx = wrap(m->colorIdx, d, kColorN); hand(); }, false});
-            {   // IMAGE: NONE, the MY IMAGES folder's pictures, then LOAD FILE... (a click opens the file dialog)
-                std::string iv = m->imagePath.empty() ? "NONE" : string::uppercase(system::getStem(m->imagePath));
-                r.push_back({"IMAGE", iv, [=](int d) {
-                    std::vector<std::string> L = myImages();
-                    int n = (int) L.size() + 2, i = 0;   // 0 NONE, 1..L MY IMAGES, last LOAD FILE
-                    for (size_t k = 0; k < L.size(); k++) if (L[k] == m->imagePath) i = (int) k + 1;
-                    i = wrap(i, d, n);
-                    if (i == n - 1 && scr) i = wrap(i, d, n);   // the wheel skips LOAD FILE
-                    if (i == 0) m->imagePath.clear();
-                    else if (i <= (int) L.size()) useImage(m, L[i - 1]);
-                    else {
-                        osdialog_filters* f = osdialog_filters_parse("Images:png,jpg,jpeg,bmp,gif");
-                        char* path = osdialog_file(OSDIALOG_OPEN, myImagesDir().c_str(), NULL, f);
-                        osdialog_filters_free(f);
-                        if (path) { useImage(m, path); std::free(path); }
-                    }
-                }, false});
+        if (page == 0) return {"THEME", "BG", "COLOUR", "IMAGE", "PRESET"};
+        if (page == 1) return {"CASE", "MATERIAL", "DEPTH", "SHADOW"};
+        if (page == 2) {
+            if (m && m->earKind > 0) return {"OFF", "PANELS", "EARS", "FINISH", "SHAPE", "MORE"};
+            if (m && m->panelMat > 0) return {"OFF", "PANELS", "EARS", "MATERIAL", "SHAPE", "FINISH", "MORE"};
+            return {"OFF", "PANELS", "EARS"};
+        }
+        return {};
+    }
+    // SIDES: the first three keys are the mode; they act at once (and open the mode's first list)
+    int lastPanel = 0, lastEar = 0;
+    bool catIsAction(int c) { return page == 2 && c < 3; }
+    void catAction(int c) {
+        SynTHBloKBackdrop* m = module; if (!m) return;
+        if (c == 0) { m->panelMat = m->earKind = 0; }
+        if (c == 1) { if (m->panelMat == 0) m->panelMat = lastPanel > 0 ? lastPanel : 1; m->earKind = 0; cat[2] = 3; }
+        if (c == 2) { if (m->earKind == 0) m->earKind = lastEar > 0 ? lastEar : 1; m->panelMat = 0; cat[2] = 3; }
+        m->themeIdx = -1; pgPicked = false;
+    }
+    int modeCat() { SynTHBloKBackdrop* m = module; return !m ? 0 : m->earKind > 0 ? 2 : m->panelMat > 0 ? 1 : 0; }
+    Grid grid() {
+        Grid g; g.cols = 2; g.keyH = 12.f;
+        SynTHBloKBackdrop* m = module;
+        if (!m) return g;
+        auto hand = [=]() { m->themeIdx = -1; };
+        auto add = [&](const std::string& l, bool on, std::function<void()> f) { Item it; it.label = l; it.hasSw = false; it.on = on; it.act = f; g.items.push_back(it); };
+        auto addSw = [&](NVGcolor c, bool on, std::function<void()> f) { Item it; it.sw = c; it.hasSw = true; it.on = on; it.act = f; g.items.push_back(it); };
+        auto addThumb = [&](const std::string& t, bool on, std::function<void()> f) { Item it; it.thumb = t; it.hasSw = false; it.on = on; it.act = f; g.items.push_back(it); };
+        int c = cat[page];
+        if (page == 0) {
+            if (c == 0) { for (int i = 0; i < kThemeN; i++) add(kThemes[i].name, m->themeIdx == i, [=]() { applyTheme(m, i); }); }
+            else if (c == 1) {
+                add("OFF", !m->showBg, [=]() { m->showBg = false; hand(); });
+                for (int i = 0; i < kLookN; i++) add(kLookShort[i], m->showBg && m->look == i, [=]() { m->look = i; m->showBg = true; hand(); });
             }
-            {   // MY PRESET: the presets folder, then SAVE AS... (a click opens the save dialog)
-                std::vector<std::string> P = myPresets();
-                std::string pv = !m->presetPath.empty() && system::exists(m->presetPath) ? string::uppercase(system::getStem(m->presetPath)) : P.empty() ? "SAVE AS..." : string::f("%d SAVED", (int) P.size());
-                r.push_back({"MY PRESET", pv, [=](int d) {
-                    std::vector<std::string> L = myPresets();
-                    int n = (int) L.size() + 1, i = -1;   // the presets, then SAVE AS
-                    for (size_t k = 0; k < L.size(); k++) if (L[k] == m->presetPath) i = (int) k;
-                    i = i < 0 ? (d < 0 ? n - 1 : 0) : wrap(i, d, n);
-                    if (i == n - 1 && scr) { if (n == 1) return; i = wrap(i, d, n); }
-                    if (i < (int) L.size()) loadPreset(m, L[i]); else savePresetAs(m);
-                }, false});
+            else if (c == 2) { g.cols = 4; g.keyH = 20.f; for (int i = 0; i < kColorN; i++) addSw(kColor[i], m->colorIdx == i, [=]() { m->colorIdx = i; hand(); }); }
+            else if (c == 3) {   // IMAGE: the bank of built-in pictures, then the person's own (MY IMAGES), and loading one
+                g.cols = 3; g.keyH = 22.f;
+                bool none = m->imagePath.empty() && m->bankImg <= 0;
+                add("NONE", none, [=]() { m->imagePath.clear(); m->bankImg = 0; });
+                add("LOAD FILE", false, [=]() {
+                    osdialog_filters* f = osdialog_filters_parse("Images:png,jpg,jpeg,bmp,gif");
+                    char* path = osdialog_file(OSDIALOG_OPEN, myImagesDir().c_str(), NULL, f);
+                    osdialog_filters_free(f);
+                    if (path) { useImage(m, path); std::free(path); }
+                });
+                add("MY FOLDER", false, [=]() { system::openDirectory(myImagesDir()); });
+                for (int i = 1; i <= kBankN; i++) addThumb(bankThumbPath(i), m->bankImg == i && m->imagePath.empty(), [=]() { useBank(m, i); });
+                for (const std::string& p : myImages()) add(string::uppercase(system::getStem(p)), m->imagePath == p, [=]() { useImage(m, p); });
+            }
+            else {   // PRESET
+                add("SAVE AS...", false, [=]() { savePresetAs(m); });
+                add("OPEN FOLDER", false, [=]() { system::openDirectory(presetsDir()); });
+                for (const std::string& p : myPresets()) add(string::uppercase(system::getStem(p)), m->presetPath == p, [=]() { loadPreset(m, p); });
             }
         }
-        else if (page == 1) {   // CASE: the case itself (with rack ears there is none: an open rack)
+        else if (page == 1) {
+            const std::vector<CaseStyle>& lib = caseLibrary();
+            if (c == 0) { for (int i = 0; i < (int) lib.size(); i++) add(lib[i].name, m->caseIdx == i && m->earKind == 0, [=]() { m->caseIdx = i; m->earKind = 0; hand(); }); }
+            else if (c == 1) {
+                add("ITS OWN", m->caseMat == 0, [=]() { m->caseMat = 0; hand(); });
+                for (int i = 1; i < kPanelNoizee; i++) add(kPanelMat[i].name, m->caseMat == i, [=]() { m->caseMat = i; hand(); });
+            }
+            else if (c == 2) { g.cols = 3; g.keyH = 16.f; for (int k = 0; k < 9; k++) { float v = kDepthMm[k]; add(k ? string::f("%d MM", (int) v) : std::string("FLAT"), std::fabs(m->depthMm - v) < 0.5f, [=]() { m->depthMm = v; hand(); }); } }
+            else { g.keyH = 16.f; add("SHADOW ON", m->shadow, [=]() { m->shadow = true; }); add("SHADOW OFF", !m->shadow, [=]() { m->shadow = false; }); }
+        }
+        else if (page == 2) {
             bool ears = m->earKind > 0;
-            r.push_back({"CASE", ears ? "NONE: RACK EARS ON" : clib[clamp(m->caseIdx, 0, cn - 1)].name,
-                [=](int d) { if (m->earKind > 0) m->earKind = 0; else m->caseIdx = wrap(m->caseIdx, d, cn); hand(); }, false});
-            if (!ears) {
-                r.push_back({"MATERIAL", m->caseMat > 0 ? kPanelMat[clamp(m->caseMat, 0, kPanelMatN - 1)].name : "ITS OWN", [=](int d) { m->caseMat = wrap(m->caseMat, d, kPanelNoizee); hand(); }, false});
-                r.push_back({"DEPTH", m->depthMm < 1.f ? "FLAT" : string::f("%d MM", (int) std::round(m->depthMm)), [=](int d) { m->depthMm = kDepthMm[clamp(di + d, 0, 8)]; hand(); }, false});
+            int k = c - 3;   // the categories after the three mode keys
+            if (ears) {
+                if (k == 0) { for (int i = 1; i < kEarFinN; i++) add(kEarFin[i].name, m->earKind == i, [=]() { m->earKind = i; lastEar = i; hand(); }); }
+                else if (k == 1) { g.keyH = 16.f; add("STRAIGHT", m->earShape == 0, [=]() { m->earShape = 0; }); add("CONTOURED", m->earShape == 1, [=]() { m->earShape = 1; }); }
+                else if (k == 2) {
+                    g.cols = 1; g.keyH = 14.f;
+                    add(m->showBg ? "BACKGROUND: ON" : "BACKGROUND: OFF (BARE RAILS)", m->showBg, [=]() { m->showBg = !m->showBg; hand(); });
+                    if (isNoizee(m->earKind)) add(m->earName ? "NAME ON EAR: ON" : "NAME ON EAR: OFF", m->earName, [=]() { m->earName = !m->earName; });
+                }
             }
-            r.push_back(seg("SHADOW", {"ON", "OFF"}, m->shadow ? 0 : 1, [=](int i) { m->shadow = i == 0; }));
-        }
-        else if (page == 2) {   // SIDES: one switch, so a case has side panels or rack ears, never both
-            int mode = m->earKind > 0 ? 2 : m->panelMat > 0 ? 1 : 0;
-            r.push_back(seg("SIDES", {"NONE", "PANELS", "EARS"}, mode, [=](int i) {
-                if (i == 0) { m->panelMat = m->earKind = 0; }
-                if (i == 1 && m->panelMat == 0) { m->panelMat = lastPanel > 0 ? lastPanel : 1; m->earKind = 0; }
-                if (i == 2 && m->earKind == 0) { m->earKind = lastEar > 0 ? lastEar : 1; m->panelMat = 0; }
-                hand();
-            }));
-            if (mode == 1) {
-                r.push_back({"MATERIAL", kPanelMat[clamp(m->panelMat, 1, kPanelMatN - 1)].name, [=](int d) { m->panelMat = 1 + wrap(m->panelMat - 1, d, kPanelMatN - 1); lastPanel = m->panelMat; hand(); }, false});
-                int ps = 0; for (int k = 0; k < 3; k++) if (kPanelShapeOrder[k] == m->panelShape) ps = k;
-                r.push_back(seg("SHAPE", {"SQUARE", "SEMI", "ROUND"}, ps, [=](int i) { m->panelShape = kPanelShapeOrder[i]; }));
-                r.push_back(seg("FINISH", {"OILED", "SATIN", "GLOSS"}, clamp(m->panelFinish, 0, 2), [=](int i) { m->panelFinish = i; }));
-                if (noizeePanelArt(m->panelMat)) r.push_back(seg("NAME ON PANEL", {"ON", "OFF"}, m->earName ? 0 : 1, [=](int i) { m->earName = i == 0; }));
-                r.push_back(seg("CASE", {"ON", "OFF: RAILS ONLY"}, m->noCase ? 1 : 0, [=](int i) { m->noCase = i == 1; hand(); }));
-                r.push_back(seg("BACKGROUND", {"ON", "OFF"}, m->showBg ? 0 : 1, [=](int i) { m->showBg = i == 0; hand(); }));
-            }
-            if (mode == 2) {
-                r.push_back({"EAR FINISH", kEarFin[clamp(m->earKind, 1, kEarFinN - 1)].name, [=](int d) { m->earKind = 1 + wrap(m->earKind - 1, d, kEarFinN - 1); lastEar = m->earKind; hand(); }, false});
-                r.push_back(seg("EAR SHAPE", {"STRAIGHT", "CONTOURED"}, clamp(m->earShape, 0, 1), [=](int i) { m->earShape = i; }));
-                if (isNoizee(m->earKind)) r.push_back(seg("NAME ON EAR", {"ON", "OFF"}, m->earName ? 0 : 1, [=](int i) { m->earName = i == 0; }));
-                r.push_back(seg("BACKGROUND", {"ON", "OFF"}, m->showBg ? 0 : 1, [=](int i) { m->showBg = i == 0; hand(); }));   // off: bare rails on the ears
+            else if (m->panelMat > 0) {
+                if (k == 0) { for (int i = 1; i < kPanelMatN; i++) add(kPanelMat[i].name, m->panelMat == i, [=]() { m->panelMat = i; lastPanel = i; hand(); }); }
+                else if (k == 1) { g.cols = 3; g.keyH = 16.f; static const char* const sh[3] = {"SQUARE", "SEMI", "ROUND"};
+                    for (int i = 0; i < 3; i++) { int v = kPanelShapeOrder[i]; add(sh[i], m->panelShape == v, [=]() { m->panelShape = v; }); } }
+                else if (k == 2) { g.cols = 3; g.keyH = 16.f; for (int i = 0; i < 3; i++) add(kSideFinish[i], m->panelFinish == i, [=]() { m->panelFinish = i; }); }
+                else if (k == 3) {
+                    g.cols = 1; g.keyH = 14.f;
+                    add(m->noCase ? "CASE: OFF (RAILS ONLY)" : "CASE: ON", !m->noCase, [=]() { m->noCase = !m->noCase; hand(); });
+                    add(m->showBg ? "BACKGROUND: ON" : "BACKGROUND: OFF", m->showBg, [=]() { m->showBg = !m->showBg; hand(); });
+                    if (noizeePanelArt(m->panelMat)) add(m->earName ? "NAME ON PANEL: ON" : "NAME ON PANEL: OFF", m->earName, [=]() { m->earName = !m->earName; });
+                }
             }
         }
-        else {
-            r.push_back({"PATCH NAME", "", nullptr, false});   // the name field sits in this row
-            r.push_back(seg("SHOW ON RACK", {"ON", "OFF"}, m->showTitle ? 0 : 1, [=](int i) { m->showTitle = i == 0; }));
-            r.push_back({"USE FILE NAME", "CLEAR", [=](int) { m->title.clear(); }, true});
+        else {   // NAME: the field rides at the top of the grid area
+            g.keyH = 16.f;
+            add("SHOW ON RACK", m->showTitle, [=]() { m->showTitle = true; });
+            add("HIDE", !m->showTitle, [=]() { m->showTitle = false; });
+            add("USE FILE NAME", false, [=]() { m->title.clear(); });
+            add("COLLAPSE", false, [=]() { if (onCollapse) onCollapse(); });
         }
+        return g;
+    }
+    std::function<void()> onCollapse;
+    // geometry
+    float catY() { return kTabH + 3.f + kPrevH + 3.f; }
+    float gridY() { return page == kNamePage ? catY() + 16.f : catY() + kCatH + 9.f; }
+    float pagerY() { return box.size.y - kPageH - 2.f; }
+    int perPage(const Grid& g) { int rows = std::max(1, (int) ((pagerY() - 3.f - gridY() + kGap) / (g.keyH + kGap))); return rows * g.cols; }
+    int pageCount(const Grid& g) { int pp = perPage(g); return std::max(1, ((int) g.items.size() + pp - 1) / pp); }
+    int curPage(const Grid& g) {
+        int n = pageCount(g);
+        if (!pgPicked) {   // follow the current choice
+            for (int i = 0; i < (int) g.items.size(); i++) if (g.items[i].on) { pg = i / perPage(g); break; }
+        }
+        return clamp(pg, 0, n - 1);
+    }
+    math::Rect keyRect(const Grid& g, int idxOnPage) {
+        float iw = box.size.x - 2.f * kPad, kw = iw / g.cols;
+        int r = idxOnPage / g.cols, c = idxOnPage % g.cols;
+        return math::Rect(Vec(kPad + c * kw + kGap * 0.5f, gridY() + r * (g.keyH + kGap)), Vec(kw - kGap, g.keyH));
+    }
+    std::vector<math::Rect> catRects() {
+        std::vector<std::string> cs = cats(); std::vector<math::Rect> r;
+        float iw = box.size.x - 2.f * kPad, kw = cs.empty() ? 0.f : iw / cs.size();
+        for (size_t i = 0; i < cs.size(); i++) r.push_back(math::Rect(Vec(kPad + i * kw + kGap * 0.5f, catY()), Vec(kw - kGap, kCatH)));
         return r;
     }
-    int lastPanel = 0, lastEar = 0;   // what PANELS / EARS bring back after NONE
-    float rowsTop() { return kTabH + 3.f + kPrevH + 3.f; }
-    float rowY(int i) { return rowsTop() + i * kRowH; }
-    float tabW(int k) { return box.size.x / kPages; }
-    int rowAt(Vec p) { if (p.y < rowsTop() || p.y > box.size.y - kHintH) return -1; int i = (int) ((p.y - rowsTop()) / kRowH); return i; }
+    std::vector<math::Rect> pagerRects(int n) {   // ‹ 1 2 ... n ›
+        std::vector<math::Rect> r; int k = n + 2;
+        float iw = box.size.x - 2.f * kPad, kw = iw / k;
+        for (int i = 0; i < k; i++) r.push_back(math::Rect(Vec(kPad + i * kw + kGap * 0.5f, pagerY()), Vec(kw - kGap, kPageH)));
+        return r;
+    }
+    float tabW() { return box.size.x / kPages; }
     void step() override {
-        if (name) {   // the name field lives in the first NAME row
-            name->visible = page == kNamePage;
-            name->box.pos = box.pos.plus(Vec(kPad, rowY(0) + 6.f));
-            name->box.size = Vec(box.size.x - 2.f * kPad, kRowH - 7.f);
+        if (name) {   // the name field lives at the top of the NAME page's grid area
+            name->visible = page == kNamePage && visible;
+            name->box.pos = box.pos.plus(Vec(kPad, catY()));
+            name->box.size = Vec(box.size.x - 2.f * kPad, 12.f);
         }
         OpaqueWidget::step();
+    }
+    void hit(Vec p, int& tab, int& c, int& key, int& pgk) {
+        tab = c = key = pgk = -1;
+        if (p.y < kTabH) { tab = clamp((int) (p.x / tabW()), 0, kPages - 1); return; }
+        std::vector<math::Rect> cr = catRects();
+        for (size_t i = 0; i < cr.size(); i++) if (cr[i].contains(p)) { c = (int) i; return; }
+        Grid g = grid(); int n = pageCount(g), cp = curPage(g), pp = perPage(g);
+        if (n > 1) { std::vector<math::Rect> pr = pagerRects(n); for (size_t i = 0; i < pr.size(); i++) if (pr[i].contains(p)) { pgk = (int) i; return; } }
+        for (int i = 0; i < pp && cp * pp + i < (int) g.items.size(); i++) if (keyRect(g, i).contains(p)) { key = cp * pp + i; return; }
     }
     void onButton(const ButtonEvent& e) override {
         if (e.button != GLFW_MOUSE_BUTTON_LEFT || e.action != GLFW_PRESS) { OpaqueWidget::onButton(e); return; }
         e.consume(this);
-        if (e.pos.y < kTabH) {
-            float x = 0.f;
-            for (int k = 0; k < kPages; k++) { x += tabW(k); if (e.pos.x < x) { page = k; break; } }
+        int tab, c, key, pgk; hit(e.pos, tab, c, key, pgk);
+        if (tab >= 0) {
+            page = tab; pgPicked = false;
             if (page == kNamePage && name) { step(); name->visible = true; nameWanted = true; }   // NAME: start typing
             return;
         }
-        std::vector<Row> r = rows();
-        int i = rowAt(e.pos);
-        if (i < 0 || i >= (int) r.size() || !r[i].step) return;
-        if (!r[i].opts.empty()) {   // option boxes: pick the one clicked
-            int n = (int) r[i].opts.size();
-            r[i].pick(clamp((int) ((e.pos.x - kPad) / ((box.size.x - 2.f * kPad) / n)), 0, n - 1));
+        if (c >= 0) { if (catIsAction(c)) catAction(c); else { cat[page] = c; pgPicked = false; } return; }
+        Grid g = grid();
+        if (pgk >= 0) {
+            int n = pageCount(g), cp = curPage(g);
+            pg = pgk == 0 ? (cp + n - 1) % n : pgk == n + 1 ? (cp + 1) % n : pgk - 1; pgPicked = true;
             return;
         }
-        r[i].step(e.pos.x < box.size.x * 0.5f && !r[i].flip ? -1 : 1);
+        if (key >= 0 && key < (int) g.items.size() && g.items[key].act) { pendingAct = g.items[key].act; }   // run on release (dialogs)
     }
+    std::function<void()> pendingAct;
     bool nameWanted = false;   // select the name field once the click is over, so the click doesn't take it back
     void onDragEnd(const DragEndEvent& e) override {
+        if (pendingAct) { std::function<void()> f = pendingAct; pendingAct = nullptr; f(); }
         if (nameWanted && name) { nameWanted = false; APP->event->setSelectedWidget(name); }
         OpaqueWidget::onDragEnd(e);
     }
-    void onHover(const HoverEvent& e) override { hover = rowAt(e.pos); OpaqueWidget::onHover(e); }
-    void onLeave(const LeaveEvent& e) override { hover = -1; }
-    void onHoverScroll(const HoverScrollEvent& e) override {
-        std::vector<Row> r = rows();
-        int i = rowAt(e.pos);
-        if (i < 0 || i >= (int) r.size() || !r[i].step) return;
-        scrolling = true;   // rows skip their dialog slots (LOAD FILE, SAVE AS) for the wheel
-        r[i].step(e.scrollDelta.y > 0 ? -1 : 1);
-        scrolling = false;
+    void onHover(const HoverEvent& e) override { hit(e.pos, hoverTab, hoverCat, hoverKey, hoverPg); OpaqueWidget::onHover(e); }
+    void onLeave(const LeaveEvent& e) override { hoverTab = hoverCat = hoverKey = hoverPg = -1; }
+    void onHoverScroll(const HoverScrollEvent& e) override {   // the wheel turns pages (never steps through a list)
+        Grid g = grid(); int n = pageCount(g);
+        if (n > 1) { int cp = curPage(g); pg = clamp(cp + (e.scrollDelta.y > 0 ? -1 : 1), 0, n - 1); pgPicked = true; }
         e.consume(this);
+    }
+    // images for the keys (bank thumbnails) and the preview, cached per path
+    std::map<std::string, int> thumbs; NVGcontext* thumbVg = NULL;
+    int thumbImg(NVGcontext* vg, const std::string& p) {
+        if (thumbVg != vg) { thumbs.clear(); thumbVg = vg; }
+        auto it = thumbs.find(p);
+        if (it != thumbs.end()) return it->second;
+        int h = nvgCreateImage(vg, p.c_str(), 0);
+        thumbs[p] = h;
+        return h;
     }
     // LIVE PREVIEW: a small picture of the look as set: the background (the art itself, or its colour), the case in its
     // colour / material, two rows of modules, the side panels and the rack ears
@@ -2249,6 +2321,16 @@ struct BackdropOled : widget::OpaqueWidget {
                 prevLook = k; prevVg = vg;
             }
             if (prevImg >= 0) { nvgFillPaint(vg, nvgImagePattern(vg, x, y - (w * 0.625f - h) * 0.5f, w, w * 0.625f, 0.f, prevImg, 1.f)); nvgFill(vg); }
+        }
+        if (m && m->showBg) {   // a picture (the bank's or the person's own) over the look, as in the rack
+            std::string ip = m->imagePath.empty() && m->bankImg > 0 ? bankThumbPath(m->bankImg) : m->imagePath;
+            int img = ip.empty() ? -1 : thumbImg(vg, ip);
+            if (img >= 0) {
+                int iw = 1, ih = 1; nvgImageSize(vg, img, &iw, &ih);
+                float k = std::max(w / iw, h / ih), dw = iw * k, dh = ih * k;
+                nvgBeginPath(vg); nvgRect(vg, x, y, w, h);
+                nvgFillPaint(vg, nvgImagePattern(vg, x + (w - dw) * 0.5f, y + (h - dh) * 0.5f, dw, dh, 0.f, img, 1.f - m->imgDim)); nvgFill(vg);
+            }
         }
         if (m) {
             const std::vector<CaseStyle>& lib = caseLibrary();
@@ -2304,6 +2386,22 @@ struct BackdropOled : widget::OpaqueWidget {
         nvgStrokeWidth(args.vg, 0.8f);
         nvgStroke(args.vg);
     }
+    // a square key: softly backlit, brighter when hovered, brightest (with a lit rim) when on
+    void keyBox(NVGcontext* vg, math::Rect r, bool on, bool hot) {
+        nvgBeginPath(vg); nvgRect(vg, r.pos.x, r.pos.y, r.size.x, r.size.y);
+        nvgFillColor(vg, oled::amber(on ? 150 : hot ? 52 : 30)); nvgFill(vg);
+        nvgStrokeColor(vg, oled::amber(on ? 235 : hot ? 150 : 90)); nvgStrokeWidth(vg, 0.6f); nvgStroke(vg);
+    }
+    void keyText(NVGcontext* vg, math::Rect r, const std::string& t, bool on, float size) {
+        nvgFontSize(vg, size); nvgTextLetterSpacing(vg, 0.15f);
+        float bw = nvgTextBounds(vg, 0, 0, t.c_str(), NULL, NULL);
+        if (bw > r.size.x - 2.f) { nvgFontSize(vg, size * 0.82f); nvgTextLetterSpacing(vg, 0.f); }
+        nvgSave(vg); nvgIntersectScissor(vg, r.pos.x + 0.5f, r.pos.y, r.size.x - 1.f, r.size.y);
+        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(vg, on ? nvgRGB(255, 246, 225) : oled::amber());
+        nvgText(vg, r.pos.x + r.size.x * 0.5f, r.pos.y + r.size.y * 0.5f + 0.3f, t.c_str(), NULL);
+        nvgRestore(vg);
+    }
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
         std::shared_ptr<window::Font> font = APP->window->uiFont;
@@ -2313,98 +2411,85 @@ struct BackdropOled : widget::OpaqueWidget {
         float W = box.size.x;
         // tabs
         static const char* const tabs[kPages] = {"LOOK", "CASE", "SIDES", "NAME"};
-        nvgFontSize(vg, 6.6f);
-        nvgTextLetterSpacing(vg, 0.2f);
-        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        float tx0 = 0.f;
         for (int k = 0; k < kPages; k++) {
-            float tw = tabW(k);
-            // squared tab keys: every one softly backlit, the chosen one brighter (less translucent) with a lit rim
-            nvgBeginPath(vg); nvgRect(vg, tx0 + 0.3f, 0.6f, tw - 0.6f, kTabH - 1.2f);   // square keys, packed tight
-            nvgFillColor(vg, oled::amber(k == page ? 150 : 34)); nvgFill(vg);
-            nvgStrokeColor(vg, oled::amber(k == page ? 235 : 90)); nvgStrokeWidth(vg, 0.7f); nvgStroke(vg);
-            nvgFillColor(vg, k == page ? nvgRGB(255, 246, 225) : oled::amber());
-            float lx = k == kNamePage ? 3.5f : 0.f;   // NAME carries the status light, a small LED beside the word
-            nvgText(vg, tx0 + tw * 0.5f + 0.1f + lx, kTabH * 0.5f + 0.5f, tabs[k], NULL);
-            if (k == kNamePage) {
-                // amber while this BACKDROP dresses the rack, red if another one does
+            math::Rect r(Vec(k * tabW() + 0.3f, 0.6f), Vec(tabW() - 0.6f, kTabH - 1.2f));
+            keyBox(vg, r, k == page, k == hoverTab);
+            if (k == kNamePage) {   // the status light: amber while this BACKDROP dresses the rack, red if another one does
                 bool mine = !module || gOwner == owner;
-                float cx = tx0 + tw * 0.5f - 8.5f, cy = kTabH * 0.5f;
+                float cx = r.pos.x + 6.f, cy = kTabH * 0.5f;
                 NVGcolor lc = mine ? nvgRGB(255, 190, 90) : nvgRGB(220, 50, 35);
-                nvgBeginPath(vg); nvgCircle(vg, cx, cy, 4.2f);
-                nvgFillPaint(vg, nvgRadialGradient(vg, cx, cy, 0.8f, 4.2f, nvgTransRGBA(lc, 150), nvgRGBA(0, 0, 0, 0))); nvgFill(vg);
-                nvgBeginPath(vg); nvgCircle(vg, cx, cy, 1.6f);
-                nvgFillColor(vg, k == page ? nvgLerpRGBA(lc, nvgRGB(0, 0, 0), 0.35f) : lc); nvgFill(vg);
+                nvgBeginPath(vg); nvgCircle(vg, cx, cy, 4.f);
+                nvgFillPaint(vg, nvgRadialGradient(vg, cx, cy, 0.8f, 4.f, nvgTransRGBA(lc, 150), nvgRGBA(0, 0, 0, 0))); nvgFill(vg);
+                nvgBeginPath(vg); nvgCircle(vg, cx, cy, 1.5f); nvgFillColor(vg, lc); nvgFill(vg);
+                r.pos.x += 5.f; r.size.x -= 5.f;
             }
-            tx0 += tw;
+            keyText(vg, r, tabs[k], k == page, 6.6f);
         }
-        nvgBeginPath(vg); nvgMoveTo(vg, 1.f, kTabH + 0.5f); nvgLineTo(vg, W - 1.f, kTabH + 0.5f);
-        nvgStrokeColor(vg, oled::outline(90)); nvgStrokeWidth(vg, 0.6f); nvgStroke(vg);
         drawPreview(vg, kPad, kTabH + 3.f, W - 2.f * kPad, kPrevH);
-        // the hint along the foot
-        nvgFontSize(vg, 5.f); nvgTextLetterSpacing(vg, 0.3f); nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFillColor(vg, oled::outline(150));
-        bool other = module && gOwner && gOwner != owner;
-        if (other) nvgFillColor(vg, nvgRGB(220, 70, 50));
-        nvgText(vg, W * 0.5f, box.size.y - kHintH * 0.5f, other ? "ANOTHER BACKDROP IS DRESSING THE RACK" : "CLICK < >  \xc2\xb7  SCROLL  \xc2\xb7  RIGHT-CLICK FOR ALL", NULL);
-        // rows
-        std::vector<Row> r = rows();
-        float iw = W - 2.f * kPad;
-        for (int i = 0; i < (int) r.size(); i++) {
-            float y = rowY(i);
-            if (y + kRowH > box.size.y - kHintH) break;
-            bool hot = i == hover && r[i].step;
-            if (hot) {
-                nvgBeginPath(vg); nvgRoundedRect(vg, 1.5f, y, W - 3.f, kRowH - 1.5f, 1.5f);
-                nvgFillColor(vg, oled::amber(26)); nvgFill(vg);
-                nvgStrokeColor(vg, oled::amber(110)); nvgStrokeWidth(vg, 0.6f); nvgStroke(vg);
-            }
-            nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-            nvgFontSize(vg, 5.4f);
-            nvgTextLetterSpacing(vg, 0.4f);
+        // categories
+        std::vector<std::string> cs = cats(); std::vector<math::Rect> cr = catRects();
+        int mc = modeCat();
+        for (size_t i = 0; i < cs.size(); i++) {
+            bool on = catIsAction((int) i) ? (int) i == mc : (int) i == cat[page];
+            if (page == 2 && !catIsAction((int) i) && (int) i == cat[page]) on = true;
+            keyBox(vg, cr[i], on, (int) i == hoverCat);
+            keyText(vg, cr[i], cs[i], on, 5.6f);
+        }
+        if (page == 2 && cat[2] >= (int) cs.size()) cat[2] = (int) cs.size() > 3 ? 3 : 0;
+        // the chosen category's name and the current pick, over the grid
+        Grid g = grid();
+        if (!cs.empty() && page != kNamePage) {
+            std::string what = catIsAction(cat[page]) && page == 2 ? "SIDES" : cs[clamp(cat[page], 0, (int) cs.size() - 1)];
+            std::string cur;
+            for (const Item& it : g.items) if (it.on && !it.label.empty()) { cur = it.label; break; }
+            nvgFontSize(vg, 5.2f); nvgTextLetterSpacing(vg, 0.4f); nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
             nvgFillColor(vg, oled::dim());
-            nvgText(vg, kPad, y + 1.2f, r[i].label.c_str(), NULL);
-            if (page == kNamePage && i == 0) continue;   // the name field draws itself
-            if (!r[i].opts.empty()) {   // option boxes, the chosen one lit
-                int n = (int) r[i].opts.size();
-                float bw = iw / n;
-                nvgFontSize(vg, 6.2f); nvgTextLetterSpacing(vg, 0.2f); nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-                for (int k = 0; k < n; k++) {
-                    float bx = kPad + k * bw;
-                    nvgBeginPath(vg); nvgRect(vg, bx + 0.3f, y + 6.4f, bw - 0.6f, 9.8f);   // square keys, packed tight
-                    bool on = k == r[i].sel;   // backlit like the tabs: all softly, the chosen one brighter with a lit rim
-                    nvgFillColor(vg, oled::amber(on ? 150 : hot ? 46 : 30)); nvgFill(vg);
-                    nvgStrokeColor(vg, oled::amber(on ? 235 : 90)); nvgStrokeWidth(vg, 0.6f); nvgStroke(vg);
-                    nvgFillColor(vg, on ? nvgRGB(255, 246, 225) : oled::amber());
-                    nvgText(vg, bx + bw * 0.5f, y + 11.4f, r[i].opts[k].c_str(), NULL);
-                }
+            nvgText(vg, kPad + 1.f, catY() + kCatH + 4.5f, (std::string("\xe2\x96\xbe ") + what + (cur.empty() ? "" : "  \xc2\xb7  " + cur)).c_str(), NULL);
+        }
+        if (page == 2 && g.items.empty()) {   // SIDES with nothing open: say what the keys do
+            nvgFontSize(vg, 5.6f); nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE); nvgFillColor(vg, oled::outline(150));
+            nvgText(vg, W * 0.5f, gridY() + 20.f, mc == 0 ? "PICK PANELS OR EARS" : "PICK A KEY ABOVE", NULL);
+        }
+        // the grid (this page of it)
+        int n = pageCount(g), cp = curPage(g), pp = perPage(g);
+        for (int i = 0; i < pp && cp * pp + i < (int) g.items.size(); i++) {
+            const Item& it = g.items[cp * pp + i];
+            math::Rect r = keyRect(g, i);
+            bool hot = cp * pp + i == hoverKey;
+            if (it.hasSw) {   // a colour swatch
+                nvgBeginPath(vg); nvgRect(vg, r.pos.x, r.pos.y, r.size.x, r.size.y); nvgFillColor(vg, it.sw); nvgFill(vg);
+                nvgStrokeColor(vg, it.on ? nvgRGB(255, 240, 210) : oled::amber(hot ? 180 : 70)); nvgStrokeWidth(vg, it.on ? 1.6f : 0.6f); nvgStroke(vg);
                 continue;
             }
-            // the value, with arrows when it steps; slides sideways when it's too long and hovered
-            bool arrows = r[i].step && !r[i].flip;
-            float vx = kPad + (arrows ? 8.f : 0.f), vw = iw - (arrows ? 16.f : 0.f);
-            float bw = 0.f, off = 0.f;
-            for (float fsz : {8.4f, 7.2f, 6.f}) {   // three fixed sizes only (nothing re-rasterised per frame)
-                nvgFontSize(vg, fsz);
-                nvgTextLetterSpacing(vg, fsz > 6.f ? 0.2f : 0.f);
-                bw = nvgTextBounds(vg, 0, 0, r[i].value.c_str(), NULL, NULL);
-                if (bw <= vw) break;
-            }
-            if (bw > vw && hot) { float span = bw - vw + 8.f; off = std::fmod((float) system::getTime() * 18.f, span * 2.f); if (off > span) off = 2.f * span - off; }
-            nvgSave(vg);
-            nvgScissor(vg, vx, y, vw, kRowH);
-            nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-            nvgFillColor(vg, oled::amber());
-            float tx = bw <= vw ? vx + (vw - bw) * 0.5f : vx - off;
-            nvgText(vg, tx, y + 11.4f, r[i].value.c_str(), NULL);
-            nvgRestore(vg);
-            if (arrows) {
-                nvgFillColor(vg, hot ? oled::amber() : oled::outline(140));
-                for (int sd = 0; sd < 2; sd++) {
-                    float ax = sd ? W - kPad - 1.f : kPad + 1.f, ay = y + 11.4f, d = sd ? -1.f : 1.f;
-                    nvgBeginPath(vg); nvgMoveTo(vg, ax, ay); nvgLineTo(vg, ax + d * 4.f, ay - 3.f); nvgLineTo(vg, ax + d * 4.f, ay + 3.f); nvgClosePath(vg); nvgFill(vg);
+            if (!it.thumb.empty()) {   // a picture from the bank
+                int img = thumbImg(vg, it.thumb);
+                nvgBeginPath(vg); nvgRect(vg, r.pos.x, r.pos.y, r.size.x, r.size.y);
+                if (img >= 0) {
+                    int iw = 1, ih = 1; nvgImageSize(vg, img, &iw, &ih);
+                    float k = std::max(r.size.x / iw, r.size.y / ih), dw = iw * k, dh = ih * k;
+                    nvgSave(vg); nvgIntersectScissor(vg, r.pos.x, r.pos.y, r.size.x, r.size.y);
+                    nvgFillPaint(vg, nvgImagePattern(vg, r.pos.x + (r.size.x - dw) * 0.5f, r.pos.y + (r.size.y - dh) * 0.5f, dw, dh, 0.f, img, 1.f)); nvgFill(vg);
+                    nvgRestore(vg);
                 }
+                nvgBeginPath(vg); nvgRect(vg, r.pos.x, r.pos.y, r.size.x, r.size.y);
+                nvgStrokeColor(vg, it.on ? nvgRGB(255, 240, 210) : oled::amber(hot ? 200 : 60)); nvgStrokeWidth(vg, it.on ? 1.6f : 0.6f); nvgStroke(vg);
+                continue;
             }
+            keyBox(vg, r, it.on, hot);
+            keyText(vg, r, it.label, it.on, 5.4f);
+        }
+        // the pager: ‹ 1 2 ... ›, the page shown lit
+        if (n > 1) {
+            std::vector<math::Rect> pr = pagerRects(n);
+            for (int i = 0; i < (int) pr.size(); i++) {
+                bool on = i >= 1 && i <= n && i - 1 == cp;
+                keyBox(vg, pr[i], on, i == hoverPg);
+                keyText(vg, pr[i], i == 0 ? "\xe2\x80\xb9" : i == n + 1 ? "\xe2\x80\xba" : string::f("%d", i), on, 6.f);
+            }
+        }
+        else if (module && gOwner && gOwner != owner) {
+            nvgFontSize(vg, 5.f); nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE); nvgFillColor(vg, nvgRGB(220, 70, 50));
+            nvgText(vg, W * 0.5f, pagerY() + kPageH * 0.5f, "ANOTHER BACKDROP IS DRESSING THE RACK", NULL);
         }
         nvgTextLetterSpacing(vg, 0.f);
     }
@@ -2472,6 +2557,74 @@ struct BackdropTitle : TransparentWidget {
     }
 };
 
+// COLLAPSED (Nov 2026): BACKDROP folds to 7 HP (the width of its title): the modules' face, and down the middle a tall
+// strip showing the rack's background (the picture, the art, or the colour), with an EXPAND key at the foot.
+struct BackdropFace : widget::TransparentWidget {
+    SynTHBloKBackdrop* module = NULL;
+    int img = -1; std::string imgPath; NVGcontext* imgVg = NULL;
+    void draw(const DrawArgs& args) override {
+        NVGcontext* vg = args.vg;
+        float w = box.size.x, h = box.size.y;
+        nvgBeginPath(vg); nvgRect(vg, 0, 0, w, h); nvgFillColor(vg, nvgRGB(0x11, 0x11, 0x11)); nvgFill(vg);
+        nvgFillPaint(vg, nvgLinearGradient(vg, 0, 0, 0, h, nvgRGBA(255, 255, 255, 9), nvgRGBA(0, 0, 0, 41))); nvgFill(vg);
+        nvgBeginPath(vg); nvgRect(vg, 0, 0, w, mm2px(7.f)); nvgFillColor(vg, nvgRGB(8, 8, 8)); nvgFill(vg);
+        nvgBeginPath(vg); nvgRect(vg, 0, mm2px(7.f) - 0.45f, w, 0.9f); nvgFillColor(vg, nvgRGBA(255, 122, 0, 190)); nvgFill(vg);
+        nvgBeginPath(vg); nvgRoundedRect(vg, mm2px(2.5f), mm2px(9.f), w - mm2px(5.f), mm2px(116.5f), mm2px(1.2f));
+        nvgFillColor(vg, nvgRGB(0x16, 0x16, 0x16)); nvgFill(vg);
+        nvgStrokeColor(vg, nvgRGB(0x2c, 0x2c, 0x2c)); nvgStrokeWidth(vg, mm2px(0.25f)); nvgStroke(vg);
+        // the strip: what is on the background now
+        SynTHBloKBackdrop* m = module;
+        float sx = mm2px(4.2f), sy = mm2px(11.f), sw = w - 2.f * sx, sh = mm2px(100.f);
+        NVGcolor col = m ? kColor[clamp(m->colorIdx, 0, kColorN - 1)] : nvgRGB(40, 20, 60);
+        nvgBeginPath(vg); nvgRect(vg, sx, sy, sw, sh);
+        nvgFillPaint(vg, nvgLinearGradient(vg, 0, sy, 0, sy + sh, nvgLerpRGBA(col, nvgRGB(255, 255, 255), 0.1f), nvgLerpRGBA(col, nvgRGB(0, 0, 0), 0.5f))); nvgFill(vg);
+        std::string p;
+        if (m && m->showBg) {
+            p = bgImagePath(m);
+            if (p.empty() && m->look >= LOOK_ART) p = asset::plugin(pluginInstance, string::f("res/backdrops/%s.jpg", kArtFile[clamp(m->look - LOOK_ART, 0, kArtN - 1)]));
+        }
+        if (!p.empty()) {
+            if (imgVg != vg || imgPath != p) { if (img >= 0 && imgVg == vg) nvgDeleteImage(vg, img); img = nvgCreateImage(vg, p.c_str(), 0); imgPath = p; imgVg = vg; }
+            if (img >= 0) {
+                int iw = 1, ih = 1; nvgImageSize(vg, img, &iw, &ih);
+                float k = std::max(sw / iw, sh / ih), dw = iw * k, dh = ih * k;
+                nvgSave(vg); nvgIntersectScissor(vg, sx, sy, sw, sh);
+                nvgBeginPath(vg); nvgRect(vg, sx, sy, sw, sh);
+                nvgFillPaint(vg, nvgImagePattern(vg, sx + (sw - dw) * 0.5f, sy + (sh - dh) * 0.5f, dw, dh, 0.f, img, 1.f)); nvgFill(vg);
+                nvgRestore(vg);
+            }
+        }
+        nvgBeginPath(vg); nvgRect(vg, sx, sy, sw, sh); nvgStrokeColor(vg, nvgRGBA(255, 190, 90, 90)); nvgStrokeWidth(vg, 0.8f); nvgStroke(vg);
+        if (std::shared_ptr<window::Font> font = APP->window->uiFont) {
+            nvgFontFaceId(vg, font->handle); nvgFontSize(vg, mm2px(1.944f) * 1.4f); nvgTextLetterSpacing(vg, 0.f);
+            nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_BASELINE);
+            nvgFillColor(vg, nvgRGB(0x80, 0x80, 0x80)); nvgText(vg, w * 0.5f, mm2px(127.9f), "NoiZee ToyZ", NULL);
+        }
+        Widget::draw(args);
+    }
+};
+// the EXPAND key on the collapsed face (and nothing else there takes clicks, so the module still drags)
+struct BackdropExpand : widget::OpaqueWidget {
+    std::function<void()> act;
+    bool hot = false;
+    void onButton(const ButtonEvent& e) override { if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) e.consume(this); }
+    void onDragEnd(const DragEndEvent& e) override { if (e.button == GLFW_MOUSE_BUTTON_LEFT && act) act(); }
+    void onEnter(const EnterEvent& e) override { hot = true; }
+    void onLeave(const LeaveEvent& e) override { hot = false; }
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1) return;
+        NVGcontext* vg = args.vg;
+        nvgBeginPath(vg); nvgRect(vg, 0.3f, 0.3f, box.size.x - 0.6f, box.size.y - 0.6f);
+        nvgFillColor(vg, oled::amber(hot ? 90 : 40)); nvgFill(vg);
+        nvgStrokeColor(vg, oled::amber(hot ? 235 : 130)); nvgStrokeWidth(vg, 0.7f); nvgStroke(vg);
+        if (std::shared_ptr<window::Font> font = APP->window->uiFont) {
+            nvgFontFaceId(vg, font->handle); nvgFontSize(vg, 6.2f); nvgTextLetterSpacing(vg, 0.6f);
+            nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE); nvgFillColor(vg, oled::amber());
+            nvgText(vg, box.size.x * 0.5f, box.size.y * 0.5f + 0.3f, "\xe2\x80\xb9 EXPAND \xe2\x80\xba", NULL);
+        }
+    }
+};
+
 struct SynTHBloKBackdropWidget : ModuleWidget {
     SynTHBloKBackdropWidget(SynTHBloKBackdrop* module) {
         setModule(module);
@@ -2481,23 +2634,62 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         p->module = module;
         p->widget = this;
         addChild(p);
+        face = new BackdropFace;   // shown only when collapsed
+        face->module = module;
+        face->box.size = box.size;
+        face->visible = false;
+        addChild(face);
+        expand = new BackdropExpand;
+        expand->box.pos = mm2px(Vec(2.9f, 112.6f));
+        expand->box.size = mm2px(Vec(7.f * 5.08f - 5.8f, 7.4f));
+        expand->act = [=]() { setCollapsed(false); };
+        expand->visible = false;
+        addChild(expand);
         addChild(createWidget<BackdropTitle>(mm2px(Vec(8.5f, 0.f))));
         BackdropOled* om = new BackdropOled;   // the OLED menu fills the well; the name field rides in its NAME page
         om->module = module;
         om->box.pos = mm2px(Vec(5.6f, 12.6f));
         om->box.size = mm2px(Vec(49.76f, 107.8f));   // the well runs down to just above the bottom screws
         om->owner = this;
+        om->onCollapse = [=]() { setCollapsed(true); };
         addChild(om);
+        oled = om;
         NameOled* nf = new NameOled;
         nf->module = module;
         nf->visible = false;
         om->name = nf;
         addChild(nf);   // after the menu, so it gets the clicks in its row
+        nameField = nf;
         // four screws, 3.5 mm in from each corner, as on every module
-        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
-        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(60.96f - 3.5f, 3.5f))));
-        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 125.f))));
-        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(60.96f - 3.5f, 125.f))));
+        for (int k = 0; k < 4; k++) {
+            screws[k] = createWidgetCentered<SocketScrew>(mm2px(Vec((k & 1) ? 60.96f - 3.5f : 3.5f, k < 2 ? 3.5f : 125.f)));
+            addChild(screws[k]);
+        }
+        fold(false);
+    }
+    // COLLAPSE / EXPAND: 12 HP <-> 7 HP. Expanding pushes the neighbours aside if they are in the way.
+    BackdropFace* face = NULL; BackdropExpand* expand = NULL; BackdropOled* oled = NULL; NameOled* nameField = NULL;
+    widget::Widget* screws[4] = {};
+    void setCollapsed(bool c) {
+        SynTHBloKBackdrop* m = dynamic_cast<SynTHBloKBackdrop*>(module);
+        if (!m || m->collapsed == c) return;
+        m->collapsed = c;
+        fold(true);
+    }
+    void fold(bool push) {
+        SynTHBloKBackdrop* m = dynamic_cast<SynTHBloKBackdrop*>(module);
+        bool c = m && m->collapsed;
+        float w = RACK_GRID_WIDTH * (c ? 7.f : 12.f);
+        if (box.size.x != w) {
+            box.size.x = w;
+            if (push && APP->scene && APP->scene->rack) APP->scene->rack->setModulePosForce(this, box.pos);
+        }
+        if (getPanel()) getPanel()->visible = !c;
+        if (oled) oled->visible = !c;
+        if (nameField && c) nameField->visible = false;
+        if (face) { face->visible = c; face->box.size = box.size; }
+        if (expand) expand->visible = c;
+        for (int k = 0; k < 4; k++) if (screws[k]) screws[k]->box.pos.x = ((k & 1) ? w - mm2px(3.5f) : mm2px(3.5f)) - screws[k]->box.size.x * 0.5f;
     }
     // CASE SNAPSHOTS (a dev aid): if Rack's user folder holds SynTHBloK/snap_cases.txt when this BACKDROP opens, it
     // steps through every case and saves a picture of the Rack window for each to SynTHBloK/case_shots/
@@ -2549,6 +2741,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         ModuleWidget::step();
         SynTHBloKBackdrop* m = getModule<SynTHBloKBackdrop>();
         if (!m) return;
+        if ((box.size.x < RACK_GRID_WIDTH * 9.f) != m->collapsed) fold(false);   // a patch or preset changed it
         // take the rack if no BACKDROP has it: the layer goes just above Rack's rails (its first child)
         if (!gOwner && APP->scene && APP->scene->rack && !APP->scene->rack->children.empty()) {
             gLayer = new BackdropLayer;
@@ -2562,6 +2755,13 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
     void appendContextMenu(Menu* menu) override {
         SynTHBloKBackdrop* m = getModule<SynTHBloKBackdrop>();
         if (!m) return;
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuItem(m->collapsed ? "Expand BACKDROP" : "Collapse BACKDROP (7 HP)", "", [=]() { setCollapsed(!m->collapsed); }));
+        menu->addChild(createSubmenuItem("Image bank", m->bankImg > 0 && m->imagePath.empty() ? string::f("#%d", m->bankImg) : "", [=](Menu* sub) {
+            sub->addChild(createCheckMenuItem("None", "", [=]() { return m->bankImg <= 0 || !m->imagePath.empty(); }, [=]() { m->bankImg = 0; }));
+            for (int i = 1; i <= kBankN; i++)
+                sub->addChild(createCheckMenuItem(string::f("Picture %d", i), "", [=]() { return m->bankImg == i && m->imagePath.empty(); }, [=]() { useBank(m, i); m->themeIdx = -1; }));
+        }));
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("BACKGROUND"));
         menu->addChild(createBoolPtrMenuItem("Draw the background", "", &m->showBg));
@@ -2601,7 +2801,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
                 m->fit = 1; m->imgScale = 1.f; m->imgW = m->imgH = 1.f; m->imgX = m->imgY = 0.f;   // snap it in, every time
             }
         }));
-        if (!m->imagePath.empty()) {
+        if (!bgImagePath(m).empty()) {
             menu->addChild(createIndexSubmenuItem("Image placement", std::vector<std::string>(kFitName, kFitName + 4),
                 [=]() { return (size_t) m->fit; }, [=](size_t i) { m->fit = (int) i; }));
             menu->addChild(pctSlider("Darken", &m->imgDim, 0.f, 0.9f, 0.f));
@@ -2614,7 +2814,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
                 sub->addChild(pctSlider("X offset", &m->imgX, -1.f, 1.f, 0.f));
                 sub->addChild(pctSlider("Y offset", &m->imgY, -1.f, 1.f, 0.f));
             }));
-            menu->addChild(createMenuItem("Clear the image", "", [=]() { m->imagePath.clear(); }));
+            menu->addChild(createMenuItem("Clear the image", "", [=]() { m->imagePath.clear(); m->bankImg = 0; }));
         }
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("CASE"));
