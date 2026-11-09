@@ -74,6 +74,8 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   decision log, from `tools/claude_thinking.json` (local, git-ignored). Claude: update that file as you work (keys: updated,
   mode: think|compile|idle (drives the MIND canvas: embers when idle, alive when thinking, hot while compiling), task, goal, now{title,detail,why}, questions[], plan[{title,state: done|now|next|later|blocked,note}], log[{t,kind:
   think|do|check|fix|ask,text}]).
+- WORKBENCH header OPEN RACK button: POST /rack/launch on the helper starts Rack.exe (Rack2Pro, else Rack2Free) from the
+  helper (a normal user process, so the real plugins folder) or brings a running Rack to the front; GET /ping says if it runs.
 - `tools/open_workbench.ps1`: the workbench on 127.0.0.1:8766 (plus the Tailscale address for the phone), with the
   chat, patch-feed and open-in-Rack helpers.
 - POWERSHELL tab console modes: PS, CMD (cmd.exe) and ADMIN. ADMIN starts `tools/admin_worker.ps1` through the Windows
@@ -104,15 +106,23 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   set a side material + wood finish (Theme.sideMat / sideFinish, SW_* names for the species woods).
   SIDE PANELS (attachments, Nick's meaning of "side panels"): separate solid slabs on the outside of each case end
   (kPanelMat: NONE, 24 woods, 6 man-made: diamond plate, carbon fiber, 3D printed PLA, brushed alu, neon acrylic, tolex;
-  shapes SUBTLE ROUNDED 6 px / SOFT RECTANGLE 16 px; widths; OILED/SATIN/GLOSS). Round-over edges, visible thickness,
-  own shadow, NO screws on the face (real panels screw on from the inside). CASE MATERIAL builds the frame itself in any
-  kPanelMat material. The old per-case "side material" is now labelled CASE ENDS. Themes put their wood on the panels.
+  shapes SQUARE 2 / SEMI-ROUNDED 6 / ROUNDED 16 px (kPanelShape, SQUARE appended at index 2); one width, SLIM 36 px; OILED/SATIN/GLOSS). Flush with the case top and
+  the full case height (they follow the case size); thickness shows on the outer side only; own shadow, NO screws on the face
+  (real panels screw on from the inside). CASE MATERIAL builds the frame itself in any kPanelMat material. The old CASE ENDS
+  material/finish option is removed (Nov 2026; saved sideMat/sideFinish are ignored). Themes put their wood on the panels.
+  Side panels XOR rack ears: picking one turns the other off. With ears there is NO case: an open rack, Rack's rails screwing
+  straight onto the ears (ears at the row ends, a round hole + our socket screw, 23 px = 10-32 cap, at every rail). With side
+  panels on, the case's own ends are hidden (drawn 2 px, square); they come back when the panels go. Ears are 92 px wide,
+  STRAIGHT or CONTOURED (earShape: the outer edge dips 9 px along each row). END SHAPE / END WIDTH are gone: cases keep their ends.
   Man-made textures: `make_wood_textures.py mats` -> res/cases/mat_*.png. RACK EARS (kEarFin): L-shaped brackets, a lip
   down each case end (outside any side panels), a plate bent out with two oval slots; 9 plain finishes (aluminium, black,
   gold, copper, bronze, green, primary red/blue/yellow) + NOIZEE TOYZ (black, orange rule, name optional: earName).
-  BACKDROP is 12 HP since Nov 2026 (was 6; `tools/make_backdrop_panel.py`). OLED: 5 tabs THEME / BG / CASE / SIDES / NAME
-  (kNamePage = 4), a LIVE PREVIEW strip (art, case colour, panels, ears), label-over-value rows with arrows, a hint line;
-  status light beside NAME, a 10-segment level meter between the L/R jacks.
+  BACKDROP is 12 HP since Nov 2026 (was 6; `tools/make_backdrop_panel.py`). OLED (simplified): 4 tabs LOOK / CASE / SIDES /
+  NAME (kNamePage = 3), 3-5 rows each; SIDES is one NONE/PANELS/EARS switch; rows are < > steppers or option boxes (Row.opts);
+  IMAGE steps NONE / MY IMAGES / LOAD FILE, MY PRESET steps the presets / SAVE AS (the wheel skips the dialog slots).
+  Themes (remade): mostly case only; 6 wear side panels, 5 wear rack ears (Theme.ear / earShape). a LIVE PREVIEW strip (art, case colour, panels, ears), label-over-value rows with arrows, a hint line.
+  No NAME key on the panel: the NAME tab starts typing and carries the status LED (amber = this one dresses the rack, red =
+  another does). Small jacks (SmallJack) for L/R, a 10-segment meter between them; two top screws at 3.5 mm like the MTX modules.
   Screws: the MTX / drum / singles modules have had two top screws since before v2.1.0 (checked against the tag); the
   SocketScrew change only swapped the look (silver -> black socket head), no positions moved.
   Rails: BACKDROP never draws rails. Each case row is left open edge to edge (a shorter row's empty end too), so Rack's own

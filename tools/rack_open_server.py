@@ -3,6 +3,7 @@
 # Rack on the patch, brings it to the front).
 #   python3 tools/rack_open_server.py        (tools/open_workbench.ps1 starts it with the workbench)
 #   POST /open  {"lib": "SynTHBloK" | "Rack", "file": "<name>.vcv"}   -> {"ok": true, "path": ...}
+#   POST /rack/launch               opens VCV Rack (as it last was), or brings it to the front if it's running
 #   GET  /ping                                                         -> {"ok": true, "rack": <is Rack running>}
 #   POST /gen   {"style": "<genre>" | ""}   -> {"ok": true, "file": ...}: the PATCHES pop-up's GEN button. One new
 #        patch (tools/make_series_patches.py --gen) into Rack's patches folder, for the pop-up to show; Rack is left alone.
@@ -348,6 +349,18 @@ def ps_runs():
         out.append({k: v for k, v in r.items() if k != 'log'})
     return out
 
+RACK_EXES = [r'C:\Program Files\VCV\Rack2Pro\Rack.exe', r'C:\Program Files\VCV\Rack2Free\Rack.exe']
+def rack_launch():
+    """The workbench's OPEN RACK button: start Rack (from this helper, a normal user process, so it uses the real
+    plugins folder) or, if it's already running, bring its window to the front."""
+    if rack_running():
+        ps = "$p = Get-Process Rack -ErrorAction SilentlyContinue | Select-Object -First 1; if ($p) { (New-Object -ComObject WScript.Shell).AppActivate($p.Id) | Out-Null }"
+        subprocess.Popen(['powershell', '-NoProfile', '-Command', ps], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        return {'ok': True, 'did': 'focused'}
+    exe = next((e for e in RACK_EXES if os.path.isfile(e)), None)
+    if not exe: return {'ok': False, 'error': 'Rack.exe not found in Program Files\\VCV'}
+    subprocess.Popen([exe], cwd=os.path.dirname(exe))
+    return {'ok': True, 'did': 'started', 'exe': exe}
 def rack_running():
     r = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq Rack.exe', '/NH'], capture_output=True, text=True)
     return 'Rack.exe' in r.stdout
@@ -516,7 +529,7 @@ class H(BaseHTTPRequestHandler):
             except Exception as e: return self.reply(500, {'ok': False, 'error': str(e)})
         self.reply(404, {'ok': False})
     def do_POST(self):
-        if self.path not in ('/open', '/gen', '/sh', '/sh/kill', '/cleaner', '/cleaner/uninstall', '/cleaner/settings', '/runq/open', '/ps', '/ps/kill', '/ps/task', '/ps/task/in', '/ps/task/stop', '/site', '/backdrop', '/cmd', '/cmd/kill', '/admin', '/admin/kill', '/admin/start', '/admin/stop'): return self.reply(404, {'ok': False})
+        if self.path not in ('/open', '/gen', '/sh', '/sh/kill', '/cleaner', '/cleaner/uninstall', '/cleaner/settings', '/runq/open', '/ps', '/ps/kill', '/ps/task', '/ps/task/in', '/ps/task/stop', '/site', '/backdrop', '/cmd', '/cmd/kill', '/admin', '/admin/kill', '/admin/start', '/admin/stop', '/rack/launch'): return self.reply(404, {'ok': False})
         # pages from other sites can't use it: only the workbench's own origin
         if self.headers.get('Origin') not in ORIGINS: return self.reply(403, {'ok': False, 'error': 'not the workbench'})
         if self.path.startswith('/sh'):
@@ -534,6 +547,7 @@ class H(BaseHTTPRequestHandler):
             i = sh_start(cmd)
             if i is None: return self.reply(409, {'ok': False, 'error': 'a command is still running (Ctrl+C stops it)'})
             return self.reply(200, {'ok': True, 'id': i, 'cwd': SH['cwd']})
+        if self.path == '/rack/launch': return self.reply(200, rack_launch())
         if self.path == '/gen': return self.gen()
         if self.path == '/cleaner': return self.cleaner()
         if self.path == '/site': return self.site_note()

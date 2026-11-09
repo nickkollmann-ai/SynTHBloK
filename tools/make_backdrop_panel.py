@@ -36,7 +36,6 @@ def well(x, y, w, h):
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 W, H = 60.96, 128.5        # 12 HP (Nov 2026: was 6 HP; the OLED got twice as wide)
-LED_X, LED_Y = W / 2 + 13.0, 104.9   # the status light (drawn by the module: amber = dressing the rack), beside NAME
 
 p = ['<?xml version="1.0" encoding="UTF-8"?>',
      '<svg xmlns="http://www.w3.org/2000/svg" width="%gmm" height="%gmm" viewBox="0 0 %g %g">' % (W, H, W, H),
@@ -49,14 +48,12 @@ p = ['<?xml version="1.0" encoding="UTF-8"?>',
      ]   # the header words are drawn by the module, like every MTX module (SynTHBloK white, the name orange)
 # the card and its dark well (plain: no big lettering)
 p.append(frame(2.5, 9.0, W - 5.0, 116.5))
-p.append(well(5.0, 12.0, W - 10.0, 87.0))   # the OLED menu
-# the status light's ring and label
-p.append('<circle cx="%g" cy="%g" r="2.6" fill="#0c0c0c" stroke="#2c2c2c" stroke-width="0.25"/>' % (LED_X, LED_Y))
+p.append(well(5.0, 12.0, W - 10.0, 94.0))   # the OLED menu (the NAME key and status light now live in its NAME tab)
 p.append('<rect x="%g" y="110.2" width="4.4" height="14.6" rx="0.6" fill="#0a0a0a" stroke="#2c2c2c" stroke-width="0.25"/>' % (W / 2 - 2.2))   # the level meter's window
 p.append(text_path('NoiZee ToyZ', W / 2, 127.9, 1.944, REG, fill='#808080'))   # the same footer as the MTX modules
 # the meter inputs' rings (L, R)
-for jx in (W / 2 - 10.0, W / 2 + 10.0):
-    p.append('<circle cx="%g" cy="117.6" r="4.2" fill="#0c0c0c" stroke="#2c2c2c" stroke-width="0.25"/>' % jx)
+for jx in (W / 2 - 8.0, W / 2 + 8.0):   # small jacks, as on the MTX modules
+    p.append('<circle cx="%g" cy="117.6" r="3.4" fill="#0c0c0c" stroke="#2c2c2c" stroke-width="0.25"/>' % jx)
 p.append('</svg>')
 open(os.path.join(ROOT, 'res', 'SynTHBloKBackdrop.svg'), 'w', encoding='utf-8').write('\n'.join(p) + '\n')
 print('wrote res/SynTHBloKBackdrop.svg')

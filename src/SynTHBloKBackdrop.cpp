@@ -158,8 +158,9 @@ static const PanelMat kPanelMat[] = {
 static const int kPanelMatN = (int) (sizeof(kPanelMat) / sizeof(kPanelMat[0]));
 static const int kPanelManMade = 25;   // the first man-made entry (menus put a heading there)
 static int woodToPanel(int sw) { return sw >= SW_BLACK_WALNUT && sw <= SW_SHOU_SUGI_BAN ? sw - SW_BLACK_WALNUT + 1 : 0; }
-static const char* const kPanelShape[] = {"SUBTLE ROUNDED", "SOFT RECTANGLE"};
-static const float kPanelRadius[] = {6.f, 16.f};
+static const char* const kPanelShape[] = {"SEMI-ROUNDED", "ROUNDED", "SQUARE"};   // shown SQUARE / SEMI / ROUND
+static const float kPanelRadius[] = {6.f, 16.f, 2.f};
+static const int kPanelShapeOrder[] = {2, 0, 1};
 static const char* const kPanelWidth[] = {"SLIM", "NORMAL", "WIDE"};
 static const float kPanelWidthPx[] = {36.f, 52.f, 70.f};
 // RACK EARS: L-shaped metal brackets, a 1/4" lip down each case end, then a flat plate bent outward with two oval
@@ -302,7 +303,8 @@ struct SynTHBloKBackdrop : Module {
     int sideFinish = 0;   // species woods: OILED / SATIN / GLOSS
     int panelMat = 0, panelShape = 0, panelWidth = 1, panelFinish = 2;   // SIDE PANELS (attachments); 0: none
     int caseMat = 0;   // CASE MATERIAL (kPanelMat index; 0: the case's own)
-    int earKind = 0; bool earName = true;   // RACK EARS (kEarFin index; 0: none); the NOIZEE TOYZ ear's name on/off
+    // RACK EARS: kEarFin index (0: none); the NOIZEE TOYZ ear's name on/off; shape 0 STRAIGHT, 1 CONTOURED outer edge
+    int earKind = 0; bool earName = true; int earShape = 0;
     bool shadow = true, rails = true;
     bool showTitle = false;   // the name above the case: optional, off unless turned on (NAME page or menu)
     std::string title;   // empty: the patch's file name
@@ -357,6 +359,7 @@ struct SynTHBloKBackdrop : Module {
         json_object_set_new(r, "caseMat", json_integer(caseMat));
         json_object_set_new(r, "earKind", json_integer(earKind));
         json_object_set_new(r, "earName", json_boolean(earName));
+        json_object_set_new(r, "earShape", json_integer(earShape));
         json_object_set_new(r, "openMode", json_integer(openMode));
         json_object_set_new(r, "shadow", json_boolean(shadow));
         json_object_set_new(r, "rails", json_boolean(rails));
@@ -392,12 +395,13 @@ struct SynTHBloKBackdrop : Module {
         if (json_t* v = json_object_get(r, "sideWidth")) sideWidth = clamp((int) json_integer_value(v), 0, 4);
         if (json_t* v = json_object_get(r, "sideFinish")) sideFinish = clamp((int) json_integer_value(v), 0, 2);
         if (json_t* v = json_object_get(r, "panelMat")) panelMat = clamp((int) json_integer_value(v), 0, kPanelMatN - 1);
-        if (json_t* v = json_object_get(r, "panelShape")) panelShape = clamp((int) json_integer_value(v), 0, 1);
+        if (json_t* v = json_object_get(r, "panelShape")) panelShape = clamp((int) json_integer_value(v), 0, 2);
         if (json_t* v = json_object_get(r, "panelWidth")) panelWidth = clamp((int) json_integer_value(v), 0, 2);
         if (json_t* v = json_object_get(r, "panelFinish")) panelFinish = clamp((int) json_integer_value(v), 0, 2);
         if (json_t* v = json_object_get(r, "caseMat")) caseMat = clamp((int) json_integer_value(v), 0, kPanelMatN - 1);
         if (json_t* v = json_object_get(r, "earKind")) earKind = clamp((int) json_integer_value(v), 0, kEarFinN - 1);
         if (json_t* v = json_object_get(r, "earName")) earName = json_boolean_value(v);
+        if (json_t* v = json_object_get(r, "earShape")) earShape = clamp((int) json_integer_value(v), 0, 1);
         if (json_t* v = json_object_get(r, "openMode")) openMode = clamp((int) json_integer_value(v), 0, 2);
         if (json_t* v = json_object_get(r, "shadow")) shadow = json_boolean_value(v);
         if (json_t* v = json_object_get(r, "rails")) rails = json_boolean_value(v);
@@ -1074,18 +1078,19 @@ struct BackdropLayer : widget::TransparentWidget {
         NVGcolor avg = nvgRGB(pm.r, pm.g, pm.b);
         float s = cs.side, tt = topLip(cs);
         float x = in.pos.x - s, y = in.pos.y - tt, w = in.size.x + 2.f * s, h = in.size.y + 6.f + tt;
-        float pw = kPanelWidthPx[clamp(width, 0, 2)], rad = kPanelRadius[clamp(shape, 0, 1)];
-        float py = y - 16.f, ph = h + 26.f, th = 8.f, e = std::min(7.f, pw * 0.2f);
+        float pw = kPanelWidthPx[0], rad = kPanelRadius[clamp(shape, 0, 2)];
+        // flush with the top of the case and running its full height, so it follows the case's size
+        float py = y, ph = h, th = 5.f, e = std::min(7.f, pw * 0.2f);
         for (int side = 0; side < 2; side++) {
-            float px = side ? x + w : x - pw;
+            float px = side ? x + w : x - pw, dir = side ? 1.f : -1.f;   // the thickness shows on the outer side only
             if (doShadow) {
-                nvgBeginPath(vg); nvgRect(vg, px - 30.f, py - 30.f, pw + 80.f, ph + 80.f);
-                nvgFillPaint(vg, nvgBoxGradient(vg, px + th + 6.f, py + th + 8.f, pw, ph, rad + 6.f, 16.f, nvgRGBA(0, 0, 0, 150), nvgRGBA(0, 0, 0, 0)));
+                nvgBeginPath(vg); nvgRect(vg, px - 40.f, py - 30.f, pw + 80.f, ph + 80.f);
+                nvgFillPaint(vg, nvgBoxGradient(vg, px + dir * (th + 4.f), py + 8.f, pw, ph, rad + 6.f, 16.f, nvgRGBA(0, 0, 0, 150), nvgRGBA(0, 0, 0, 0)));
                 nvgFill(vg);
             }
-            // the thickness: the outline swept toward the lower right, one solid colour band (layers of the same fill)
+            // the thickness: the outline swept outward, one solid colour band (layers of the same fill)
             for (int k = (int) th; k >= 1; k--) {
-                nvgBeginPath(vg); nvgRoundedRect(vg, px + k, py + k * 0.8f, pw, ph, rad);
+                nvgBeginPath(vg); nvgRoundedRect(vg, px + dir * k, py, pw, ph, rad);
                 nvgFillColor(vg, nvgLerpRGBA(avg, nvgRGB(0, 0, 0), 0.62f - 0.1f * k / th));
                 nvgFill(vg);
             }
@@ -1116,12 +1121,38 @@ struct BackdropLayer : widget::TransparentWidget {
         }
     }
     // ---- RACK EARS: on each end of the case (outside the side panels, if there are any)
-    void drawEars(NVGcontext* vg, const CaseStyle& cs, math::Rect in, int kind, bool name, float panelW, bool doShadow) {
+    // With ears there is no case: an open rack, just Rack's rails, whose ends screw straight onto the ears. So the ears
+    // sit right at the ends of the module rows, and their slots line up with each row's rails.
+    void drawEars(NVGcontext* vg, math::Rect in, int kind, bool name, int shape, bool doShadow, const std::vector<float>& rowTops) {
         const EarFin& ef = kEarFin[clamp(kind, 1, kEarFinN - 1)];
         NVGcolor c = nvgRGB(ef.r, ef.g, ef.b);
-        float s = cs.side, tt = topLip(cs);
-        float x = in.pos.x - s - panelW, y = in.pos.y - tt, w = in.size.x + 2.f * (s + panelW), h = in.size.y + 6.f + tt;
-        const float lip = 7.f, plate = 46.f;
+        float x = in.pos.x, y = in.pos.y, w = in.size.x, h = in.size.y;
+        const float lip = 7.f, plate = 92.f;   // twice the first width (Nov 2026)
+        // CONTOURED: the outer edge dips in gently along each row (full width at the rails, 9 px in at the middle),
+        // with softly rounded corners where rows meet; STRAIGHT: a plain edge
+        std::vector<float> segs;
+        for (float rt : rowTops) segs.push_back(rt);
+        if (segs.empty()) segs.push_back(y);
+        auto platePath = [&](float px, int sd) {
+            float in0 = sd ? px : px + plate, out = sd ? px + plate : px, o = sd ? 1.f : -1.f;
+            nvgBeginPath(vg);
+            nvgMoveTo(vg, in0, y);
+            if (!shape) { nvgLineTo(vg, out, y); nvgLineTo(vg, out, y + h); }
+            else {
+                const float dip = 9.f, rc = 5.f;
+                nvgLineTo(vg, out - o * rc, y); nvgQuadTo(vg, out, y, out, y + rc);
+                for (size_t k = 0; k < segs.size(); k++) {
+                    float a = std::max(y, segs[k]), b = k + 1 < segs.size() ? segs[k + 1] : y + h;
+                    if (b - a < 4.f * rc) { nvgLineTo(vg, out, b); continue; }
+                    nvgLineTo(vg, out, a + rc);
+                    nvgBezierTo(vg, out - o * dip, a + (b - a) * 0.3f, out - o * dip, a + (b - a) * 0.7f, out, b - rc);
+                    if (k + 1 < segs.size()) nvgLineTo(vg, out, b + rc);
+                }
+                nvgLineTo(vg, out, y + h - rc); nvgQuadTo(vg, out, y + h, out - o * rc, y + h);
+            }
+            nvgLineTo(vg, in0, y + h);
+            nvgClosePath(vg);
+        };
         int brushed = tex(vg, "brushed");
         for (int side = 0; side < 2; side++) {
             int dir = side ? 1 : -1;
@@ -1135,14 +1166,15 @@ struct BackdropLayer : widget::TransparentWidget {
             }
             // plate: the colour, brushed grain, then a subtle shade from the bend (inside, darker) to the outer edge,
             // and a faint fall-off from top to bottom
-            nvgBeginPath(vg); nvgRect(vg, px, y, plate, h);
+            platePath(px, side);
             nvgFillColor(vg, c); nvgFill(vg);
             if (brushed >= 0 && ef.brushed > 0.f) { nvgFillPaint(vg, nvgImagePattern(vg, px, y, 300.f, 300.f, (float) M_PI * 0.5f, brushed, ef.brushed)); nvgFill(vg); }
             float inX = side ? px : px + plate, outX = side ? px + plate : px;
             nvgFillPaint(vg, nvgLinearGradient(vg, inX, 0, outX, 0, nvgRGBA(0, 0, 0, 38), nvgRGBA(255, 255, 255, 10))); nvgFill(vg);
             nvgFillPaint(vg, nvgLinearGradient(vg, 0, y, 0, y + h, nvgRGBA(255, 255, 255, 8), nvgRGBA(0, 0, 0, 16))); nvgFill(vg);
-            nvgBeginPath(vg); nvgRect(vg, px, y, plate, 1.f); nvgFillColor(vg, nvgRGBA(255, 255, 255, 60)); nvgFill(vg);   // lit top edge
-            nvgBeginPath(vg); nvgRect(vg, side ? px + plate - 1.f : px, y, 1.f, h); nvgFillColor(vg, nvgRGBA(0, 0, 0, 110)); nvgFill(vg);   // outer edge
+            nvgBeginPath(vg); nvgRect(vg, px + (shape && !side ? 5.f : 0.f), y, plate - (shape ? 5.f : 0.f), 1.f); nvgFillColor(vg, nvgRGBA(255, 255, 255, 60)); nvgFill(vg);   // lit top edge
+            platePath(px, side);   // the outer rim: a dark line round the plate (the bend side is covered by the lip)
+            nvgStrokeColor(vg, nvgRGBA(0, 0, 0, 110)); nvgStrokeWidth(vg, 1.f); nvgStroke(vg);
             // lip and bend: a rounded highlight across the fold
             for (int half = 0; half < 2; half++) {
                 float hx = lx + half * lip * 0.5f;
@@ -1151,12 +1183,26 @@ struct BackdropLayer : widget::TransparentWidget {
                 nvgFillPaint(vg, half ? nvgLinearGradient(vg, hx, 0, hx + lip * 0.5f, 0, b, a) : nvgLinearGradient(vg, hx, 0, hx + lip * 0.5f, 0, a, b));
                 nvgFill(vg);
             }
-            // two oval mounting slots, dark, with a lit lower lip
+            // oval mounting slots, dark, with a lit lower lip: one at each rail (top and bottom of every row)
             float cx = px + plate * 0.5f;
-            for (int k = 0; k < 2; k++) {
-                float sy = k ? y + h - 22.f : y + 22.f;
-                nvgBeginPath(vg); nvgEllipse(vg, cx, sy + 0.8f, 10.f, 4.6f); nvgFillColor(vg, nvgLerpRGBA(c, nvgRGB(255, 255, 255), 0.3f)); nvgFill(vg);
-                nvgBeginPath(vg); nvgEllipse(vg, cx, sy, 9.5f, 4.2f); nvgFillColor(vg, nvgRGB(8, 8, 10)); nvgFill(vg);
+            std::vector<float> slots;
+            for (float rt : rowTops) { slots.push_back(rt + 7.5f); slots.push_back(rt + RACK_GRID_HEIGHT - 7.5f); }
+            if (slots.empty()) { slots.push_back(y + 22.f); slots.push_back(y + h - 22.f); }
+            // round holes with our black socket-head screw in each, bigger than the modules' M3 screws: a 10-32 rack
+            // screw's socket cap is about 7.9 mm across (23 px; the modules' screw is 15 px)
+            static std::shared_ptr<window::Svg> screw;
+            if (!screw) screw = window::Svg::load(asset::plugin(pluginInstance, "res/SocketScrewBlack.svg"));
+            const float sd = 23.f;
+            for (float sy : slots) {
+                nvgBeginPath(vg); nvgCircle(vg, cx, sy, sd * 0.5f + 1.2f);   // a faint countersink ring round the head
+                nvgFillPaint(vg, nvgRadialGradient(vg, cx, sy, sd * 0.5f - 1.f, sd * 0.5f + 1.2f, nvgRGBA(0, 0, 0, 120), nvgRGBA(0, 0, 0, 0))); nvgFill(vg);
+                if (screw && screw->handle) {
+                    nvgSave(vg); nvgTranslate(vg, cx - sd * 0.5f, sy - sd * 0.5f); nvgScale(vg, sd / 15.f, sd / 15.f);
+                    window::svgDraw(vg, screw->handle);
+                    nvgRestore(vg);
+                } else {
+                    nvgBeginPath(vg); nvgCircle(vg, cx, sy, 4.f); nvgFillColor(vg, nvgRGB(8, 8, 10)); nvgFill(vg);   // the bare round hole
+                }
             }
             if (kind == kEarNoizee) {   // the rig's orange rule down the inner edge
                 float rx = side ? px + 3.f : px + plate - 5.f;
@@ -1515,12 +1561,10 @@ struct BackdropLayer : widget::TransparentWidget {
         const std::vector<CaseStyle>& lib = caseLibrary();
         CaseStyle cs = lib[clamp(m->caseIdx, 0, (int) lib.size() - 1)];
         if (cs.material != M_NONE) {   // the side panel options
-            if (m->sideShape > 0) cs.ends = kSideShapeEnds[m->sideShape];
-            cs.side *= kSideWidthK[clamp(m->sideWidth, 0, 4)];
+            // END SHAPE / END WIDTH: removed (Nov 2026); every case keeps the ends it was drawn with
             if (m->openMode == 1) cs.extras |= X_OPEN;
             if (m->openMode == 2) cs.extras &= ~X_OPEN;
-            cs.sideIdx = m->sideMat;
-            cs.sideFinish = m->sideFinish;
+            cs.sideIdx = 0;   // CASE ENDS material: removed (Nov 2026); old patches' choice is ignored
             if (m->caseMat > 0 && kPanelMat[clamp(m->caseMat, 0, kPanelMatN - 1)].tex) {   // CASE MATERIAL
                 const PanelMat& pm = kPanelMat[clamp(m->caseMat, 0, kPanelMatN - 1)];
                 cs.bodyTex = pm.tex; cs.base = nvgRGB(pm.r, pm.g, pm.b);
@@ -1537,12 +1581,18 @@ struct BackdropLayer : widget::TransparentWidget {
                 drawLook(args.vg, v, m->look, col, cs.material == M_NONE ? col : cs.base);
                 drawImage(args, v);
             });
-        if (cs.material != M_NONE)
+        if (cs.material != M_NONE || m->earKind > 0)
             outside(args.vg, v, holes, [&]() {
                 for (const Block& b : bl) {
-                    drawCase(args.vg, cs, b.r, m->depthMm, m->shadow, false, b.rows);
-                    if (m->panelMat > 0) drawPanels(args.vg, cs, b.r, m->panelMat, m->panelShape, m->panelWidth, m->panelFinish, m->shadow);
-                    if (m->earKind > 0) drawEars(args.vg, cs, b.r, m->earKind, m->earName, m->panelMat > 0 ? kPanelWidthPx[clamp(m->panelWidth, 0, 2)] : 0.f, m->shadow);
+                    // either side panels on a case, or rack ears on an open rack (no case: the rails screw onto the
+                    // ears); never both (ears win in an old patch with both)
+                    if (m->earKind > 0) { drawEars(args.vg, b.r, m->earKind, m->earName, m->earShape, m->shadow, b.rows); continue; }
+                    if (m->panelMat > 0) {   // side panels replace the case's own ends (they come back when the panels go)
+                        CaseStyle pc = cs; pc.side = 2.f; pc.ends = E_SQUARE;
+                        drawCase(args.vg, pc, b.r, m->depthMm, m->shadow, false, b.rows);
+                        drawPanels(args.vg, pc, b.r, m->panelMat, m->panelShape, 0, m->panelFinish, m->shadow);
+                    }
+                    else drawCase(args.vg, cs, b.r, m->depthMm, m->shadow, false, b.rows);
                 }
             });
         // the patch title, above the first block
@@ -1577,34 +1627,13 @@ static void* gOwner = NULL;
 
 // ---------------------------------------------------------------------------------------------------------
 // THE PANEL: res/SynTHBloKBackdrop.svg (tools/make_backdrop_panel.py), 12 HP, the SynTHBloK look. This widget
-// adds the status light (amber while this BACKDROP dresses the rack, dim red if another one does) and the level meter.
+// adds the level meter (the status light lives in the OLED's NAME tab).
 // ---------------------------------------------------------------------------------------------------------
 struct BackdropPanel : widget::Widget {
     SynTHBloKBackdrop* module = NULL;
     void* widget = NULL;
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
-        // the status light: amber while this BACKDROP dresses the rack, dim red if another one does
-        bool mine = module && gOwner == widget;
-        float cx = box.size.x * 0.5f + mm2px(13.f), cy = mm2px(104.9f);
-        nvgBeginPath(args.vg);
-        nvgCircle(args.vg, cx, cy, 6.f);
-        nvgFillPaint(args.vg, nvgRadialGradient(args.vg, cx, cy, 1.f, 6.f, mine ? nvgRGBA(255, 160, 40, 200) : nvgRGBA(200, 40, 30, 120), nvgRGBA(0, 0, 0, 0)));
-        nvgFill(args.vg);
-        nvgBeginPath(args.vg);
-        nvgCircle(args.vg, cx, cy, 2.2f);
-        nvgFillColor(args.vg, mine || !module ? nvgRGB(255, 190, 90) : nvgRGB(160, 40, 30));
-        nvgFill(args.vg);
-        if (module && !mine) {
-            std::shared_ptr<window::Font> font = APP->window->uiFont;
-            if (font) {
-                nvgFontFaceId(args.vg, font->handle);
-                nvgFontSize(args.vg, 5.5f);
-                nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
-                nvgFillColor(args.vg, nvgRGB(200, 70, 50));
-                nvgText(args.vg, cx, cy - 9.f, "ANOTHER IS ON", NULL);
-            }
-        }
         // the level meter between L and R: ten segments, green, amber, red (the louder side)
         if (module) {
             float lv = std::max(module->peak[0], module->peak[1]);
@@ -1727,9 +1756,11 @@ struct NameOled : ui::TextField {
 
 
 // THEMES: a look, a colour, a case and a depth that go together. Pick one, then change any part (it shows CUSTOM).
-struct Theme { const char* name; int look; int color; const char* caseName; float depthMm; int sideMat; int sideFinish; };   // sideMat/Finish: 0 = the case's own
+// sideMat/sideFinish: the side panels' wood (0: none); ear/earShape: rack ears (kEarFin index, 0: none; 1 = contoured).
+// Remade Nov 2026: most themes are just a case; a few wear side panels, a few rack ears (an open rack, no case).
+struct Theme { const char* name; int look; int color; const char* caseName; float depthMm; int sideMat; int sideFinish; int ear; int earShape; };
 static const Theme kThemes[] = {
-    {"SYNTHBLOK BLACK", LOOK_GRADIENT, 0, "BLACK ANODIZED", 65.f},
+    {"SYNTHBLOK BLACK", LOOK_GRADIENT, 0, "BLACK ANODIZED", 65.f, 0, 0, 10, 0},
     {"WALNUT STUDIO", LOOK_CASE_GRADIENT, 0, "WALNUT SKIFF", 84.f},
     {"OAK DAYLIGHT", LOOK_CASE_GRADIENT, 0, "OAK SKIFF", 65.f},
     {"EBONY NIGHT", LOOK_GRADIENT, 1, "EBONY SKIFF", 84.f},
@@ -1737,8 +1768,8 @@ static const Theme kThemes[] = {
     {"TIERED SUNSET", 14, 5, "TIERED WALNUT", 100.f},
     {"AMBER LAB", 1, 2, "LAB EXTRUSION", 84.f},
     {"OLED GLOW", 2, 0, "BLACK ANODIZED", 50.f},
-    {"DEEP SPACE", 4, 0, "SMOKED ACRYLIC", 50.f},
-    {"BLUEPRINT", 10, 8, "BRUSHED ALUMINUM", 65.f},
+    {"DEEP SPACE", 4, 0, "SMOKED ACRYLIC", 50.f, 0, 0, 2, 1},
+    {"BLUEPRINT", 10, 8, "BRUSHED ALUMINUM", 65.f, 0, 0, 1, 0},
     {"ROAD WARRIOR", 3, 19, "ROAD CASE", 120.f},
     {"TOUR CASE", 6, 1, "SUITCASE 9U", 120.f},
     {"STUDIO FOAM", 12, 1, "STALKER 6U", 100.f},
@@ -1771,7 +1802,7 @@ static const Theme kThemes[] = {
     {"FLOW", LOOK_ART + 4, 0, "CARBON FIBER", 65.f},
     {"CRYSTAL CAVE", LOOK_ART + 5, 0, "BRUSHED ALUMINUM", 84.f},
     {"SCOPE", LOOK_ART + 6, 0, "BUS STEEL 7U", 84.f},
-    {"GOLD MARBLE", LOOK_ART + 7, 0, "EBONY SKIFF", 84.f},
+    {"GOLD MARBLE", LOOK_ART + 7, 0, "EBONY SKIFF", 84.f, 0, 0, 3, 1},
     {"PCB", LOOK_ART + 8, 0, "LAB EXTRUSION", 84.f},
     {"SPECTRUM", LOOK_ART + 9, 0, "PERFORMER 7U", 100.f},
     // PSYCHEDELIC combos (Nov 2026): Nick's abstract artwork, with neon, UV and blacklight cases
@@ -1801,58 +1832,58 @@ static const Theme kThemes[] = {
     {"NEON PINK NIGHT", LOOK_GRADIENT, 25, "NEON ACRYLIC PINK", 50.f},
     {"ACID GREEN", LOOK_GRADIENT, 26, "UV PRINT LIME", 65.f},
     {"UV BLUE", LOOK_GRADIENT, 27, "NEON ACRYLIC CYAN", 50.f},
-    // DREAM combos (round 6): the Midjourney-inspired art with matching cases and species-wood side panels
-    {"MOTION WALNUT", LOOK_ART + 19, 0, "WALNUT CONSOLE", 120.f, SW_BLACK_WALNUT, F_OILED},
-    {"MIRROR NEON", LOOK_ART + 20, 0, "STEPPED NEON", 84.f, 0, 0},
-    {"IRIS WATCH", LOOK_ART + 21, 0, "BLACK ANODIZED", 65.f, SW_MACASSAR, F_GLOSS},
-    {"TUNNEL VISION", LOOK_ART + 22, 0, "SMOKED ACRYLIC", 50.f, 0, 0},
-    {"PRISM CASE", LOOK_ART + 23, 0, "CLEAR ACRYLIC", 50.f, SW_PURPLEHEART, F_GLOSS},
-    {"BRONZE TEMPLE", LOOK_ART + 24, 0, "EBONY GOLD CONSOLE", 120.f, SW_BUBINGA, F_SATIN},
-    {"FLOWER OF LIFE", LOOK_ART + 25, 0, "CURVED VIOLET", 100.f, 0, 0},
-    {"GOLD FIBRE", LOOK_ART + 26, 0, "BLACK PLY STUDIO", 100.f, SW_WENGE, F_OILED},
-    {"NEURAL VIOLET", LOOK_ART + 27, 0, "SMOKED VIOLET ACRYLIC", 50.f, SW_PURPLEHEART, F_SATIN},
-    {"COSMIC KOA", LOOK_ART + 28, 0, "CURVED CONSOLE", 100.f, SW_KOA, F_GLOSS},
-    {"CLOUD NINE", LOOK_ART + 29, 0, "POD PURPLE", 65.f, SW_QUILTED_MAPLE, F_GLOSS},
-    {"INK AND MAPLE", LOOK_ART + 30, 0, "BIRCH PLY STUDIO", 84.f, SW_SPALTED, F_OILED},
-    {"GLASS WORLD", LOOK_ART + 31, 0, "NEON ACRYLIC CYAN", 50.f, 0, 0},
-    {"COPPER STAIRS", LOOK_ART + 32, 0, "STEPPED WALNUT", 120.f, SW_PADAUK, F_SATIN},
-    {"TESSELLATE", LOOK_ART + 33, 0, "STEPPED OAK", 100.f, SW_QS_OAK, F_OILED},
-    {"VIOLET RIDGE", LOOK_ART + 34, 0, "BLACKLIGHT POD", 65.f, SW_ZIRICOTE, F_SATIN},
-    {"SNOW GLOBE", LOOK_ART + 35, 0, "POD BLUE", 65.f, SW_BIRDSEYE, F_GLOSS},
-    {"MANDELBROT", LOOK_ART + 36, 0, "CARBON FIBER", 65.f, SW_SHOU_SUGI_BAN, F_OILED},
-    {"JULIA", LOOK_ART + 37, 0, "NEON ACRYLIC PINK", 50.f, 0, 0},
-    {"REEF", LOOK_ART + 38, 0, "MYCELIUM LATTICE", 84.f, 0, 0},
-    {"LOTUS", LOOK_ART + 39, 0, "CHERRY STUDIO", 100.f, SW_CHERRY, F_GLOSS},
-    {"NEON MARBLE", LOOK_ART + 40, 0, "GRAFFITI ROAD CASE", 84.f, SW_ZEBRAWOOD, F_GLOSS},
-    {"MELTDOWN", LOOK_ART + 41, 0, "FORGE STEEL", 100.f, SW_COCOBOLO, F_OILED},
-    {"THIRD EYE", LOOK_ART + 42, 0, "IRIDESCENT ANODIZED", 65.f, SW_AMBOYNA, F_GLOSS},
-    {"RAINBOW SURF", LOOK_ART + 43, 0, "WEST COAST BOAT", 84.f, SW_CURLY_MAPLE, F_GLOSS},
+    // DREAM combos (round 6): the Midjourney-inspired art with matching cases (a few wear species-wood side panels)
+    {"MOTION WALNUT", LOOK_ART + 19, 0, "WALNUT CONSOLE", 120.f, SW_BLACK_WALNUT, F_OILED, 0, 0},
+    {"MIRROR NEON", LOOK_ART + 20, 0, "STEPPED NEON", 84.f},
+    {"IRIS WATCH", LOOK_ART + 21, 0, "BLACK ANODIZED", 65.f, SW_MACASSAR, F_GLOSS, 0, 0},
+    {"TUNNEL VISION", LOOK_ART + 22, 0, "SMOKED ACRYLIC", 50.f},
+    {"PRISM CASE", LOOK_ART + 23, 0, "CLEAR ACRYLIC", 50.f},
+    {"BRONZE TEMPLE", LOOK_ART + 24, 0, "EBONY GOLD CONSOLE", 120.f},
+    {"FLOWER OF LIFE", LOOK_ART + 25, 0, "CURVED VIOLET", 100.f},
+    {"GOLD FIBRE", LOOK_ART + 26, 0, "BLACK PLY STUDIO", 100.f},
+    {"NEURAL VIOLET", LOOK_ART + 27, 0, "SMOKED VIOLET ACRYLIC", 50.f},
+    {"COSMIC KOA", LOOK_ART + 28, 0, "CURVED CONSOLE", 100.f},
+    {"CLOUD NINE", LOOK_ART + 29, 0, "POD PURPLE", 65.f},
+    {"INK AND MAPLE", LOOK_ART + 30, 0, "BIRCH PLY STUDIO", 84.f},
+    {"GLASS WORLD", LOOK_ART + 31, 0, "NEON ACRYLIC CYAN", 50.f},
+    {"COPPER STAIRS", LOOK_ART + 32, 0, "STEPPED WALNUT", 120.f},
+    {"TESSELLATE", LOOK_ART + 33, 0, "STEPPED OAK", 100.f},
+    {"VIOLET RIDGE", LOOK_ART + 34, 0, "BLACKLIGHT POD", 65.f},
+    {"SNOW GLOBE", LOOK_ART + 35, 0, "POD BLUE", 65.f},
+    {"MANDELBROT", LOOK_ART + 36, 0, "CARBON FIBER", 65.f},
+    {"JULIA", LOOK_ART + 37, 0, "NEON ACRYLIC PINK", 50.f},
+    {"REEF", LOOK_ART + 38, 0, "MYCELIUM LATTICE", 84.f},
+    {"LOTUS", LOOK_ART + 39, 0, "CHERRY STUDIO", 100.f, SW_CHERRY, F_GLOSS, 0, 0},
+    {"NEON MARBLE", LOOK_ART + 40, 0, "GRAFFITI ROAD CASE", 84.f},
+    {"MELTDOWN", LOOK_ART + 41, 0, "FORGE STEEL", 100.f},
+    {"THIRD EYE", LOOK_ART + 42, 0, "IRIDESCENT ANODIZED", 65.f},
+    {"RAINBOW SURF", LOOK_ART + 43, 0, "WEST COAST BOAT", 84.f},
     // DREAM II combos (round 6b)
-    {"TESSERACT", LOOK_ART + 44, 0, "CARBON FIBER", 65.f, SW_MACASSAR, F_GLOSS},
-    {"LAVA LOUNGE", LOOK_ART + 45, 0, "WALNUT CONSOLE", 120.f, SW_BLACK_WALNUT, F_GLOSS},
-    {"OP POP", LOOK_ART + 46, 0, "POWDER COAT WHITE", 65.f, SW_HARD_MAPLE, F_SATIN},
-    {"RING NEBULA", LOOK_ART + 47, 0, "BLACK ANODIZED", 84.f, SW_WENGE, F_OILED},
-    {"AURORA HALO", LOOK_ART + 48, 0, "SMOKED ACRYLIC", 50.f, 0, 0},
-    {"CRYSTAL GROTTO", LOOK_ART + 49, 0, "CLEAR ACRYLIC", 50.f, SW_BIRDSEYE, F_GLOSS},
-    {"FERN GULLY", LOOK_ART + 50, 0, "OAK OPEN FRAME", 100.f, SW_SPALTED, F_OILED},
-    {"STORM CELL", LOOK_ART + 51, 0, "BRUSHED ALUMINUM", 65.f, SW_SHOU_SUGI_BAN, F_OILED},
-    {"DRAGON FOLD", LOOK_ART + 52, 0, "STEPPED NEON", 84.f, 0, 0},
-    {"CATHEDRAL", LOOK_ART + 53, 0, "EBONY GOLD CONSOLE", 120.f, SW_PADAUK, F_GLOSS},
-    {"CHROME DRIP", LOOK_ART + 54, 0, "STALKER 6U SILVER", 84.f, SW_ZEBRAWOOD, F_GLOSS},
-    {"METATRON", LOOK_ART + 55, 0, "POD GOLD", 65.f, SW_BUBINGA, F_GLOSS},
-    {"PENROSE", LOOK_ART + 56, 0, "CURVED VIOLET", 100.f, 0, 0},
-    {"GLOW FOREST", LOOK_ART + 57, 0, "MYCELIUM LATTICE", 84.f, 0, 0},
-    {"BUBBLE BATH", LOOK_ART + 58, 0, "POD BLUE", 65.f, SW_QUILTED_MAPLE, F_GLOSS},
-    {"SHARD SIX", LOOK_ART + 59, 0, "IRIDESCENT ANODIZED", 65.f, SW_AMBOYNA, F_SATIN},
-    {"RIPPLE POOL", LOOK_ART + 60, 0, "POWDER COAT TEAL", 65.f, SW_CLARO, F_OILED},
-    {"ATTRACTOR", LOOK_ART + 61, 0, "BLACK PLY STUDIO", 100.f, SW_COCOBOLO, F_SATIN},
-    {"SPIRO", LOOK_ART + 62, 0, "PRINTED PLA BLACK", 50.f, 0, 0},
-    {"PLASMA TV", LOOK_ART + 63, 0, "ROAD CASE", 84.f, SW_LEOPARD, F_OILED},
-    {"WHIRLPOOL", LOOK_ART + 64, 0, "SMOKED VIOLET ACRYLIC", 50.f, SW_PURPLEHEART, F_GLOSS},
-    {"DEEP SEA", LOOK_ART + 65, 0, "BLACKLIGHT POD", 65.f, SW_ZIRICOTE, F_SATIN},
-    {"NEON GRID CITY", LOOK_ART + 66, 0, "LAB EXTRUSION", 84.f, 0, 0},
-    {"SEVENTIES", LOOK_ART + 67, 0, "TIERED WALNUT", 120.f, SW_KOA, F_GLOSS},
-    {"GOLDEN SPIRAL", LOOK_ART + 68, 0, "CHERRY STUDIO", 100.f, SW_CURLY_MAPLE, F_GLOSS},
+    {"TESSERACT", LOOK_ART + 44, 0, "CARBON FIBER", 65.f},
+    {"LAVA LOUNGE", LOOK_ART + 45, 0, "WALNUT CONSOLE", 120.f},
+    {"OP POP", LOOK_ART + 46, 0, "POWDER COAT WHITE", 65.f},
+    {"RING NEBULA", LOOK_ART + 47, 0, "BLACK ANODIZED", 84.f, SW_WENGE, F_SATIN, 0, 0},
+    {"AURORA HALO", LOOK_ART + 48, 0, "SMOKED ACRYLIC", 50.f},
+    {"CRYSTAL GROTTO", LOOK_ART + 49, 0, "CLEAR ACRYLIC", 50.f},
+    {"FERN GULLY", LOOK_ART + 50, 0, "OAK OPEN FRAME", 100.f},
+    {"STORM CELL", LOOK_ART + 51, 0, "BRUSHED ALUMINUM", 65.f},
+    {"DRAGON FOLD", LOOK_ART + 52, 0, "STEPPED NEON", 84.f},
+    {"CATHEDRAL", LOOK_ART + 53, 0, "EBONY GOLD CONSOLE", 120.f},
+    {"CHROME DRIP", LOOK_ART + 54, 0, "STALKER 6U SILVER", 84.f},
+    {"METATRON", LOOK_ART + 55, 0, "POD GOLD", 65.f},
+    {"PENROSE", LOOK_ART + 56, 0, "CURVED VIOLET", 100.f},
+    {"GLOW FOREST", LOOK_ART + 57, 0, "MYCELIUM LATTICE", 84.f},
+    {"BUBBLE BATH", LOOK_ART + 58, 0, "POD BLUE", 65.f},
+    {"SHARD SIX", LOOK_ART + 59, 0, "IRIDESCENT ANODIZED", 65.f},
+    {"RIPPLE POOL", LOOK_ART + 60, 0, "POWDER COAT TEAL", 65.f},
+    {"ATTRACTOR", LOOK_ART + 61, 0, "BLACK PLY STUDIO", 100.f, SW_COCOBOLO, F_SATIN, 0, 0},
+    {"SPIRO", LOOK_ART + 62, 0, "PRINTED PLA BLACK", 50.f},
+    {"PLASMA TV", LOOK_ART + 63, 0, "ROAD CASE", 84.f, SW_LEOPARD, F_OILED, 0, 0},
+    {"WHIRLPOOL", LOOK_ART + 64, 0, "SMOKED VIOLET ACRYLIC", 50.f},
+    {"DEEP SEA", LOOK_ART + 65, 0, "BLACKLIGHT POD", 65.f},
+    {"NEON GRID CITY", LOOK_ART + 66, 0, "LAB EXTRUSION", 84.f, 0, 0, 7, 0},
+    {"SEVENTIES", LOOK_ART + 67, 0, "TIERED WALNUT", 120.f},
+    {"GOLDEN SPIRAL", LOOK_ART + 68, 0, "CHERRY STUDIO", 100.f},
 };
 static const int kThemeN = (int) (sizeof(kThemes) / sizeof(kThemes[0]));
 static void applyTheme(SynTHBloKBackdrop* m, int i) {
@@ -1861,6 +1892,7 @@ static void applyTheme(SynTHBloKBackdrop* m, int i) {
     m->look = t.look; m->colorIdx = t.color; m->depthMm = t.depthMm; m->showBg = true;
     m->sideShape = m->sideMat = m->sideWidth = m->openMode = 0;
     m->panelMat = woodToPanel(t.sideMat); m->panelFinish = clamp(t.sideFinish, 0, 2);   // a theme's wood goes on the side panels
+    m->earKind = m->panelMat > 0 ? 0 : clamp(t.ear, 0, kEarFinN - 1); m->earShape = clamp(t.earShape, 0, 1);
     m->sideMat = 0; m->caseMat = 0;
     const std::vector<CaseStyle>& lib = caseLibrary();
     for (size_t k = 0; k < lib.size(); k++) if (lib[k].name == t.caseName) m->caseIdx = (int) k;
@@ -1947,90 +1979,102 @@ struct BackdropOled : widget::OpaqueWidget {
     NameOled* name = NULL;
     int page = 0, hover = -1;
     static constexpr float kTabH = 14.f, kRowH = 17.f, kPad = 4.f, kPrevH = 34.f, kHintH = 11.f;
-    static const int kPages = 5;   // THEME, BG, CASE, SIDES, NAME
-    static const int kNamePage = 4;
-    struct Row { std::string label, value; std::function<void(int)> step; bool flip; };
+    static const int kPages = 4;   // LOOK, CASE, SIDES, NAME (simplified Nov 2026)
+    static const int kNamePage = 3;
+    void* owner = NULL;   // the module widget: for the status light in the NAME tab
+    // a row: a label over a value stepped with < > (step), or over a row of option boxes (opts / sel / pick)
+    struct Row { std::string label, value; std::function<void(int)> step; bool flip; std::vector<std::string> opts; int sel; std::function<void(int)> pick; };
+    bool scrolling = false;   // set while a scroll wheel steps a row: no file dialogs then
     std::vector<Row> rows() {
         std::vector<Row> r;
         SynTHBloKBackdrop* m = module;
         if (!m) return r;
         auto wrap = [](int v, int d, int n) { return ((v + d) % n + n) % n; };
         auto hand = [=]() { m->themeIdx = -1; };   // changed by hand: the theme shows CUSTOM
+        auto seg = [=](const char* label, std::vector<std::string> opts, int sel, std::function<void(int)> pick) {
+            int n = (int) opts.size();
+            Row w = {label, "", [=](int d) { pick(((sel + d) % n + n) % n); }, false, opts, sel, pick};
+            return w;
+        };
         const std::vector<CaseStyle>& clib = caseLibrary();
         int cn = (int) clib.size();
         int di = 0; for (int k = 0; k < 9; k++) if (std::fabs(kDepthMm[k] - m->depthMm) < std::fabs(kDepthMm[di] - m->depthMm)) di = k;
-        if (page == 0) {   // THEME: pick one, then combine its parts as you like
+        bool scr = scrolling;
+        if (page == 0) {   // LOOK: a theme, then fine-tune its background
             r.push_back({"THEME", m->themeIdx >= 0 && m->themeIdx < kThemeN ? kThemes[m->themeIdx].name : "CUSTOM",
                 [=](int d) { applyTheme(m, (m->themeIdx >= 0 ? m->themeIdx : -1 + (d < 0 ? 1 : 0)) + d); }, false});
-            {   // MY PRESETS: step through the presets folder (each step loads one); SAVE writes the current look
-                std::vector<std::string> P = myPresets();
-                std::string pv = !m->presetPath.empty() && system::exists(m->presetPath) ? string::uppercase(system::getStem(m->presetPath)) : P.empty() ? "NONE SAVED" : string::f("%d SAVED", (int) P.size());
-                r.push_back({"MY PRESET", pv, [=](int d) { stepIn(myPresets(), m->presetPath, d, [=](const std::string& p) { loadPreset(m, p); }); }, false});
-                r.push_back({"SAVE PRESET", "SAVE AS...", [=](int) { savePresetAs(m); }, true});
-            }
-            r.push_back({"LOOK", kLookShort[clamp(m->look, 0, kLookN - 1)], [=](int d) { m->look = wrap(m->look, d, kLookN); hand(); }, false});
+            r.push_back({"BACKGROUND", m->showBg ? kLookShort[clamp(m->look, 0, kLookN - 1)] : "OFF",
+                [=](int d) { if (m->showBg) m->look = wrap(m->look, d, kLookN); m->showBg = true; hand(); }, false});
             r.push_back({"COLOUR", string::uppercase(kColorName[clamp(m->colorIdx, 0, kColorN - 1)]), [=](int d) { m->colorIdx = wrap(m->colorIdx, d, kColorN); hand(); }, false});
-            r.push_back({"CASE", clib[clamp(m->caseIdx, 0, cn - 1)].name, [=](int d) { m->caseIdx = wrap(m->caseIdx, d, cn); hand(); }, false});
-            r.push_back({"DEPTH", m->depthMm < 1.f ? "FLAT" : string::f("%d MM", (int) std::round(m->depthMm)), [=](int d) { m->depthMm = kDepthMm[clamp(di + d, 0, 8)]; hand(); }, false});
-        }
-        else if (page == 1) {
-            r.push_back({"BACKGROUND", m->showBg ? "ON" : "OFF", [=](int) { m->showBg = !m->showBg; }, true});
-            r.push_back({"LOOK", kLookShort[clamp(m->look, 0, kLookN - 1)], [=](int d) { m->look = wrap(m->look, d, kLookN); hand(); }, false});
-            r.push_back({"COLOUR", string::uppercase(kColorName[clamp(m->colorIdx, 0, kColorN - 1)]), [=](int d) { m->colorIdx = wrap(m->colorIdx, d, kColorN); hand(); }, false});
-            r.push_back({"IMAGE", m->imagePath.empty() ? "LOAD..." : string::uppercase(system::getStem(m->imagePath)), [=](int d) {
-                if (d < 0 && !m->imagePath.empty()) { m->imagePath.clear(); return; }   // left half: clear
-                osdialog_filters* f = osdialog_filters_parse("Images:png,jpg,jpeg,bmp,gif");
-                char* path = osdialog_file(OSDIALOG_OPEN, NULL, NULL, f);
-                osdialog_filters_free(f);
-                if (path) { m->imagePath = path; std::free(path); m->fit = 1; m->imgScale = 1.f; m->imgW = m->imgH = 1.f; m->imgX = m->imgY = 0.f; }
-            }, false});
-            {   // MY IMAGES: step through the images folder; empty, a click opens the folder to drop some in
-                std::vector<std::string> L = myImages();
-                bool mine = !m->imagePath.empty() && system::getDirectory(m->imagePath) == system::getDirectory(myImagesDir() + "/x");
-                std::string iv = L.empty() ? "OPEN FOLDER" : mine ? string::uppercase(system::getStem(m->imagePath)) : string::f("%d IMAGES", (int) L.size());
-                r.push_back({"MY IMAGES", iv, [=](int d) {
-                    std::vector<std::string> L2 = myImages();
-                    if (L2.empty()) { system::openDirectory(myImagesDir()); return; }
-                    stepIn(L2, m->imagePath, d, [=](const std::string& p) { useImage(m, p); });
+            {   // IMAGE: NONE, the MY IMAGES folder's pictures, then LOAD FILE... (a click opens the file dialog)
+                std::string iv = m->imagePath.empty() ? "NONE" : string::uppercase(system::getStem(m->imagePath));
+                r.push_back({"IMAGE", iv, [=](int d) {
+                    std::vector<std::string> L = myImages();
+                    int n = (int) L.size() + 2, i = 0;   // 0 NONE, 1..L MY IMAGES, last LOAD FILE
+                    for (size_t k = 0; k < L.size(); k++) if (L[k] == m->imagePath) i = (int) k + 1;
+                    i = wrap(i, d, n);
+                    if (i == n - 1 && scr) i = wrap(i, d, n);   // the wheel skips LOAD FILE
+                    if (i == 0) m->imagePath.clear();
+                    else if (i <= (int) L.size()) useImage(m, L[i - 1]);
+                    else {
+                        osdialog_filters* f = osdialog_filters_parse("Images:png,jpg,jpeg,bmp,gif");
+                        char* path = osdialog_file(OSDIALOG_OPEN, myImagesDir().c_str(), NULL, f);
+                        osdialog_filters_free(f);
+                        if (path) { useImage(m, path); std::free(path); }
+                    }
                 }, false});
             }
-            if (!m->imagePath.empty()) {
-                r.push_back({"IMAGE FIT", kFitShort[clamp(m->fit, 0, 3)], [=](int d) { m->fit = wrap(m->fit, d, 4); }, false});
-                r.push_back({"DARKEN", string::f("%d%%", (int) std::round(m->imgDim * 100.f)), [=](int d) { m->imgDim = clamp(m->imgDim + d * 0.05f, 0.f, 0.9f); }, false});
+            {   // MY PRESET: the presets folder, then SAVE AS... (a click opens the save dialog)
+                std::vector<std::string> P = myPresets();
+                std::string pv = !m->presetPath.empty() && system::exists(m->presetPath) ? string::uppercase(system::getStem(m->presetPath)) : P.empty() ? "SAVE AS..." : string::f("%d SAVED", (int) P.size());
+                r.push_back({"MY PRESET", pv, [=](int d) {
+                    std::vector<std::string> L = myPresets();
+                    int n = (int) L.size() + 1, i = -1;   // the presets, then SAVE AS
+                    for (size_t k = 0; k < L.size(); k++) if (L[k] == m->presetPath) i = (int) k;
+                    i = i < 0 ? (d < 0 ? n - 1 : 0) : wrap(i, d, n);
+                    if (i == n - 1 && scr) { if (n == 1) return; i = wrap(i, d, n); }
+                    if (i < (int) L.size()) loadPreset(m, L[i]); else savePresetAs(m);
+                }, false});
             }
         }
-        else if (page == 2) {   // CASE
-            r.push_back({"CASE", clib[clamp(m->caseIdx, 0, cn - 1)].name, [=](int d) { m->caseIdx = wrap(m->caseIdx, d, cn); hand(); }, false});
-            r.push_back({"DEPTH", m->depthMm < 1.f ? "FLAT" : string::f("%d MM", (int) std::round(m->depthMm)), [=](int d) { m->depthMm = kDepthMm[clamp(di + d, 0, 8)]; hand(); }, false});
-            r.push_back({"CASE MATERIAL", m->caseMat > 0 ? kPanelMat[clamp(m->caseMat, 0, kPanelMatN - 1)].name : "ITS OWN", [=](int d) { m->caseMat = wrap(m->caseMat, d, kPanelMatN); hand(); }, false});
-            r.push_back({"END SHAPE", kSideShape[clamp(m->sideShape, 0, kSideShapeN - 1)], [=](int d) { m->sideShape = wrap(m->sideShape, d, kSideShapeN); hand(); }, false});
-            r.push_back({"CASE ENDS", kSideMat[clamp(m->sideMat, 0, kSideMatN - 1)].name, [=](int d) { m->sideMat = wrap(m->sideMat, d, kSideMatN); hand(); }, false});
-            r.push_back({"END WIDTH", kSideWidth[clamp(m->sideWidth, 0, 4)], [=](int d) { m->sideWidth = wrap(m->sideWidth, d, 5); hand(); }, false});
-            r.push_back({"ENDS FINISH", kSideFinish[clamp(m->sideFinish, 0, 2)], [=](int d) { m->sideFinish = wrap(m->sideFinish, d, 3); }, false});
-            r.push_back({"OPEN FRAME", kOpenName[clamp(m->openMode, 0, 2)], [=](int d) { m->openMode = wrap(m->openMode, d, 3); hand(); }, false});
-            r.push_back({"INFO STRIP", kOpenName[clamp(m->infoMode, 0, 2)], [=](int d) { m->infoMode = wrap(m->infoMode, d, 3); }, false});
-            r.push_back({"BG MATCHES CASE", m->look == LOOK_CASE_GRADIENT ? "ON" : "OFF", [=](int) { m->look = m->look == LOOK_CASE_GRADIENT ? LOOK_GRADIENT : LOOK_CASE_GRADIENT; hand(); }, true});
-            r.push_back({"RESET CASE", "TO ITS OWN", [=](int) { m->sideShape = m->sideMat = m->sideWidth = m->openMode = m->infoMode = 0; m->panelMat = m->caseMat = m->earKind = 0; m->depthMm = 65.f; m->shadow = true; }, true});
-        }
-        else if (page == 3) {   // SIDES: the side panel attachments and the rack ears
-            r.push_back({"SIDE PANELS", kPanelMat[clamp(m->panelMat, 0, kPanelMatN - 1)].name, [=](int d) { m->panelMat = wrap(m->panelMat, d, kPanelMatN); hand(); }, false});
-            if (m->panelMat > 0) {
-                r.push_back({"PANEL SHAPE", kPanelShape[clamp(m->panelShape, 0, 1)], [=](int d) { m->panelShape = wrap(m->panelShape, d, 2); }, false});
-                r.push_back({"PANEL WIDTH", kPanelWidth[clamp(m->panelWidth, 0, 2)], [=](int d) { m->panelWidth = wrap(m->panelWidth, d, 3); }, false});
-                r.push_back({"PANEL FINISH", kSideFinish[clamp(m->panelFinish, 0, 2)], [=](int d) { m->panelFinish = wrap(m->panelFinish, d, 3); }, false});
+        else if (page == 1) {   // CASE: the case itself (with rack ears there is none: an open rack)
+            bool ears = m->earKind > 0;
+            r.push_back({"CASE", ears ? "NONE: RACK EARS ON" : clib[clamp(m->caseIdx, 0, cn - 1)].name,
+                [=](int d) { if (m->earKind > 0) m->earKind = 0; else m->caseIdx = wrap(m->caseIdx, d, cn); hand(); }, false});
+            if (!ears) {
+                r.push_back({"MATERIAL", m->caseMat > 0 ? kPanelMat[clamp(m->caseMat, 0, kPanelMatN - 1)].name : "ITS OWN", [=](int d) { m->caseMat = wrap(m->caseMat, d, kPanelMatN); hand(); }, false});
+                r.push_back({"DEPTH", m->depthMm < 1.f ? "FLAT" : string::f("%d MM", (int) std::round(m->depthMm)), [=](int d) { m->depthMm = kDepthMm[clamp(di + d, 0, 8)]; hand(); }, false});
             }
-            r.push_back({"RACK EARS", kEarFin[clamp(m->earKind, 0, kEarFinN - 1)].name, [=](int d) { m->earKind = wrap(m->earKind, d, kEarFinN); hand(); }, false});
-            if (m->earKind == kEarNoizee) r.push_back({"EAR NAME", m->earName ? "ON" : "OFF", [=](int) { m->earName = !m->earName; }, true});
-            r.push_back({"SHADOW", m->shadow ? "ON" : "OFF", [=](int) { m->shadow = !m->shadow; }, true});
-            r.push_back({"CLEAR SIDES", "PANELS + EARS OFF", [=](int) { m->panelMat = m->earKind = 0; }, true});
+            r.push_back(seg("SHADOW", {"ON", "OFF"}, m->shadow ? 0 : 1, [=](int i) { m->shadow = i == 0; }));
+        }
+        else if (page == 2) {   // SIDES: one switch, so a case has side panels or rack ears, never both
+            int mode = m->earKind > 0 ? 2 : m->panelMat > 0 ? 1 : 0;
+            r.push_back(seg("SIDES", {"NONE", "PANELS", "EARS"}, mode, [=](int i) {
+                if (i == 0) { m->panelMat = m->earKind = 0; }
+                if (i == 1 && m->panelMat == 0) { m->panelMat = lastPanel > 0 ? lastPanel : 1; m->earKind = 0; }
+                if (i == 2 && m->earKind == 0) { m->earKind = lastEar > 0 ? lastEar : 1; m->panelMat = 0; }
+                hand();
+            }));
+            if (mode == 1) {
+                r.push_back({"MATERIAL", kPanelMat[clamp(m->panelMat, 1, kPanelMatN - 1)].name, [=](int d) { m->panelMat = 1 + wrap(m->panelMat - 1, d, kPanelMatN - 1); lastPanel = m->panelMat; hand(); }, false});
+                int ps = 0; for (int k = 0; k < 3; k++) if (kPanelShapeOrder[k] == m->panelShape) ps = k;
+                r.push_back(seg("SHAPE", {"SQUARE", "SEMI", "ROUND"}, ps, [=](int i) { m->panelShape = kPanelShapeOrder[i]; }));
+                r.push_back(seg("FINISH", {"OILED", "SATIN", "GLOSS"}, clamp(m->panelFinish, 0, 2), [=](int i) { m->panelFinish = i; }));
+            }
+            if (mode == 2) {
+                r.push_back({"EAR FINISH", kEarFin[clamp(m->earKind, 1, kEarFinN - 1)].name, [=](int d) { m->earKind = 1 + wrap(m->earKind - 1, d, kEarFinN - 1); lastEar = m->earKind; hand(); }, false});
+                r.push_back(seg("EAR SHAPE", {"STRAIGHT", "CONTOURED"}, clamp(m->earShape, 0, 1), [=](int i) { m->earShape = i; }));
+                if (m->earKind == kEarNoizee) r.push_back(seg("NAME ON EAR", {"ON", "OFF"}, m->earName ? 0 : 1, [=](int i) { m->earName = i == 0; }));
+            }
         }
         else {
             r.push_back({"PATCH NAME", "", nullptr, false});   // the name field sits in this row
-            r.push_back({"SHOW ON RACK", m->showTitle ? "ON" : "OFF", [=](int) { m->showTitle = !m->showTitle; }, true});
+            r.push_back(seg("SHOW ON RACK", {"ON", "OFF"}, m->showTitle ? 0 : 1, [=](int i) { m->showTitle = i == 0; }));
             r.push_back({"USE FILE NAME", "CLEAR", [=](int) { m->title.clear(); }, true});
         }
         return r;
     }
+    int lastPanel = 0, lastEar = 0;   // what PANELS / EARS bring back after NONE
     float rowsTop() { return kTabH + 3.f + kPrevH + 3.f; }
     float rowY(int i) { return rowsTop() + i * kRowH; }
     float tabW(int k) { return box.size.x / kPages; }
@@ -2046,11 +2090,26 @@ struct BackdropOled : widget::OpaqueWidget {
     void onButton(const ButtonEvent& e) override {
         if (e.button != GLFW_MOUSE_BUTTON_LEFT || e.action != GLFW_PRESS) { OpaqueWidget::onButton(e); return; }
         e.consume(this);
-        if (e.pos.y < kTabH) { float x = 0.f; for (int k = 0; k < kPages; k++) { x += tabW(k); if (e.pos.x < x) { page = k; break; } } return; }
+        if (e.pos.y < kTabH) {
+            float x = 0.f;
+            for (int k = 0; k < kPages; k++) { x += tabW(k); if (e.pos.x < x) { page = k; break; } }
+            if (page == kNamePage && name) { step(); name->visible = true; nameWanted = true; }   // NAME: start typing
+            return;
+        }
         std::vector<Row> r = rows();
         int i = rowAt(e.pos);
         if (i < 0 || i >= (int) r.size() || !r[i].step) return;
+        if (!r[i].opts.empty()) {   // option boxes: pick the one clicked
+            int n = (int) r[i].opts.size();
+            r[i].pick(clamp((int) ((e.pos.x - kPad) / ((box.size.x - 2.f * kPad) / n)), 0, n - 1));
+            return;
+        }
         r[i].step(e.pos.x < box.size.x * 0.5f && !r[i].flip ? -1 : 1);
+    }
+    bool nameWanted = false;   // select the name field once the click is over, so the click doesn't take it back
+    void onDragEnd(const DragEndEvent& e) override {
+        if (nameWanted && name) { nameWanted = false; APP->event->setSelectedWidget(name); }
+        OpaqueWidget::onDragEnd(e);
     }
     void onHover(const HoverEvent& e) override { hover = rowAt(e.pos); OpaqueWidget::onHover(e); }
     void onLeave(const LeaveEvent& e) override { hover = -1; }
@@ -2058,8 +2117,9 @@ struct BackdropOled : widget::OpaqueWidget {
         std::vector<Row> r = rows();
         int i = rowAt(e.pos);
         if (i < 0 || i >= (int) r.size() || !r[i].step) return;
-        if (r[i].label == "IMAGE") return;   // no file dialogs from a scroll wheel
+        scrolling = true;   // rows skip their dialog slots (LOAD FILE, SAVE AS) for the wheel
         r[i].step(e.scrollDelta.y > 0 ? -1 : 1);
+        scrolling = false;
         e.consume(this);
     }
     // LIVE PREVIEW: a small picture of the look as set: the background (the art itself, or its colour), the case in its
@@ -2084,9 +2144,9 @@ struct BackdropOled : widget::OpaqueWidget {
             const std::vector<CaseStyle>& lib = caseLibrary();
             const CaseStyle& cs = lib[clamp(m->caseIdx, 0, (int) lib.size() - 1)];
             NVGcolor cc = m->caseMat > 0 ? nvgRGB(kPanelMat[m->caseMat].r, kPanelMat[m->caseMat].g, kPanelMat[m->caseMat].b) : cs.base;
-            float ew = m->earKind > 0 ? 6.f : 0.f, pw = m->panelMat > 0 ? 5.f : 0.f;
+            float ew = m->earKind > 0 ? 10.f : 0.f, pw = m->panelMat > 0 && m->earKind == 0 ? 4.f : 0.f;
             float cw = w * 0.56f, ch = h * 0.62f, cx = x + (w - cw) * 0.5f, cy = y + (h - ch) * 0.5f;
-            if (cs.material != M_NONE) {
+            if (cs.material != M_NONE && ew == 0.f) {   // with ears: no case, an open rack
                 nvgBeginPath(vg); nvgRect(vg, cx - 3.f, cy - 2.f, cw + 6.f, ch + 4.f); nvgFillColor(vg, cc); nvgFill(vg);
             }
             nvgBeginPath(vg); nvgRect(vg, cx, cy, cw, ch); nvgFillColor(vg, nvgRGB(14, 14, 15)); nvgFill(vg);
@@ -2101,16 +2161,16 @@ struct BackdropOled : widget::OpaqueWidget {
                 }
             }
             for (int sd = 0; sd < 2; sd++) {
-                float ex = sd ? cx + cw + 3.f : cx - 3.f;
+                float ex = ew > 0.f ? (sd ? cx + cw : cx) : (sd ? cx + cw + 3.f : cx - 3.f);
                 if (pw > 0.f) {
                     const PanelMat& pm = kPanelMat[m->panelMat];
-                    nvgBeginPath(vg); nvgRoundedRect(vg, sd ? ex : ex - pw, cy - 4.f, pw, ch + 7.f, m->panelShape ? 2.f : 1.f);
+                    nvgBeginPath(vg); nvgRoundedRect(vg, sd ? ex : ex - pw, cy - 2.f, pw, ch + 4.f, m->panelShape ? 1.5f : 0.8f);
                     nvgFillColor(vg, nvgRGB(pm.r, pm.g, pm.b)); nvgFill(vg);
                     ex += sd ? pw : -pw;
                 }
                 if (ew > 0.f) {
                     const EarFin& ef = kEarFin[m->earKind];
-                    nvgBeginPath(vg); nvgRect(vg, sd ? ex : ex - ew, cy - 2.f, ew, ch + 4.f); nvgFillColor(vg, nvgRGB(ef.r, ef.g, ef.b)); nvgFill(vg);
+                    nvgBeginPath(vg); nvgRect(vg, sd ? ex : ex - ew, cy, ew, ch); nvgFillColor(vg, nvgRGB(ef.r, ef.g, ef.b)); nvgFill(vg);
                     if (m->earKind == kEarNoizee) { nvgBeginPath(vg); nvgRect(vg, sd ? ex + 0.8f : ex - 1.6f, cy - 1.f, 0.8f, ch + 2.f); nvgFillColor(vg, nvgRGB(255, 122, 0)); nvgFill(vg); }
                 }
             }
@@ -2142,7 +2202,7 @@ struct BackdropOled : widget::OpaqueWidget {
         nvgFontFaceId(vg, font->handle);
         float W = box.size.x;
         // tabs
-        static const char* const tabs[kPages] = {"THEME", "BG", "CASE", "SIDES", "NAME"};
+        static const char* const tabs[kPages] = {"LOOK", "CASE", "SIDES", "NAME"};
         nvgFontSize(vg, 6.6f);
         nvgTextLetterSpacing(vg, 0.2f);
         nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
@@ -2154,7 +2214,18 @@ struct BackdropOled : widget::OpaqueWidget {
                 nvgFillColor(vg, oled::amber()); nvgFill(vg);
             }
             nvgFillColor(vg, k == page ? oled::ink() : oled::dim());
-            nvgText(vg, tx0 + tw * 0.5f + 0.1f, kTabH * 0.5f + 0.5f, tabs[k], NULL);
+            float lx = k == kNamePage ? 3.5f : 0.f;   // NAME carries the status light, a small LED beside the word
+            nvgText(vg, tx0 + tw * 0.5f + 0.1f + lx, kTabH * 0.5f + 0.5f, tabs[k], NULL);
+            if (k == kNamePage) {
+                // amber while this BACKDROP dresses the rack, red if another one does
+                bool mine = !module || gOwner == owner;
+                float cx = tx0 + tw * 0.5f - 8.5f, cy = kTabH * 0.5f;
+                NVGcolor lc = mine ? nvgRGB(255, 190, 90) : nvgRGB(220, 50, 35);
+                nvgBeginPath(vg); nvgCircle(vg, cx, cy, 4.2f);
+                nvgFillPaint(vg, nvgRadialGradient(vg, cx, cy, 0.8f, 4.2f, nvgTransRGBA(lc, 150), nvgRGBA(0, 0, 0, 0))); nvgFill(vg);
+                nvgBeginPath(vg); nvgCircle(vg, cx, cy, 1.6f);
+                nvgFillColor(vg, k == page ? nvgLerpRGBA(lc, nvgRGB(0, 0, 0), 0.35f) : lc); nvgFill(vg);
+            }
             tx0 += tw;
         }
         nvgBeginPath(vg); nvgMoveTo(vg, 1.f, kTabH + 0.5f); nvgLineTo(vg, W - 1.f, kTabH + 0.5f);
@@ -2163,7 +2234,9 @@ struct BackdropOled : widget::OpaqueWidget {
         // the hint along the foot
         nvgFontSize(vg, 5.f); nvgTextLetterSpacing(vg, 0.3f); nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
         nvgFillColor(vg, oled::outline(150));
-        nvgText(vg, W * 0.5f, box.size.y - kHintH * 0.5f, "CLICK < >  \xc2\xb7  SCROLL  \xc2\xb7  RIGHT-CLICK FOR ALL", NULL);
+        bool other = module && gOwner && gOwner != owner;
+        if (other) nvgFillColor(vg, nvgRGB(220, 70, 50));
+        nvgText(vg, W * 0.5f, box.size.y - kHintH * 0.5f, other ? "ANOTHER BACKDROP IS DRESSING THE RACK" : "CLICK < >  \xc2\xb7  SCROLL  \xc2\xb7  RIGHT-CLICK FOR ALL", NULL);
         // rows
         std::vector<Row> r = rows();
         float iw = W - 2.f * kPad;
@@ -2182,6 +2255,20 @@ struct BackdropOled : widget::OpaqueWidget {
             nvgFillColor(vg, oled::dim());
             nvgText(vg, kPad, y + 1.2f, r[i].label.c_str(), NULL);
             if (page == kNamePage && i == 0) continue;   // the name field draws itself
+            if (!r[i].opts.empty()) {   // option boxes, the chosen one lit
+                int n = (int) r[i].opts.size();
+                float bw = iw / n;
+                nvgFontSize(vg, 6.2f); nvgTextLetterSpacing(vg, 0.2f); nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+                for (int k = 0; k < n; k++) {
+                    float bx = kPad + k * bw;
+                    nvgBeginPath(vg); nvgRoundedRect(vg, bx + 0.5f, y + 7.4f, bw - 1.5f, 8.2f, 1.2f);
+                    if (k == r[i].sel) { nvgFillColor(vg, oled::amber()); nvgFill(vg); }
+                    else { nvgStrokeColor(vg, oled::outline(hot ? 160 : 100)); nvgStrokeWidth(vg, 0.6f); nvgStroke(vg); }
+                    nvgFillColor(vg, k == r[i].sel ? oled::ink() : oled::amber());
+                    nvgText(vg, bx + bw * 0.5f - 0.25f, y + 11.6f, r[i].opts[k].c_str(), NULL);
+                }
+                continue;
+            }
             // the value, with arrows when it steps; slides sideways when it's too long and hovered
             bool arrows = r[i].step && !r[i].flip;
             float vx = kPad + (arrows ? 8.f : 0.f), vw = iw - (arrows ? 16.f : 0.f);
@@ -2209,40 +2296,6 @@ struct BackdropOled : widget::OpaqueWidget {
             }
         }
         nvgTextLetterSpacing(vg, 0.f);
-    }
-};
-
-// NAME: a square key: opens the NAME page and starts the typing (on release, so the click doesn't take it back)
-struct NameButton : widget::OpaqueWidget {
-    NameOled* field = NULL;
-    BackdropOled* menu = NULL;
-    void onButton(const ButtonEvent& e) override {
-        if (e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS) e.consume(this);
-    }
-    void onDragEnd(const DragEndEvent& e) override {
-        if (e.button != GLFW_MOUSE_BUTTON_LEFT || !field) return;
-        if (menu) { menu->page = BackdropOled::kNamePage; menu->step(); }
-        field->visible = true;
-        APP->event->setSelectedWidget(field);
-    }
-    void drawLayer(const DrawArgs& args, int layer) override {
-        if (layer != 1) return;
-        nvgBeginPath(args.vg);
-        nvgRoundedRect(args.vg, 0.5f, 0.5f, box.size.x - 1.f, box.size.y - 1.f, 2.2f);   // square, softly rounded corners
-        nvgFillColor(args.vg, nvgRGB(24, 18, 12));
-        nvgFill(args.vg);
-        nvgStrokeColor(args.vg, oled::outline(110));
-        nvgStrokeWidth(args.vg, 0.8f);
-        nvgStroke(args.vg);
-        std::shared_ptr<window::Font> font = APP->window->uiFont;
-        if (!font) return;
-        nvgFontFaceId(args.vg, font->handle);
-        nvgFontSize(args.vg, 6.5f);
-        nvgTextLetterSpacing(args.vg, 0.8f);
-        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFillColor(args.vg, oled::amber());
-        nvgText(args.vg, box.size.x * 0.5f + 0.4f, box.size.y * 0.5f + 0.5f, "NAME", NULL);
-        nvgTextLetterSpacing(args.vg, 0.f);
     }
 };
 
@@ -2319,26 +2372,22 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
         addChild(p);
         addChild(createWidget<BackdropTitle>(mm2px(Vec(8.5f, 0.f))));
         float cxm = 60.96f * 0.5f;   // 12 HP
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(cxm - 10.f, 117.6f)), module, SynTHBloKBackdrop::IN_L));   // the meter
-        addInput(createInputCentered<BlackJack>(mm2px(Vec(cxm + 10.f, 117.6f)), module, SynTHBloKBackdrop::IN_R));
+        addInput(createInputCentered<SmallJack>(mm2px(Vec(cxm - 8.f, 117.6f)), module, SynTHBloKBackdrop::IN_L));   // the meter (small jacks, as the MTX modules)
+        addInput(createInputCentered<SmallJack>(mm2px(Vec(cxm + 8.f, 117.6f)), module, SynTHBloKBackdrop::IN_R));
         BackdropOled* om = new BackdropOled;   // the OLED menu fills the well; the name field rides in its NAME page
         om->module = module;
         om->box.pos = mm2px(Vec(5.6f, 12.6f));
-        om->box.size = mm2px(Vec(49.76f, 85.8f));
+        om->box.size = mm2px(Vec(49.76f, 92.8f));   // the well runs down to where the NAME key was
+        om->owner = this;
         addChild(om);
         NameOled* nf = new NameOled;
         nf->module = module;
         nf->visible = false;
         om->name = nf;
         addChild(nf);   // after the menu, so it gets the clicks in its row
-        NameButton* nb = new NameButton;
-        nb->field = nf;
-        nb->menu = om;
-        nb->box.size = mm2px(Vec(7.6f, 7.0f));   // nearly square
-        nb->box.pos = Vec(box.size.x * 0.5f - nb->box.size.x * 0.5f, mm2px(101.4f));
-        addChild(nb);
-        addChild(createWidget<SocketScrew>(Vec(RACK_GRID_WIDTH * 0.5f, 0)));
-        addChild(createWidget<SocketScrew>(Vec(box.size.x - RACK_GRID_WIDTH * 1.5f, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
+        // two top screws, placed as on every MTX module (3.5 mm in from each top corner)
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(3.5f, 3.5f))));
+        addChild(createWidgetCentered<SocketScrew>(mm2px(Vec(60.96f - 3.5f, 3.5f))));
     }
     // CASE SNAPSHOTS (a dev aid): if Rack's user folder holds SynTHBloK/snap_cases.txt when this BACKDROP opens, it
     // steps through every case and saves a picture of the Rack window for each to SynTHBloK/case_shots/
@@ -2468,38 +2517,31 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
             for (int i = 0; i < kPanelMatN; i++) {
                 if (i == 1) { sub->addChild(new MenuSeparator); sub->addChild(createMenuLabel("Woods")); }
                 if (i == kPanelManMade) { sub->addChild(new MenuSeparator); sub->addChild(createMenuLabel("Man-made")); }
-                sub->addChild(createCheckMenuItem(i ? kPanelMat[i].name : none, "", [=]() { return *v == i; }, [=]() { *v = i; m->themeIdx = -1; }));
+                sub->addChild(createCheckMenuItem(i ? kPanelMat[i].name : none, "", [=]() { return *v == i; }, [=]() { *v = i; m->themeIdx = -1; if (v == &m->panelMat && i > 0) m->earKind = 0; }));
             }
         };
         menu->addChild(createSubmenuItem("Side panels (attachments)", kPanelMat[clamp(m->panelMat, 0, kPanelMatN - 1)].name, [=](Menu* sub) {
-            sub->addChild(createIndexSubmenuItem("Shape", std::vector<std::string>(kPanelShape, kPanelShape + 2), [=]() { return (size_t) m->panelShape; }, [=](size_t i) { m->panelShape = (int) i; }));
-            sub->addChild(createIndexSubmenuItem("Width", std::vector<std::string>(kPanelWidth, kPanelWidth + 3), [=]() { return (size_t) m->panelWidth; }, [=](size_t i) { m->panelWidth = (int) i; }));
+            sub->addChild(createSubmenuItem("Shape", kPanelShape[clamp(m->panelShape, 0, 2)], [=](Menu* s2) {
+                for (int k = 0; k < 3; k++) { int v = kPanelShapeOrder[k]; s2->addChild(createCheckMenuItem(kPanelShape[v], "", [=]() { return m->panelShape == v; }, [=]() { m->panelShape = v; })); }
+            }));
             sub->addChild(createIndexSubmenuItem("Finish", std::vector<std::string>(kSideFinish, kSideFinish + 3), [=]() { return (size_t) m->panelFinish; }, [=](size_t i) { m->panelFinish = (int) i; }));
             sub->addChild(new MenuSeparator);
             sub->addChild(createMenuLabel("Material"));
             matMenu(sub, &m->panelMat, "NONE");
+            sub->addChild(new MenuSeparator);
+            sub->addChild(createMenuLabel("Turns the rack ears off (a case has one or the other)"));
         }));
         menu->addChild(createSubmenuItem("Rack ears", kEarFin[clamp(m->earKind, 0, kEarFinN - 1)].name, [=](Menu* sub) {
             for (int i = 0; i < kEarFinN; i++) {
                 if (i == 1) sub->addChild(new MenuSeparator);
-                sub->addChild(createCheckMenuItem(kEarFin[i].name, "", [=]() { return m->earKind == i; }, [=]() { m->earKind = i; m->themeIdx = -1; }));
+                sub->addChild(createCheckMenuItem(kEarFin[i].name, "", [=]() { return m->earKind == i; }, [=]() { m->earKind = i; m->themeIdx = -1; if (i > 0) m->panelMat = 0; }));
             }
             sub->addChild(new MenuSeparator);
+            sub->addChild(createIndexSubmenuItem("Shape", {"STRAIGHT", "CONTOURED"}, [=]() { return (size_t) m->earShape; }, [=](size_t i) { m->earShape = (int) i; }));
             sub->addChild(createBoolPtrMenuItem("Name on the NOIZEE TOYZ ear", "", &m->earName));
+            sub->addChild(createMenuLabel("Ears mean no case: an open rack (turns the side panels off)"));
         }));
         menu->addChild(createSubmenuItem("Case material", m->caseMat > 0 ? kPanelMat[clamp(m->caseMat, 0, kPanelMatN - 1)].name : "its own", [=](Menu* sub) { matMenu(sub, &m->caseMat, "ITS OWN"); }));
-        menu->addChild(createIndexSubmenuItem("Case end shape", std::vector<std::string>(kSideShape, kSideShape + kSideShapeN),
-            [=]() { return (size_t) m->sideShape; }, [=](size_t i) { m->sideShape = (int) i; m->themeIdx = -1; }));
-        menu->addChild(createSubmenuItem("Case ends material", kSideMat[clamp(m->sideMat, 0, kSideMatN - 1)].name, [=](Menu* sub) {
-            for (int i = 0; i < kSideMatN; i++) {
-                if (i && kSideMat[i].tex && !kSideMat[i - 1].tex) { sub->addChild(new MenuSeparator); sub->addChild(createMenuLabel("Species woods")); }
-                sub->addChild(createCheckMenuItem(kSideMat[i].name, "", [=]() { return m->sideMat == i; }, [=]() { m->sideMat = i; m->themeIdx = -1; }));
-            }
-        }));
-        menu->addChild(createIndexSubmenuItem("Case ends finish (species woods)", std::vector<std::string>(kSideFinish, kSideFinish + 3),
-            [=]() { return (size_t) m->sideFinish; }, [=](size_t i) { m->sideFinish = (int) i; }));
-        menu->addChild(createIndexSubmenuItem("Side width", std::vector<std::string>(kSideWidth, kSideWidth + 5),
-            [=]() { return (size_t) m->sideWidth; }, [=](size_t i) { m->sideWidth = (int) i; }));
         menu->addChild(createIndexSubmenuItem("Info strip (readouts + level meter)", std::vector<std::string>(kOpenName, kOpenName + 3),
             [=]() { return (size_t) m->infoMode; }, [=](size_t i) { m->infoMode = (int) i; }));
         menu->addChild(createIndexSubmenuItem("Open frame", std::vector<std::string>(kOpenName, kOpenName + 3),
@@ -2515,7 +2557,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
             }
         }));
         menu->addChild(createBoolPtrMenuItem("Drop shadow", "", &m->shadow));
-        menu->addChild(createMenuItem("Reset the case options", "ends, panels, material, depth, shadow", [=]() { m->sideShape = m->sideMat = m->sideWidth = m->openMode = 0; m->panelMat = m->caseMat = m->earKind = 0; m->depthMm = 65.f; m->shadow = true; }));
+        menu->addChild(createMenuItem("Reset the case options", "panels, ears, material, depth, shadow", [=]() { m->sideShape = m->sideMat = m->sideWidth = m->openMode = 0; m->panelMat = m->caseMat = m->earKind = 0; m->depthMm = 65.f; m->shadow = true; }));
         menu->addChild(createMenuItem("Open the case library folder", "add your own cases in cases.json", [=]() {
             std::string dir = asset::user("SynTHBloK");
             system::createDirectories(dir);
