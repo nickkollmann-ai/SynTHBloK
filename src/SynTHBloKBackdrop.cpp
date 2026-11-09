@@ -309,6 +309,7 @@ struct SynTHBloKBackdrop : Module {
     int caseMat = 0;   // CASE MATERIAL (kPanelMat index; 0: the case's own)
     // RACK EARS: kEarFin index (0: none); the NOIZEE TOYZ ear's name on/off; shape 0 STRAIGHT, 1 CONTOURED outer edge
     int earKind = 0; bool earName = true; int earShape = 0;
+    bool noCase = false;   // side panels only, no case between them: the rails held by the panels (an open rack)
     bool shadow = true, rails = true;
     bool showTitle = false;   // the name above the case: optional, off unless turned on (NAME page or menu)
     std::string title;   // empty: the patch's file name
@@ -364,6 +365,7 @@ struct SynTHBloKBackdrop : Module {
         json_object_set_new(r, "earKind", json_integer(earKind));
         json_object_set_new(r, "earName", json_boolean(earName));
         json_object_set_new(r, "earShape", json_integer(earShape));
+        json_object_set_new(r, "noCase", json_boolean(noCase));
         json_object_set_new(r, "openMode", json_integer(openMode));
         json_object_set_new(r, "shadow", json_boolean(shadow));
         json_object_set_new(r, "rails", json_boolean(rails));
@@ -406,6 +408,7 @@ struct SynTHBloKBackdrop : Module {
         if (json_t* v = json_object_get(r, "earKind")) earKind = clamp((int) json_integer_value(v), 0, kEarFinN - 1);
         if (json_t* v = json_object_get(r, "earName")) earName = json_boolean_value(v);
         if (json_t* v = json_object_get(r, "earShape")) earShape = clamp((int) json_integer_value(v), 0, 1);
+        if (json_t* v = json_object_get(r, "noCase")) noCase = json_boolean_value(v);
         if (json_t* v = json_object_get(r, "openMode")) openMode = clamp((int) json_integer_value(v), 0, 2);
         if (json_t* v = json_object_get(r, "shadow")) shadow = json_boolean_value(v);
         if (json_t* v = json_object_get(r, "rails")) rails = json_boolean_value(v);
@@ -1108,7 +1111,7 @@ struct BackdropLayer : widget::TransparentWidget {
                 continue;
             }
             // the depth: the outline swept back to the lower right, darker toward the back
-            int n = std::max(2, std::min(24, (int) (d / 1.5f)));
+            int nd = std::max(2, std::min(24, (int) (d / 1.5f)));
             for (int clip = 0; clip < (side ? 1 : 2); clip++) {
                 nvgSave(vg);
                 if (!side) {   // the left panel's depth runs behind the case: show it only left of, and below, the case front
@@ -1117,12 +1120,12 @@ struct BackdropLayer : widget::TransparentWidget {
                 }
                 // every face carries the material: each layer is the texture (one continuous pattern), then a shade
                 // that deepens toward the back, so the side and foot read as the same piece turned away from the light
-                for (int k = n; k >= 1; k--) {
-                    float o = d * k / n;
+                for (int k = nd; k >= 1; k--) {
+                    float o = d * k / nd;
                     nvgBeginPath(vg); nvgRoundedRect(vg, px + o, py + o, pw, ph, rad);
                     nvgFillColor(vg, avg); nvgFill(vg);
                     if (img >= 0) { nvgFillPaint(vg, nvgImagePattern(vg, px, py, 260.f, 260.f, (float) M_PI * 0.5f, img, 1.f)); nvgFill(vg); }
-                    nvgFillColor(vg, nvgRGBA(0, 0, 0, (int) (110 + 60.f * k / n))); nvgFill(vg);
+                    nvgFillColor(vg, nvgRGBA(0, 0, 0, (int) (110 + 60.f * k / nd))); nvgFill(vg);
                 }
                 nvgRestore(vg);
             }
@@ -1691,7 +1694,7 @@ struct BackdropLayer : widget::TransparentWidget {
                     if (m->panelMat > 0) {   // side panels replace the case's own ends (they come back when the panels go)
                         CaseStyle pc = cs; pc.side = 2.f; pc.ends = E_SQUARE;
                         drawPanels(args.vg, pc, b.r, m->panelMat, m->panelShape, m->panelFinish, m->shadow, m->depthMm, 0);
-                        drawCase(args.vg, pc, b.r, m->depthMm, m->shadow, false, b.rows);
+                        if (!m->noCase) drawCase(args.vg, pc, b.r, m->depthMm, m->shadow, false, b.rows);   // CASE OFF: just the panels
                         drawPanels(args.vg, pc, b.r, m->panelMat, m->panelShape, m->panelFinish, m->shadow, m->depthMm, 1);
                     }
                     else drawCase(args.vg, cs, b.r, m->depthMm, m->shadow, false, b.rows);
@@ -1995,7 +1998,7 @@ static void applyTheme(SynTHBloKBackdrop* m, int i) {
     m->sideShape = m->sideMat = m->sideWidth = m->openMode = 0;
     m->panelMat = woodToPanel(t.sideMat); m->panelFinish = clamp(t.sideFinish, 0, 2);   // a theme's wood goes on the side panels
     m->earKind = m->panelMat > 0 ? 0 : clamp(t.ear, 0, kEarFinN - 1); m->earShape = clamp(t.earShape, 0, 1);
-    m->sideMat = 0; m->caseMat = 0;
+    m->sideMat = 0; m->caseMat = 0; m->noCase = false;
     const std::vector<CaseStyle>& lib = caseLibrary();
     for (size_t k = 0; k < lib.size(); k++) if (lib[k].name == t.caseName) m->caseIdx = (int) k;
     m->themeIdx = i;
@@ -2154,11 +2157,14 @@ struct BackdropOled : widget::OpaqueWidget {
                 int ps = 0; for (int k = 0; k < 3; k++) if (kPanelShapeOrder[k] == m->panelShape) ps = k;
                 r.push_back(seg("SHAPE", {"SQUARE", "SEMI", "ROUND"}, ps, [=](int i) { m->panelShape = kPanelShapeOrder[i]; }));
                 r.push_back(seg("FINISH", {"OILED", "SATIN", "GLOSS"}, clamp(m->panelFinish, 0, 2), [=](int i) { m->panelFinish = i; }));
+                r.push_back(seg("CASE", {"ON", "OFF: RAILS ONLY"}, m->noCase ? 1 : 0, [=](int i) { m->noCase = i == 1; hand(); }));
+                r.push_back(seg("BACKGROUND", {"ON", "OFF"}, m->showBg ? 0 : 1, [=](int i) { m->showBg = i == 0; hand(); }));
             }
             if (mode == 2) {
                 r.push_back({"EAR FINISH", kEarFin[clamp(m->earKind, 1, kEarFinN - 1)].name, [=](int d) { m->earKind = 1 + wrap(m->earKind - 1, d, kEarFinN - 1); lastEar = m->earKind; hand(); }, false});
                 r.push_back(seg("EAR SHAPE", {"STRAIGHT", "CONTOURED"}, clamp(m->earShape, 0, 1), [=](int i) { m->earShape = i; }));
                 if (isNoizee(m->earKind)) r.push_back(seg("NAME ON EAR", {"ON", "OFF"}, m->earName ? 0 : 1, [=](int i) { m->earName = i == 0; }));
+                r.push_back(seg("BACKGROUND", {"ON", "OFF"}, m->showBg ? 0 : 1, [=](int i) { m->showBg = i == 0; hand(); }));   // off: bare rails on the ears
             }
         }
         else {
@@ -2240,7 +2246,7 @@ struct BackdropOled : widget::OpaqueWidget {
             NVGcolor cc = m->caseMat > 0 ? nvgRGB(kPanelMat[m->caseMat].r, kPanelMat[m->caseMat].g, kPanelMat[m->caseMat].b) : cs.base;
             float ew = m->earKind > 0 ? 10.f : 0.f, pw = m->panelMat > 0 && m->earKind == 0 ? 4.f : 0.f;
             float cw = w * 0.56f, ch = h * 0.62f, cx = x + (w - cw) * 0.5f, cy = y + (h - ch) * 0.5f;
-            if (cs.material != M_NONE && ew == 0.f) {   // with ears: no case, an open rack
+            if (cs.material != M_NONE && ew == 0.f && !(pw > 0.f && m->noCase)) {   // with ears (or panels, CASE OFF): no case
                 nvgBeginPath(vg); nvgRect(vg, cx - 3.f, cy - 2.f, cw + 6.f, ch + 4.f); nvgFillColor(vg, cc); nvgFill(vg);
             }
             nvgBeginPath(vg); nvgRect(vg, cx, cy, cw, ch); nvgFillColor(vg, nvgRGB(14, 14, 15)); nvgFill(vg);
@@ -2625,6 +2631,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
             sub->addChild(createMenuLabel("Material"));
             matMenu(sub, &m->panelMat, "NONE");
             sub->addChild(new MenuSeparator);
+            sub->addChild(createBoolPtrMenuItem("No case between the panels (rails only)", "", &m->noCase));
             sub->addChild(createMenuLabel("Turns the rack ears off (a case has one or the other)"));
         }));
         menu->addChild(createSubmenuItem("Rack ears", kEarFin[clamp(m->earKind, 0, kEarFinN - 1)].name, [=](Menu* sub) {
@@ -2653,7 +2660,7 @@ struct SynTHBloKBackdropWidget : ModuleWidget {
             }
         }));
         menu->addChild(createBoolPtrMenuItem("Drop shadow", "", &m->shadow));
-        menu->addChild(createMenuItem("Reset the case options", "panels, ears, material, depth, shadow", [=]() { m->sideShape = m->sideMat = m->sideWidth = m->openMode = 0; m->panelMat = m->caseMat = m->earKind = 0; m->depthMm = 65.f; m->shadow = true; }));
+        menu->addChild(createMenuItem("Reset the case options", "panels, ears, material, depth, shadow", [=]() { m->sideShape = m->sideMat = m->sideWidth = m->openMode = 0; m->panelMat = m->caseMat = m->earKind = 0; m->noCase = false; m->depthMm = 65.f; m->shadow = true; }));
         menu->addChild(createMenuItem("Open the case library folder", "add your own cases in cases.json", [=]() {
             std::string dir = asset::user("SynTHBloK");
             system::createDirectories(dir);

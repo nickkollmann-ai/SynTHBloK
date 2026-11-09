@@ -116,7 +116,9 @@ it can't type into the MSYS2 / PowerShell terminal (those are granted click-only
   shapes SQUARE 2 / SEMI-ROUNDED 6 / ROUNDED 16 px (kPanelShape, SQUARE appended at index 2); one width, SLIM 36 px; OILED/SATIN/GLOSS). Flush with the case top and
   the full case height (they follow the case size); as deep as the case (swept to the lower right by depth*0.18 like
   drawCase; pass 0 shadow before the case, pass 1 depth + face after it; the left panel's depth clipped behind the case
-  front); the material's texture on every face, shaded toward the back. CASE MATERIAL textures the case's sides too; own shadow, NO screws on the face
+  front); the material's texture on every face, shaded toward the back. CASE MATERIAL textures the case's sides too;
+  SIDES page: PANELS adds CASE ON / OFF: RAILS ONLY (noCase: panels alone hold the rails) and BACKGROUND ON/OFF;
+  EARS adds BACKGROUND ON/OFF (off: bare rails on the ears over Rack's own background; same flag as showBg); own shadow, NO screws on the face
   (real panels screw on from the inside). CASE MATERIAL builds the frame itself in any kPanelMat material. The old CASE ENDS
   material/finish option is removed (Nov 2026; saved sideMat/sideFinish are ignored). Themes put their wood on the panels.
   Side panels XOR rack ears: picking one turns the other off. With ears there is NO case: an open rack, Rack's rails screwing
