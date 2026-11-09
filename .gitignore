@@ -1,66 +1,13 @@
-# Ignore all dotfiles except git dotfiles
-.*
-!.git*
-
-# Binaries and build targets
+# build output
 *.a
 *.so
 *.dylib
 *.dll
-/build
-/dep
-/dist
+build/
+dist/
 *.vcvplugin
-*.orig
-build.log
-# what Claude is looking over, for the workbench (tools/design_watch.html)
-tools/wb_focus.json
-tailscale_status.txt
-# the workbench THINKING view (written by Claude, local only)
-tools/claude_thinking.json
-# the singles (singles/<slug>/): build output, and the res/ files + licence copied in from the repo root
-/singles/*/build
-/singles/*/dist
+*.log
+# copied into each single at build time (from the repo root)
 /singles/*/res
 /singles/*/LICENSE.txt
-/singles/*/make.log
-jobs/
-tools/pc_stats.json
-site/
-tools/.shell_token
-tools/.wb-app/
-# notes from Claude for the workbench FOR YOU box (local only)
-tools/claude_inbox.json
-# BACKDROP case snapshots for review (local only)
-tools/case_shots/
-# BACKDROP lab feed (local)
-tools/backdrop_lab.json
-# PC cleanup survey + probes: details of this PC, never public
-tools/pc_survey.txt
-tools/pc_probe.txt
-tools/pc_stats_test.txt
-# the CLEANER tab (local only)
-tools/cleaner.json
-tools/cleaner_inbox.json
-tools/pc_step1.txt
-tools/space_map.json
-# ACID BEDROCK developer copy: protected code, NEVER public (workbench ACID BEDROCK tab loads it from here)
-private_acid/
-tools/run_queue.json
-tools/run_done.json
-tools/lhm_install.txt
-tools/bios_restart.txt
-tools/lhm.json
-tools/ni_relink*.txt
-tools/ni_relink*.json
-tools/ni_relink_xml_backup/
-tools/claude_startup.txt
-tools/ps_runs/
-# SITE tab: COMM messages and the BUILDER feed (local only)
-tools/site.json
-tools/site_inbox.json
-tools/site_build.json
-# BACKDROP LAB BUILDER feed, notes, and the Midjourney influences (local only: private prompts)
-tools/backdrop_build.json
-tools/backdrop_inbox.json
-tools/backdrop_influences.json
+.DS_Store
