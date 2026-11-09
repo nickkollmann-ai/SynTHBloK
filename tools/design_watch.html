@@ -1533,7 +1533,7 @@ header .modes button.on,#t-brief .ob-tabs button.on,#cln-views button.on{--bcol:
 <div id="csig" role="status" aria-live="polite" title="Click for CLAUDE · THINKING"><i></i><b id="csig-k">CLAUDE</b><span id="csig-t"></span><u id="csig-x" title="Hide until it changes">&times;</u></div>
 <div id="zoom"><img alt=""><span id="zoom-cap">click the image for actual size · click outside or press Esc to close</span></div>
 <script>
-const ROOTS = ['/res/', '/web-images/'], IMG = /\.(svg|png|webp|jpe?g)$/i, POLL = 1500;
+const ROOTS = ['/res/', '/web-images/', '/tools/backdrop_shots/'], IMG = /\.(svg|png|webp|jpe?g)$/i, POLL = 1500;
 const files = new Map();          // path -> last-modified ms
 let shown = null, pinned = false, logStamp = '';
 // MODULES view: one tile per module in tools/modules.json (every SynTHBloK module, the MTX pack's and the singles'),
@@ -1545,7 +1545,8 @@ const known = new Set((() => { try { return JSON.parse(localStorage.getItem(KNOW
 // Library (Drum, MtxQuad, ...) but the panels kept their names (SynTHBloKDrum.svg): panelOf tries both.
 const PANEL_FILE = {Resonator: 'SynTHBloKFilter', Quad: 'SynTHBloK', BlokMaster: 'BloKMaster'};
 const panelOf = slug => [PANEL_FILE[slug], slug, 'SynTHBloK' + slug].filter(Boolean).map(n => [...files.keys()].find(p => p.toLowerCase() === ('/res/' + n + '.svg').toLowerCase())).find(Boolean);
-const shotOf = slug => [...files.keys()].find(p => p.toLowerCase() === ('/web-images/screenshots/' + slug + '.png').toLowerCase());
+// screenshots, like panels, may still carry the old SynTHBloK-prefixed name (SynTHBloKEcho.png for Echo): try both
+const shotOf = slug => [slug, 'SynTHBloK' + slug, PANEL_FILE[slug]].filter(Boolean).map(n => [...files.keys()].find(p => p.toLowerCase() === ('/web-images/screenshots/' + n + '.png').toLowerCase())).find(Boolean);
 const modOf = p => mods.find(m => p === panelOf(m.slug) || p === shotOf(m.slug));
 // A module's source file is the src/ file that registers its slug with createModel.
 const srcFile = new Map();
@@ -1578,7 +1579,7 @@ async function stamp(p) {
   const r = await fetch(encodeURI(p), {method: 'HEAD', cache: 'no-store'});
   return r.ok ? Date.parse(r.headers.get('Last-Modified')) : 0;
 }
-const short = p => p.replace(/^\/(res|web-images)\//, (_, d) => d === 'res' ? '' : 'web-images/');
+const short = p => p.replace(/^\/(res|web-images|tools\/backdrop_shots)\//, (_, d) => d === 'res' ? '' : d === 'web-images' ? 'web-images/' : 'mock-ups/');
 const time = t => new Date(t).toLocaleTimeString();
 
 const src = p => encodeURI(p) + '?t=' + files.get(p);

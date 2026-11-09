@@ -121,7 +121,9 @@ struct BlankWidget : ModuleWidget {
         if (std::shared_ptr<window::Font> font = APP->window->uiFont) {
             nvgFontFaceId(vg, font->handle); nvgFontSize(vg, mm2px(1.944f) * 1.4f); nvgTextLetterSpacing(vg, 0.f);
             nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_BASELINE);
-            nvgFillColor(vg, nvgRGB(0x80, 0x80, 0x80)); nvgText(vg, cx, mm2px(127.9f), w >= mm2px(15.f) ? "NoiZee ToyZ" : "NZT", NULL);
+            // the footer fits between the bottom screws: the full name from 7 HP, NZT from 4 HP, none at 3 HP
+            const char* foot = w >= mm2px(35.f) ? "NoiZee ToyZ" : w >= mm2px(20.f) ? "NZT" : NULL;
+            nvgFillColor(vg, nvgRGB(0x80, 0x80, 0x80)); if (foot) nvgText(vg, cx, mm2px(127.9f), foot, NULL);
         }
         float top = mm2px(12.f), bot = mm2px(121.f), span = bot - top;
         float txt = std::min(w * 0.55f, 15.f);   // the name's size follows the width, within reason
